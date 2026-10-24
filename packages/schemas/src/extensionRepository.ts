@@ -92,7 +92,8 @@ export const extensionListingEntrySchema = z.object({
    * enforced. Note what that does and does not buy: it protects against the bytes changing
    * between publish and download, not against a repository that is itself hostile — such a
    * repository controls both the listing and the bundle, and could simply omit this. Guarding
-   * against *that* needs signing, which the format does not have yet.
+   * against *that* is what `signature` below is for: on a repository the operator trusts,
+   * the signature covers this field, so it becomes required there.
    */
   bundle: z
     .object({
