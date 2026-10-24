@@ -98,6 +98,9 @@ describe('migrateWithBackup', () => {
       expect(migration.statements.length, migration.name).toBeGreaterThan(0);
 
       for (let failAfter = 1; failAfter <= migration.statements.length; failAfter++) {
+        // The mocked migration resolves as a microtask, so nothing here reaches the event
+        // loop; yield so vitest's worker RPC isn't starved across minutes of sync SQLite.
+        await new Promise((resolve) => setImmediate(resolve));
         const boundaryDir = path.join(tmpDir, `boundary-${boundaryCount++}`);
         const migrationsDir = path.join(boundaryDir, 'prisma', 'migrations');
         const targetDir = path.join(migrationsDir, migration.name);

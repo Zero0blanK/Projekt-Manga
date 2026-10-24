@@ -71,7 +71,7 @@ afterEach(() => {
 });
 
 describe('SQLite migration compatibility matrix', () => {
-  it('upgrades every migration boundary to the fresh-install schema without losing library data', () => {
+  it('upgrades every migration boundary to the fresh-install schema without losing library data', async () => {
     temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'projekt-manga-migration-matrix-'));
     const freshDatabase = openDatabase(path.join(temporaryDirectory, 'fresh.db'));
     for (const migration of migrations) applyMigration(freshDatabase, migration);
@@ -79,6 +79,9 @@ describe('SQLite migration compatibility matrix', () => {
     freshDatabase.close();
 
     for (let startingBoundary = 0; startingBoundary < migrations.length; startingBoundary++) {
+      // node:sqlite is synchronous; without a yield this test holds the worker's event loop
+      // for minutes on a slow runner, and vitest's worker RPC times out ("onTaskUpdate").
+      await new Promise((resolve) => setImmediate(resolve));
       const databasePath = path.join(temporaryDirectory, `upgrade-${startingBoundary}.db`);
       const database = openDatabase(databasePath);
 

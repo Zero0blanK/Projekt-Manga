@@ -22,13 +22,16 @@ test('a revoked remote session clears both the encrypted cache and renderer cook
     },
   };
 
+  // Matches either separator: CI runs this on Linux as well as Windows.
+  const fromSync = (parent) => /[\\/]main[\\/]sync\.js$/.test(parent?.filename ?? '');
+
   try {
     Module._load = function (request, parent, isMain) {
       if (request === 'electron') return electron;
-      if (request === './db/local-store' && parent.filename.endsWith('main\\sync.js')) {
+      if (request === './db/local-store' && fromSync(parent)) {
         return { localStore: {} };
       }
-      if (request === './auth-cache' && parent.filename.endsWith('main\\sync.js')) {
+      if (request === './auth-cache' && fromSync(parent)) {
         return {
           getCachedSession: () => cachedSession,
           clearCachedSession: () => {
@@ -36,7 +39,7 @@ test('a revoked remote session clears both the encrypted cache and renderer cook
           },
         };
       }
-      if (request === '../shared/config' && parent.filename.endsWith('main\\sync.js')) {
+      if (request === '../shared/config' && fromSync(parent)) {
         return { SESSION_COOKIE_NAME: 'pm_session', resolveWebUrl: () => 'http://localhost:3000' };
       }
       return originalLoad.call(this, request, parent, isMain);

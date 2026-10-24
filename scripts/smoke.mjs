@@ -648,6 +648,9 @@ try {
         await page.getByRole('button', { name: 'Close chapter list' }).click();
         await currentChapterLink.waitFor({ state: 'detached' });
       }
+      // The immersive chrome hides after 2.2s idle, which the GC calls above can outlast on
+      // a slow runner. Any keydown reveals it; Shift is bound to no reader shortcut.
+      await page.keyboard.press('Shift');
       const started = performance.now();
       await page.getByRole('button', { name: 'Chapter list', exact: true }).click();
       await currentChapterLink.waitFor({ state: 'attached' });
