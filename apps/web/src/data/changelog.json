@@ -1,0 +1,79 @@
+{
+  "$comment": "Release notes for Settings > Changelog. Newest first — the first entry's version and date are also what the About panel reports. IMPORTANT: the first entry's version must match `version` in apps/desktop/package.json, which is what app.getVersion() returns and what the updater compares against a GitHub release; if the two drift, the About panel reports one version while the update check reasons about another (tests/changelog.test.ts guards this). Each entry: version (semver), date (YYYY-MM-DD), and changes grouped by type. Types: added | changed | fixed | removed. Add the next entry above this one when a version is actually published — not while it is still being built.",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-10-17",
+      "changes": [
+        {
+          "type": "added",
+          "text": "Library with shelves, custom categories, grid and list views, and filtering"
+        },
+        {
+          "type": "added",
+          "text": "Discover — browse and search any source you have installed, with previews before you add a title"
+        },
+        {
+          "type": "added",
+          "text": "Sources are installed from repositories you add yourself, and run sandboxed with no filesystem, environment or direct network access of their own"
+        },
+        {
+          "type": "added",
+          "text": "Source health — see which installed sources are working, which are waiting out a cooldown, and which need updating before they will load"
+        },
+        {
+          "type": "added",
+          "text": "Reader with two-page, single page and long strip layouts, configurable preloading, brightness, page gap and reading direction"
+        },
+        {
+          "type": "added",
+          "text": "Long strip scrolling controls — a scroll-speed slider, hands-free auto-scroll with its own speed, and controls that get out of the way as you scroll down"
+        },
+        {
+          "type": "added",
+          "text": "Offline downloads with a per-chapter queue, live progress, and pause and resume"
+        },
+        {
+          "type": "added",
+          "text": "Local CBZ collection in the desktop app — import your own comic archives and read them with the same reader as the rest of your library"
+        },
+        {
+          "type": "added",
+          "text": "Reading history, a recents view, and a notifications centre for new chapters"
+        },
+        {
+          "type": "added",
+          "text": "Statistics covering read duration, chapter totals and how your library breaks down"
+        },
+        {
+          "type": "added",
+          "text": "Themes, accent colours, interface density and scale, plus keyboard shortcuts for moving between sections"
+        },
+        {
+          "type": "added",
+          "text": "Designed for phone, tablet and desktop widths alike, with keyboard navigation, visible focus and screen-reader labelling throughout"
+        },
+        {
+          "type": "added",
+          "text": "Optional accounts, with reading state synced between devices — the app works fully without one"
+        },
+        {
+          "type": "added",
+          "text": "Export your library, reading history and preferences at any time, and restore them into a fresh install"
+        },
+        {
+          "type": "added",
+          "text": "Progress tracking against AniList and MyAnimeList for linked titles"
+        },
+        {
+          "type": "added",
+          "text": "Desktop app — one installer that runs the reader, its API and its database on your machine, and updates itself from GitHub Releases"
+        },
+        {
+          "type": "added",
+          "text": "Self-hosted server — run the reader and its API on your own machine and reach your library from any device, with health checks and a documented backup and upgrade path"
+        }
+      ]
+    }
+  ]
+}

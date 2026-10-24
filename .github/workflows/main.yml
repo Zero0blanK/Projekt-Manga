@@ -1,0 +1,14 @@
+name: Manual CI
+
+# Runs the full CI workflow on demand (Actions → Manual CI → Run workflow). It calls ci.yml
+# rather than copying it, so a step added there (such as the source-contract check) can't
+# be missing here.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml

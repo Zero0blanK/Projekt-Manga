@@ -1,0 +1,46 @@
+# Patterns are deliberately depth-independent (`**/dist/` rather than `dist`).
+#
+# Prettier resolves an ignore file's patterns relative to that file's own directory, so a
+# bare `dist` here only ever meant `<repo root>/dist` — it did not match apps/desktop/dist,
+# apps/server/dist, or any of the package builds. Each workspace's `format` script runs
+# prettier from inside that workspace, which made this worse: prettier only auto-loads a
+# `.prettierignore` from its working directory, so this file was not read at all and
+# compiled output got rewritten. Those scripts now pass `--ignore-path` explicitly, and
+# these patterns match wherever they are resolved from.
+#
+# node_modules is not listed: prettier skips it unless `--with-node-modules` is passed.
+
+# Build output
+**/dist/
+**/build/
+**/.next/
+**/out/
+**/.output/
+**/.vinxi/
+
+# Test and tooling output
+**/coverage/
+
+# Lockfiles — machine-written, and reformatting one produces a huge meaningless diff
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+
+# Generated sources
+**/routeTree.gen.ts
+**/next-env.d.ts
+
+# Captured upstream responses used as scraper test fixtures. Real sites emit malformed
+# markup — prettier refuses to parse some of these outright — and the point of a fixture
+# is that it is byte-for-byte what the source actually served. Reformatting one changes
+# the thing under test.
+**/__tests__/fixtures/
+
+# Project guidance and plans. These are hand-authored prose,
+# and prettier's markdown rules rewrite tables, list markers and line wrapping in ways
+# that produce large diffs for no gain. The generated framework guidance is rewritten
+# by `next dev`, so formatting it just gets undone on the next run.
+.claude/
+**/CLAUDE.md
+**/AGENTS.md

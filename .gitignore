@@ -1,0 +1,167 @@
+# ============================================================
+# Dependencies
+# ============================================================
+
+node_modules/
+.pnpm-store/
+
+# ============================================================
+# Environment variables
+# ============================================================
+
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Keep example environment files
+!.env.example
+!.env.*.example
+
+# ============================================================
+# Next.js
+# ============================================================
+
+.next/
+out/
+
+# ============================================================
+# Build output
+# ============================================================
+
+dist/
+
+# Anchored to the repository root rather than matching every `build` directory anywhere.
+# electron-builder's buildResources directory is apps/desktop/build, and it holds
+# hand-authored release inputs (icon.ico, installer.nsh, the icons/ set); the unanchored
+# `build/` rule this replaces left every one of them untracked, so `npm run
+# package:desktop` and .github/workflows/release.yml could not run from a clean checkout.
+# The root-level build/ stays ignored — it is a local scratch area for repro scripts and
+# test screenshots. The one generated subtree under the desktop one is excluded at the
+# bottom of this file (apps/desktop/build/nsis/).
+/build/
+
+# ============================================================
+# Electron
+# ============================================================
+
+release/
+# NOT `electron-builder.yml`: it is the installer's packaging configuration and a required
+# build input (apps/desktop/package.json's `package` script passes it with --config, and
+# .github/workflows/release.yml runs that). It contains no secrets — signing material
+# comes from CSC_LINK/CSC_KEY_PASSWORD in the environment.
+*.asar
+
+# ============================================================
+# TypeScript
+# ============================================================
+
+*.tsbuildinfo
+
+# ============================================================
+# Prisma
+# ============================================================
+
+# Prisma generated client is normally generated during install/build
+# Uncomment if you do not want generated Prisma files tracked
+# apps/server/node_modules/.prisma/
+# apps/server/node_modules/@prisma/
+
+# ============================================================
+# Testing / Coverage
+# ============================================================
+
+coverage/
+.nyc_output/
+
+# ============================================================
+# Logs
+# ============================================================
+
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ============================================================
+# OS
+# ============================================================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# IDE / Editors
+# ============================================================
+
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+.idea/
+*.iml
+
+# ============================================================
+# Temporary files
+# ============================================================
+
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# ============================================================
+# Generated files
+# ============================================================
+
+*.generated.ts
+
+# ============================================================
+# Extensions anti-detection runtime state
+# ============================================================
+
+# Session/fingerprint cache the scraper stack persists between runs — regenerated
+# automatically, not something to ship or diff.
+apps/extensions/data/sessions/*.json
+
+# Downloaded repo-installed extension bundles (dynamic-extension-repositories.md) —
+# fetched at install/update time from a repository URL, not something to ship or diff.
+# The SQLite database and its WAL/shm sidecars — this is the user's actual library and
+# reading history, and it is a build artefact of `prisma migrate`, not source.
+apps/server/data/*.db
+apps/server/data/*.db-wal
+apps/server/data/*.db-shm
+# Backups the startup migration takes before applying a schema change.
+apps/server/data/*.bak
+apps/server/data/*.bak-wal
+apps/server/data/*.bak-shm
+apps/server/data/*.failed-*
+# One-off MariaDB export produced by scripts/export-mariadb-snapshot.mjs. Same data, same
+# reason to keep it out of the repo.
+apps/server/mariadb-snapshot.json
+*-snapshot.json
+
+# Installer staging tree — a build artefact of apps/desktop/scripts/stage-installer.mjs,
+# containing full production node_modules trees for the server and web app.
+apps/desktop/staging/
+apps/desktop/staging-*/
+apps/desktop/release-plan-validation/
+
+# Downloaded Node runtime shipped with the installer (see scripts/stage-node-runtime.mjs).
+# Kept outside staging/ so it survives that tree being cleared on every build.
+apps/desktop/.node-runtime-cache/
+
+apps/server/data/
+
+# ============================================================
+# Documentation
+# ============================================================
+**/API.md
+# Generated by apps/desktop/scripts/prepare-installer-script.mjs
+apps/desktop/build/nsis/

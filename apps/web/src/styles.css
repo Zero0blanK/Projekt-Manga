@@ -1,0 +1,675 @@
+@import 'tailwindcss' source(none);
+@source "../src";
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+select:not([multiple]) {
+  padding-right: 2.25rem;
+}
+[data-library-selection] {
+  -webkit-touch-callout: none;
+}
+
+@layer base {
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  select:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled,
+  select:disabled {
+    cursor: not-allowed;
+  }
+  select:not([multiple]) {
+    appearance: none;
+    padding-right: 2.25rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+  }
+}
+
+@theme inline {
+  /* Local/system families keep the desktop build offline-safe. next/font/local can
+     override these custom properties without changing the application typography tokens. */
+  --font-display: var(--font-instrument-serif, 'Instrument Serif'), ui-serif, Georgia, serif;
+  --font-sans: var(--font-inter, 'Inter'), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 0.875rem;
+
+  /* Rich dark base — near-black with a hint of warmth */
+  --background: oklch(0.16 0.008 60);
+  --foreground: oklch(0.96 0.005 80);
+
+  --surface: oklch(0.19 0.009 60);
+  --surface-elevated: oklch(0.225 0.01 60);
+
+  --card: oklch(0.19 0.009 60);
+  --card-foreground: oklch(0.96 0.005 80);
+  --popover: oklch(0.2 0.009 60);
+  --popover-foreground: oklch(0.96 0.005 80);
+
+  /* Warm amber-coral accent — refined, not neon */
+  --primary: oklch(0.78 0.14 55);
+  --primary-foreground: oklch(0.18 0.02 60);
+
+  --secondary: oklch(0.24 0.01 60);
+  --secondary-foreground: oklch(0.94 0.005 80);
+  --muted: oklch(0.22 0.008 60);
+  --muted-foreground: oklch(0.65 0.01 70);
+  --accent: oklch(0.26 0.012 60);
+  --accent-foreground: oklch(0.96 0.005 80);
+
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.98 0.005 80);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.78 0.14 55 / 60%);
+
+  --chart-1: oklch(0.78 0.14 55);
+  --chart-2: oklch(0.7 0.12 200);
+  --chart-3: oklch(0.72 0.14 320);
+  --chart-4: oklch(0.75 0.12 150);
+  --chart-5: oklch(0.8 0.1 90);
+
+  --sidebar: oklch(0.145 0.006 60);
+  --sidebar-foreground: oklch(0.92 0.005 80);
+  --sidebar-primary: oklch(0.78 0.14 55);
+  --sidebar-primary-foreground: oklch(0.18 0.02 60);
+  --sidebar-accent: oklch(0.22 0.01 60);
+  --sidebar-accent-foreground: oklch(0.96 0.005 80);
+  --sidebar-border: oklch(1 0 0 / 6%);
+  --sidebar-ring: oklch(0.78 0.14 55 / 50%);
+
+  /* Signature gradients & shadows — derived from --primary so theme/accent changes cascade */
+  --gradient-primary: linear-gradient(
+    135deg,
+    var(--primary),
+    color-mix(in oklch, var(--primary) 65%, black)
+  );
+  --gradient-surface: linear-gradient(180deg, oklch(0.2 0.009 60), oklch(0.16 0.008 60));
+  --gradient-hero:
+    radial-gradient(120% 80% at 20% 0%, oklch(0.35 0.09 45 / 0.6), transparent 60%),
+    radial-gradient(80% 60% at 100% 100%, oklch(0.3 0.1 15 / 0.5), transparent 60%),
+    oklch(0.18 0.01 60);
+  --shadow-cover: 0 20px 40px -20px oklch(0 0 0 / 0.6), 0 8px 16px -8px oklch(0 0 0 / 0.4);
+  --shadow-glow: 0 0 40px -8px color-mix(in oklch, var(--primary) 45%, transparent);
+}
+
+/* Dim — a lighter-than-black dark theme (Settings > Appearance > Theme) */
+:root[data-theme='dim'] {
+  --background: oklch(0.24 0.01 60);
+  --foreground: oklch(0.96 0.005 80);
+  --surface: oklch(0.27 0.011 60);
+  --surface-elevated: oklch(0.3 0.012 60);
+  --card: oklch(0.27 0.011 60);
+  --card-foreground: oklch(0.96 0.005 80);
+  --popover: oklch(0.28 0.011 60);
+  --popover-foreground: oklch(0.96 0.005 80);
+  --secondary: oklch(0.32 0.012 60);
+  --secondary-foreground: oklch(0.94 0.005 80);
+  --muted: oklch(0.3 0.01 60);
+  --muted-foreground: oklch(0.72 0.01 70);
+  --accent: oklch(0.34 0.014 60);
+  --accent-foreground: oklch(0.96 0.005 80);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 12%);
+  --sidebar: oklch(0.22 0.009 60);
+  --sidebar-accent: oklch(0.3 0.011 60);
+  --sidebar-accent-foreground: oklch(0.96 0.005 80);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --gradient-surface: linear-gradient(180deg, oklch(0.28 0.011 60), oklch(0.24 0.01 60));
+}
+
+/* Midnight — true black for OLED panels (Settings > Appearance > Theme) */
+:root[data-theme='midnight'] {
+  --background: oklch(0 0 0);
+  --foreground: oklch(0.95 0 0);
+  --surface: oklch(0.11 0.002 60);
+  --surface-elevated: oklch(0.15 0.003 60);
+  --card: oklch(0.1 0.002 60);
+  --card-foreground: oklch(0.95 0 0);
+  --popover: oklch(0.12 0.002 60);
+  --popover-foreground: oklch(0.95 0 0);
+  --secondary: oklch(0.17 0.003 60);
+  --secondary-foreground: oklch(0.93 0 0);
+  --muted: oklch(0.15 0.002 60);
+  --muted-foreground: oklch(0.62 0.004 70);
+  --accent: oklch(0.19 0.004 60);
+  --accent-foreground: oklch(0.95 0 0);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 14%);
+  --sidebar: oklch(0 0 0);
+  --sidebar-accent: oklch(0.16 0.003 60);
+  --sidebar-accent-foreground: oklch(0.95 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --gradient-surface: linear-gradient(180deg, oklch(0.12 0.002 60), oklch(0 0 0));
+  --gradient-hero:
+    radial-gradient(120% 80% at 20% 0%, oklch(0.28 0.08 45 / 0.45), transparent 60%),
+    radial-gradient(80% 60% at 100% 100%, oklch(0.24 0.09 15 / 0.35), transparent 60%), oklch(0 0 0);
+  --shadow-cover: 0 20px 40px -20px oklch(0 0 0 / 0.9), 0 8px 16px -8px oklch(0 0 0 / 0.7);
+}
+
+/* Paper — a warm sepia light theme (Settings > Appearance > Theme) */
+:root[data-theme='paper'] {
+  --background: oklch(0.93 0.028 82);
+  --foreground: oklch(0.3 0.03 62);
+  --surface: oklch(0.955 0.024 84);
+  --surface-elevated: oklch(0.975 0.02 84);
+  --card: oklch(0.965 0.022 84);
+  --card-foreground: oklch(0.3 0.03 62);
+  --popover: oklch(0.975 0.02 84);
+  --popover-foreground: oklch(0.3 0.03 62);
+  --primary: oklch(0.55 0.12 48);
+  --primary-foreground: oklch(0.98 0.01 84);
+  --secondary: oklch(0.89 0.028 80);
+  --secondary-foreground: oklch(0.32 0.03 62);
+  --muted: oklch(0.885 0.026 80);
+  --muted-foreground: oklch(0.5 0.028 65);
+  --accent: oklch(0.875 0.032 76);
+  --accent-foreground: oklch(0.3 0.03 62);
+  --destructive: oklch(0.52 0.18 25);
+  --destructive-foreground: oklch(0.98 0.01 84);
+  --border: oklch(0.42 0.04 62 / 18%);
+  --input: oklch(0.42 0.04 62 / 22%);
+  --ring: oklch(0.55 0.12 48 / 55%);
+  --chart-1: oklch(0.58 0.13 55);
+  --chart-2: oklch(0.52 0.1 200);
+  --chart-3: oklch(0.55 0.12 320);
+  --chart-4: oklch(0.56 0.11 150);
+  --chart-5: oklch(0.62 0.1 90);
+  --sidebar: oklch(0.915 0.03 82);
+  --sidebar-foreground: oklch(0.3 0.03 62);
+  --sidebar-primary: oklch(0.55 0.12 48);
+  --sidebar-primary-foreground: oklch(0.98 0.01 84);
+  --sidebar-accent: oklch(0.885 0.03 78);
+  --sidebar-accent-foreground: oklch(0.3 0.03 62);
+  --sidebar-border: oklch(0.42 0.04 62 / 14%);
+  --sidebar-ring: oklch(0.55 0.12 48 / 45%);
+  --gradient-surface: linear-gradient(180deg, oklch(0.975 0.02 84), oklch(0.93 0.028 82));
+  --gradient-hero:
+    radial-gradient(120% 80% at 20% 0%, oklch(0.84 0.07 60 / 0.6), transparent 60%),
+    radial-gradient(80% 60% at 100% 100%, oklch(0.85 0.06 30 / 0.45), transparent 60%),
+    oklch(0.93 0.028 82);
+  --shadow-cover:
+    0 20px 40px -20px oklch(0.35 0.05 62 / 0.28), 0 8px 16px -8px oklch(0.35 0.05 62 / 0.16);
+}
+
+/* Light — a warm off-white theme (Settings > Appearance > Theme) */
+:root[data-theme='light'] {
+  --background: oklch(0.98 0.006 80);
+  --foreground: oklch(0.22 0.015 60);
+  --surface: oklch(0.995 0.004 80);
+  --surface-elevated: oklch(1 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.015 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.015 60);
+  --primary: oklch(0.62 0.15 45);
+  --primary-foreground: oklch(0.99 0.005 80);
+  --secondary: oklch(0.94 0.008 70);
+  --secondary-foreground: oklch(0.25 0.02 60);
+  --muted: oklch(0.93 0.006 70);
+  --muted-foreground: oklch(0.48 0.012 60);
+  --accent: oklch(0.92 0.01 60);
+  --accent-foreground: oklch(0.22 0.015 60);
+  --destructive: oklch(0.58 0.2 25);
+  --destructive-foreground: oklch(0.99 0.005 80);
+  --border: oklch(0 0 0 / 10%);
+  --input: oklch(0 0 0 / 12%);
+  --ring: oklch(0.62 0.15 45 / 55%);
+  --chart-1: oklch(0.62 0.14 55);
+  --chart-2: oklch(0.55 0.12 200);
+  --chart-3: oklch(0.58 0.14 320);
+  --chart-4: oklch(0.6 0.12 150);
+  --chart-5: oklch(0.65 0.1 90);
+  --sidebar: oklch(0.97 0.006 80);
+  --sidebar-foreground: oklch(0.22 0.015 60);
+  --sidebar-primary: oklch(0.62 0.15 45);
+  --sidebar-primary-foreground: oklch(0.99 0.005 80);
+  --sidebar-accent: oklch(0.93 0.008 60);
+  --sidebar-accent-foreground: oklch(0.22 0.015 60);
+  --sidebar-border: oklch(0 0 0 / 8%);
+  --sidebar-ring: oklch(0.62 0.15 45 / 45%);
+  --gradient-surface: linear-gradient(180deg, oklch(1 0 0), oklch(0.97 0.006 80));
+  --gradient-hero:
+    radial-gradient(120% 80% at 20% 0%, oklch(0.85 0.06 45 / 0.5), transparent 60%),
+    radial-gradient(80% 60% at 100% 100%, oklch(0.85 0.07 15 / 0.4), transparent 60%),
+    oklch(0.98 0.006 80);
+  --shadow-cover: 0 20px 40px -20px oklch(0 0 0 / 0.18), 0 8px 16px -8px oklch(0 0 0 / 0.1);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html {
+    /* Reserve scrollbar space permanently so scroll-locking overlays (modal dialogs)
+       don't shift layout width. */
+    scrollbar-gutter: stable;
+  }
+  html,
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 30%, transparent);
+  }
+}
+
+/* Custom scrollbar. Uses --scrollbar-thumb so the light themes can darken it instead of
+   painting white-on-white. */
+@layer base {
+  :root {
+    --scrollbar-thumb: oklch(1 0 0 / 0.08);
+    --scrollbar-thumb-hover: oklch(1 0 0 / 0.16);
+  }
+  :root[data-theme='light'],
+  :root[data-theme='paper'] {
+    --scrollbar-thumb: oklch(0 0 0 / 0.14);
+    --scrollbar-thumb-hover: oklch(0 0 0 / 0.26);
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
+}
+
+/* Settings > Appearance > Reduce motion */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+@utility text-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+@utility bg-hero {
+  background: var(--gradient-hero);
+}
+@utility bg-gradient-primary {
+  background: var(--gradient-primary);
+}
+@utility shadow-cover {
+  box-shadow: var(--shadow-cover);
+}
+@utility shadow-glow {
+  box-shadow: var(--shadow-glow);
+}
+
+/* ── Splash intro ────────────────────────────────────────────────────────────
+   Boot sequence shown while the app comes up. See components/splash-intro.tsx.
+
+   The layout rule that matters: every glyph sits in a fixed-width cell and the
+   grid always has the same number of cells. Japanese glyphs are full-width where
+   Latin capitals are ~0.6em, so as plain text the title would change width when it
+   resolved. Cells keep the width fixed. */
+.splash-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  gap: 1.5rem;
+  grid-auto-rows: min-content;
+  align-content: center;
+  overflow: hidden;
+  background: var(--background);
+  opacity: 1;
+  transition:
+    opacity 620ms ease,
+    filter 620ms ease;
+}
+.splash-root.splash-out {
+  opacity: 0;
+  filter: blur(6px);
+  pointer-events: none;
+}
+/* Session-skip: SPLASH_INIT_SCRIPT (lib/splash.ts) stamps this attribute on <html> before
+   the first paint when this session has already shown the splash. A pure CSS rule is what
+   makes the skip instant and flash-free — it applies before React has hydrated anything,
+   unlike a JS-driven hide which would need a render to take effect. */
+html[data-skip-splash] .splash-root {
+  display: none;
+}
+
+.splash-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    120% 90% at 50% 45%,
+    color-mix(in oklch, var(--primary) 14%, transparent),
+    transparent 62%
+  );
+}
+.splash-grid {
+  position: absolute;
+  inset: -2px;
+  opacity: 0.28;
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklch, var(--foreground) 8%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklch, var(--foreground) 8%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 46px 46px;
+  mask-image: radial-gradient(85% 70% at 50% 50%, black, transparent 75%);
+}
+
+.splash-stage {
+  position: relative;
+  z-index: 1;
+  padding-inline: 1.5rem;
+  max-width: 100vw;
+}
+.splash-stage.is-glitching {
+  animation: splash-shake 220ms steps(2, end) infinite;
+}
+
+/* The three stacked layers are the chromatic split; only the main one is in flow. */
+.splash-title {
+  position: relative;
+  display: block;
+  font-family: var(--font-display);
+  /* Scales with the viewport but never overflows: 13 cells at 1em each. */
+  font-size: clamp(1.5rem, 6.2vw, 4.25rem);
+  line-height: 1.15;
+  letter-spacing: 0;
+  white-space: nowrap;
+  /* Optical centring for whichever title is showing — see centeringShift(). The grid
+     keeps its width; this only moves where that fixed-width grid sits. */
+  --splash-shift: 0em;
+  transform: translateX(var(--splash-shift));
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.splash-layer {
+  display: flex;
+  justify-content: center;
+}
+.splash-layer-r,
+.splash-layer-b {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.splash-stage.is-glitching .splash-layer-r,
+.splash-stage.is-glitching .splash-layer-b {
+  opacity: 0.55;
+  mix-blend-mode: screen;
+}
+.splash-stage.is-glitching .splash-layer-r {
+  color: oklch(0.62 0.24 25);
+  animation: splash-drift-r 320ms steps(3, end) infinite;
+}
+.splash-stage.is-glitching .splash-layer-b {
+  color: oklch(0.66 0.19 235);
+  animation: splash-drift-b 260ms steps(3, end) infinite;
+}
+
+/* One fixed-width cell per slot, so changing glyphs never reflow the title. */
+.splash-char {
+  display: inline-block;
+  width: 1em;
+  flex: 0 0 1em;
+  text-align: center;
+  color: var(--foreground);
+  transition:
+    color 180ms ease,
+    text-shadow 180ms ease;
+}
+.splash-char.is-scrambling {
+  color: color-mix(in oklch, var(--foreground) 55%, var(--primary));
+  opacity: 0.9;
+}
+.splash-char.is-hot {
+  color: var(--primary);
+  text-shadow: 0 0 18px color-mix(in oklch, var(--primary) 70%, transparent);
+}
+.splash-title.is-jp .splash-char.is-locked {
+  text-shadow: 0 0 26px color-mix(in oklch, var(--primary) 32%, transparent);
+}
+
+/* A single bright band that sweeps the title as it resolves. */
+.splash-slice {
+  position: absolute;
+  left: -6%;
+  right: -6%;
+  height: 2px;
+  top: 50%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--primary) 85%, transparent),
+    transparent
+  );
+  opacity: 0;
+}
+.splash-stage.is-glitching .splash-slice {
+  animation: splash-slice 900ms ease-in-out infinite;
+}
+
+.splash-sub {
+  position: relative;
+  z-index: 1;
+  font-size: 0.6875rem;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--foreground) 55%, transparent);
+}
+.splash-root[data-phase='resolve'] .splash-sub,
+.splash-root[data-phase='hold'] .splash-sub,
+.splash-root[data-phase='out'] .splash-sub {
+  color: var(--primary);
+}
+.splash-sub span::after {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 0.4em;
+  vertical-align: -0.15em;
+  background: currentColor;
+  animation: splash-caret 900ms steps(2, end) infinite;
+}
+
+.splash-scan {
+  position: absolute;
+  inset-inline: 0;
+  height: 42vh;
+  top: -42vh;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in oklch, var(--primary) 9%, transparent),
+    transparent
+  );
+  animation: splash-scan 2.6s linear infinite;
+}
+.splash-scanlines {
+  position: absolute;
+  inset: 0;
+  opacity: 0.16;
+  background: repeating-linear-gradient(
+    to bottom,
+    color-mix(in oklch, var(--foreground) 40%, transparent) 0 1px,
+    transparent 1px 3px
+  );
+}
+.splash-noise {
+  position: absolute;
+  inset: 0;
+  opacity: 0.05;
+  background-image: radial-gradient(
+    color-mix(in oklch, var(--foreground) 90%, transparent) 0.5px,
+    transparent 0.5px
+  );
+  background-size: 3px 3px;
+  animation: splash-noise 140ms steps(2, end) infinite;
+}
+
+@keyframes splash-shake {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(-1px, 1px, 0);
+  }
+}
+@keyframes splash-drift-r {
+  0%,
+  100% {
+    transform: translate3d(-2px, 0, 0);
+  }
+  50% {
+    transform: translate3d(2px, -1px, 0);
+  }
+}
+@keyframes splash-drift-b {
+  0%,
+  100% {
+    transform: translate3d(2px, 0, 0);
+  }
+  50% {
+    transform: translate3d(-2px, 1px, 0);
+  }
+}
+@keyframes splash-slice {
+  0% {
+    opacity: 0;
+    transform: translateY(-1.1em);
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(1.1em);
+  }
+}
+@keyframes splash-caret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes splash-scan {
+  to {
+    transform: translateY(142vh);
+  }
+}
+@keyframes splash-noise {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-2px, 1px, 0);
+  }
+}
+
+/* Reduce motion: keep the reveal, drop the movement. */
+.reduce-motion .splash-stage,
+.reduce-motion .splash-layer-r,
+.reduce-motion .splash-layer-b,
+.reduce-motion .splash-slice,
+.reduce-motion .splash-scan,
+.reduce-motion .splash-noise,
+.reduce-motion .splash-sub span::after {
+  animation: none !important;
+}
+.reduce-motion .splash-scan,
+.reduce-motion .splash-noise {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash-stage,
+  .splash-layer-r,
+  .splash-layer-b,
+  .splash-slice,
+  .splash-scan,
+  .splash-noise,
+  .splash-sub span::after {
+    animation: none !important;
+  }
+  .splash-scan,
+  .splash-noise {
+    display: none;
+  }
+}

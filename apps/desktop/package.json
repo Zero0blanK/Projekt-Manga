@@ -1,0 +1,41 @@
+{
+  "name": "@projekt-manga/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Electron shell for ProjektManga — loads the Next.js web app and provides OS-only capabilities (currently: revealing a download folder) through a preload bridge.",
+  "license": "ISC",
+  "author": "Mystyvyy",
+  "type": "commonjs",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "predev": "tsc",
+    "dev": "electron .",
+    "build": "tsc",
+    "prestart": "tsc",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit",
+    "pretest": "npm run build",
+    "test": "node --test tests/*.cjs",
+    "package": "npm run build && npm run stage && node scripts/prepare-installer-script.mjs && electron-builder --config electron-builder.yml",
+    "package:fast": "npm run build && npm run stage && node scripts/prepare-installer-script.mjs && electron-builder --config electron-builder.yml --dir",
+    "format": "prettier --write . --ignore-path ../../.prettierignore",
+    "lint": "eslint .",
+    "pretypecheck": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client",
+    "prebuild": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client",
+    "stage": "node scripts/stage-installer.mjs"
+  },
+  "dependencies": {
+    "@paralleldrive/cuid2": "^2.2.2",
+    "electron-updater": "^6.8.9",
+    "image-size": "2.0.4",
+    "yauzl": "^3.4.0"
+  },
+  "devDependencies": {
+    "@projekt-manga/api-client": "*",
+    "@types/node": "^22.20.1",
+    "@types/yauzl": "^3.4.0",
+    "electron": "43.8.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,332 @@
+name: CI
+
+on:
+  # `development` is where work happens; `main` keeps the released line.
+  push:
+    branches: [development, main]
+  pull_request:
+    branches: [development, main]
+  workflow_call:
+
+# Least privilege: nothing here writes to the repo, publishes packages, or comments on
+# PRs, so the default read/write GITHUB_TOKEN is more than this needs.
+permissions:
+  contents: read
+
+# A second push to the same branch makes the first run's result irrelevant — cancel it
+# rather than paying for both and waiting behind the stale one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Node 25+ is a hard requirement, not a preference: apps/extensions' sandboxed source
+  # runner refuses to start below it (see spawnSandboxedSource.ts's
+  # assertNodeSupportsNetworkPermission) because earlier versions don't gate network
+  # access under --permission, so a "sandboxed" extension would get real, unrestricted
+  # network access. Kept in sync with .nvmrc and the root package.json "engines" field.
+  NODE_VERSION: '25'
+
+jobs:
+  # ── Split into independent jobs so a typecheck error surfaces without waiting behind a
+  # full Next.js build. Each pays its own `npm ci`, which the npm cache keeps cheap
+  # relative to the serial time it saves.
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # `npm ci` does NOT produce a usable Prisma client: @prisma/client 7.9.1 ships no
+      # postinstall hook, so the generated types every server import depends on are simply
+      # absent until this runs. DATABASE_URL is required even though generating touches no
+      # database — prisma.config.ts resolves `env('DATABASE_URL')` eagerly and aborts
+      # without it.
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=@projekt-manga/server
+        env:
+          DATABASE_URL: file:./data/ci-generate.db
+
+      # Root typecheck runs every workspace's own typecheck script, which each rebuild
+      # the shared packages/* they depend on via a pre-hook first.
+      - name: Typecheck (all workspaces)
+        run: npm run typecheck
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout installable source adapters
+        uses: actions/checkout@v4
+        with:
+          repository: Zero0blanK/projektmanga-sources
+          ref: main
+          path: projektmanga-sources
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install source adapter test dependencies
+        run: npm ci --prefix projektmanga-sources
+
+      # `npm ci` does NOT produce a usable Prisma client: @prisma/client 7.9.1 ships no
+      # postinstall hook, so the generated types every server import depends on are simply
+      # absent until this runs. DATABASE_URL is required even though generating touches no
+      # database — prisma.config.ts resolves `env('DATABASE_URL')` eagerly and aborts
+      # without it.
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=@projekt-manga/server
+        env:
+          DATABASE_URL: file:./data/ci-generate.db
+
+      # Both suites are DB-free (Prisma is mocked — see apps/server/tests/mocks). The
+      # real-database suite is the `integration` job below.
+      - name: Test — server
+        run: npm run test --workspace=@projekt-manga/server
+
+      - name: Test — extensions
+        run: npm run test --workspace=@projekt-manga/extensions
+
+      # Run explicitly: a root `npm run test` uses --if-present and would skip a workspace
+      # without a test script, leaving the frontend unchecked.
+      - name: Test — web
+        run: npm run test --workspace=ProjektManga
+
+      - name: Test — desktop
+        run: npm run test --workspace=@projekt-manga/desktop
+
+      - name: Test source adapters against shared output schemas
+        run: npm run test:source-contracts
+        env:
+          PROJEKT_MANGA_SOURCES_DIR: projektmanga-sources
+
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # The whole repo is prettier-clean now, so this gate is absolute rather than a
+      # best-effort sample.
+      - name: Format check (whole repo)
+        run: npm run format:check
+
+      - name: Check documentation links and workspace references
+        run: node scripts/check-doc-links.mjs
+
+      # Repo-wide, and absolute: the backlog that forced this to be a changed-files-only
+      # sample is cleared, so anything this reports is new.
+      - name: Lint (whole repo)
+        run: npm run lint
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # Scoped to what ships, and to what is worth failing a build over.
+      #
+      # `--omit=dev` because the dev tree's advisories are in the toolchain (vitest's
+      # tinypool, electron-builder's tar) and reachable only by something that already
+      # controls the build — gating on them would mean a red pipeline waiting on major
+      # upgrades of the test runner and the packager, and a gate that is permanently red
+      # stops being read. What runs in front of users is the server's and the desktop
+      # shell's runtime dependencies, and that tree is clean as of this job being added,
+      # so this starts green and any future red is genuinely new.
+      #
+      # Advisories appear without anything in this repo changing, so this is a separate
+      # job: a newly published CVE should not make the typecheck or build job look broken.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      # Non-blocking visibility on the dev tree, so a toolchain advisory is at least
+      # recorded in the run rather than invisible until someone runs `npm audit` by hand.
+      - name: Audit the full tree (informational)
+        run: npm audit || true
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # `npm ci` does NOT produce a usable Prisma client: @prisma/client 7.9.1 ships no
+      # postinstall hook, so the generated types every server import depends on are simply
+      # absent until this runs. DATABASE_URL is required even though generating touches no
+      # database — prisma.config.ts resolves `env('DATABASE_URL')` eagerly and aborts
+      # without it.
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=@projekt-manga/server
+        env:
+          DATABASE_URL: file:./data/ci-generate.db
+
+      # Next.js reuses this between runs to skip re-compiling unchanged routes. Keyed on
+      # the lockfile plus the source that actually affects output, so a dependency bump or
+      # a source edit takes a fresh cache rather than a stale one.
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: apps/web/.next/cache
+          key: ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('apps/web/src/**/*.[jt]s', 'apps/web/src/**/*.[jt]sx') }}
+          restore-keys: |
+            ${{ runner.os }}-next-${{ hashFiles('**/package-lock.json') }}-
+            ${{ runner.os }}-next-
+
+      # Catches server/client boundary errors and missing Suspense boundaries that
+      # typecheck alone does not cover the database-backed integration path.
+      - name: Build — web
+        run: npm run build --workspace=ProjektManga
+
+      # A second web build in the installer's single-origin mode (NEXT_PUBLIC_API_URL=/api).
+      # That configuration takes different branches in next.config.ts — empty
+      # `remotePatterns`, an explicit `localPatterns`, and `new URL(API_URL)` guarded off —
+      # and a break there is invisible to the default build. It is what ships in the
+      # desktop installer, so it deserves the same gate.
+      - name: Build — web (single-origin / installer mode)
+        run: npm run build --workspace=ProjektManga
+        env:
+          NEXT_PUBLIC_API_URL: /api
+
+      - name: Build — server
+        run: npm run build --workspace=@projekt-manga/server
+
+      # Actually compiles the Electron main/preload output. The previous workflow labelled
+      # this step "Build — desktop" but ran `typecheck`, so `tsc`'s emit path — the thing
+      # `npm run package` depends on — was never exercised in CI at all.
+      - name: Build — desktop
+        run: npm run build --workspace=@projekt-manga/desktop
+
+  integration:
+    name: Integration tests (real database)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # No service container: the "real database" is a SQLite file this job creates.
+
+    env:
+      # Must contain "test" or "ci": tests/integration/setup.ts refuses to run against
+      # anything else, because it truncates every table and DATABASE_URL would otherwise
+      # fall back to a developer's real library.
+      DATABASE_URL: file:./data/ci-test.db
+      # tokenCrypto fails closed without a key; a throwaway one keeps that path from
+      # aborting startup on a machine that has no real secret.
+      TOKEN_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      # Creates the database file and applies the squashed SQLite migration. Also
+      # generates the client, so no separate generate step is needed in this job.
+      - name: Apply migrations
+        run: npm run db:deploy --workspace=@projekt-manga/server
+
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=@projekt-manga/server
+
+      - name: Test — server (integration)
+        run: npm run test:integration --workspace=@projekt-manga/server
+
+  # The browser half of scripts/smoke.mjs: the built web app against a fixture API, driven
+  # through the library, browsing, search retry, restore and the reader. It is the closest
+  # thing to an end-to-end test and needs no live source sites.
+  smoke:
+    name: Browser smoke (end to end)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=@projekt-manga/server
+        env:
+          DATABASE_URL: file:./data/ci-generate.db
+
+      - name: Install Chromium for Playwright
+        run: npx --workspace=@projekt-manga/extensions playwright install --with-deps chromium
+
+      - name: Smoke — browser
+        run: npm run smoke -- browser
+
+  # The desktop app ships for Windows, and some failures only exist there (file locks held
+  # by an open database, path separators, drive letters).
+  windows:
+    name: Windows tests and desktop build
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=@projekt-manga/server
+        env:
+          DATABASE_URL: file:./data/ci-generate.db
+
+      - name: Test — server
+        run: npm run test --workspace=@projekt-manga/server
+
+      - name: Test — desktop
+        run: npm run test --workspace=@projekt-manga/desktop
+
+      - name: Build — desktop
+        run: npm run build --workspace=@projekt-manga/desktop

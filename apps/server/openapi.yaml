@@ -1,0 +1,1398 @@
+openapi: 3.0.3
+info:
+  title: ProjektManga API
+  description: >
+    Server API for ProjektManga. All responses share a common envelope:
+    `{ success: boolean, message: string, data?: T }` on success,
+    `{ success: false, message: string }` on error. This spec documents the `data`
+    payload for each endpoint under its 2xx response.
+  version: 1.0.0
+servers:
+  - url: http://localhost:4000/api
+    description: Local development (default SERVER_PORT)
+
+tags:
+  - name: Manga
+  - name: Category
+  - name: Chapter
+  - name: History
+  - name: Downloads
+  - name: Sources
+  - name: Cache
+  - name: Health
+
+paths:
+  # ── Manga ──────────────────────────────────────────────────────────────
+  /manga:
+    get:
+      tags: [Manga]
+      summary: List the library
+      parameters:
+        - $ref: '#/components/parameters/SortBy'
+        - $ref: '#/components/parameters/SortOrder'
+      responses:
+        '200':
+          $ref: '#/components/responses/MangaListItemArray'
+
+  /manga/details/{manga_id}:
+    get:
+      tags: [Manga]
+      summary: Get a manga with its detail fields and full chapter list
+      parameters:
+        - $ref: '#/components/parameters/MangaId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MangaWithDetails'
+        '404':
+          $ref: '#/components/responses/Error'
+
+  /manga/{manga_id}:
+    get:
+      tags: [Manga]
+      summary: Get a manga by id or slug
+      parameters:
+        - $ref: '#/components/parameters/MangaId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Manga'
+
+  /manga/add:
+    post:
+      tags: [Manga]
+      summary: Add a manga to the library
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMangaPayload'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Manga'
+        '409':
+          description: A manga with the same title or slug already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /manga/{manga_id}/migrate:
+    post:
+      tags: [Manga]
+      summary: Migrate a library entry's reading state onto another entry
+      description: >-
+        Moves reading progress, shelf, rating, category tags and history from the entry in
+        the path onto `to_manga_id` — the "switch this series to a different source" flow.
+        Runs in a single transaction, so it either lands completely or not at all.
+        Chapters are matched by number rather than id, since two sources never share
+        chapter ids. Works signed in or not: with a session the per-account overlay tables
+        are migrated, without one the shared rows are.
+      parameters:
+        - name: manga_id
+          in: path
+          required: true
+          description: The entry being migrated *from*. Must already exist.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to_manga_id]
+              properties:
+                to_manga_id:
+                  type: string
+                  description: The entry being migrated *to*. Must already exist.
+                remove_old:
+                  type: boolean
+                  default: true
+                  description: Take the old entry out of the library once everything has moved.
+                move_history:
+                  type: boolean
+                  default: true
+                  description: >-
+                    Re-point this title's history rows at the new entry. History keeps its
+                    own source and slug, so this preserves where each chapter was read.
+      responses:
+        '200':
+          description: Migrated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          progress:
+                            type: integer
+                            description: Furthest chapter number read on the old entry.
+                          chapters_marked:
+                            type: integer
+                          categories_moved:
+                            type: integer
+                          history_moved:
+                            type: integer
+                          state_copied:
+                            type: boolean
+                          old_entry_removed:
+                            type: boolean
+        '400':
+          description: Missing destination, or an attempt to migrate a title onto itself
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          description: One of the titles no longer exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /manga/{category_id}/{manga_slug}/add:
+    post:
+      tags: [Manga]
+      summary: Add a manga to a category
+      parameters:
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/MangaSlug'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/MangaCategoryLink'
+        '404':
+          $ref: '#/components/responses/Error'
+
+  /manga/{manga_id}/delete:
+    delete:
+      tags: [Manga]
+      summary: Remove a manga from the library
+      description: >
+        Cascades: category links are removed; if the manga has read history, its
+        chapters/history are detached (manga_id set to null) rather than deleted; otherwise
+        its chapters are deleted outright.
+      parameters:
+        - $ref: '#/components/parameters/MangaId'
+      responses:
+        '200':
+          description: OK
+        '404':
+          $ref: '#/components/responses/Error'
+
+  /manga/category/{category_id}:
+    get:
+      tags: [Manga]
+      summary: List manga in a category
+      parameters:
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/SortBy'
+        - $ref: '#/components/parameters/SortOrder'
+      responses:
+        '200':
+          $ref: '#/components/responses/MangaListItemArray'
+
+  # ── Category ───────────────────────────────────────────────────────────
+  /category:
+    get:
+      tags: [Category]
+      summary: List categories
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Category'
+
+  /category/{category_id}:
+    get:
+      tags: [Category]
+      summary: Get a category by id
+      parameters:
+        - $ref: '#/components/parameters/CategoryId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Category'
+        '404':
+          $ref: '#/components/responses/Error'
+
+  /category/add:
+    post:
+      tags: [Category]
+      summary: Create a category
+      description: The id is derived from the name (lowercased, spaces → hyphens).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category_name]
+              properties:
+                category_name: { type: string, minLength: 1 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Category'
+        '400':
+          description: Empty/missing category_name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '409':
+          description: A category with the same name (case-insensitive) already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+
+  /category/update/{category_id}:
+    put:
+      tags: [Category]
+      summary: Rename a category
+      description: >
+        Renaming changes the category's id too (it's derived from the name), which
+        cascades to manga_category.category_id via the database's ON UPDATE CASCADE.
+      parameters:
+        - $ref: '#/components/parameters/CategoryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category_name]
+              properties:
+                category_name: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Category'
+        '400':
+          description: Empty/missing category_name
+        '409':
+          description: A category with the same name already exists
+
+  /category/delete/{category_id}:
+    delete:
+      tags: [Category]
+      summary: Delete a category
+      parameters:
+        - $ref: '#/components/parameters/CategoryId'
+      responses:
+        '200':
+          description: OK
+
+  # ── Chapter ────────────────────────────────────────────────────────────
+  /chapter/{manga_slug}/{chapter_id}/mark-read:
+    post:
+      tags: [Chapter]
+      summary: Mark a chapter as read
+      description: >
+        If the chapter isn't in the database yet (e.g. read directly from a source before
+        the manga was added to the library), it's created first from the optional body
+        metadata.
+      parameters:
+        - $ref: '#/components/parameters/MangaSlug'
+        - $ref: '#/components/parameters/ChapterId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChapterMeta'
+      responses:
+        '200':
+          description: OK
+
+  /chapter/{manga_slug}/{chapter_id}/mark-unread:
+    post:
+      tags: [Chapter]
+      summary: Mark a chapter as unread
+      parameters:
+        - $ref: '#/components/parameters/MangaSlug'
+        - $ref: '#/components/parameters/ChapterId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChapterMeta'
+      responses:
+        '200':
+          description: OK
+
+  /chapter/{manga_slug}/{chapter_id}/{last_page_read}/mark-by-page:
+    post:
+      tags: [Chapter]
+      summary: Record reading progress by page number
+      parameters:
+        - $ref: '#/components/parameters/MangaSlug'
+        - $ref: '#/components/parameters/ChapterId'
+        - name: last_page_read
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChapterMeta'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: last_page_read is not a number
+
+  /chapter/{manga_slug}/bulk-mark-read:
+    post:
+      tags: [Chapter]
+      summary: Mark multiple chapters as read (e.g. "mark previous chapters read")
+      parameters:
+        - $ref: '#/components/parameters/MangaSlug'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chapters:
+                  type: array
+                  items: { $ref: '#/components/schemas/ChapterMeta' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/BulkMarkResult' }
+
+  /chapter/{manga_slug}/bulk-mark-unread:
+    post:
+      tags: [Chapter]
+      summary: Mark multiple chapters as unread
+      parameters:
+        - $ref: '#/components/parameters/MangaSlug'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chapters:
+                  type: array
+                  items: { $ref: '#/components/schemas/ChapterMeta' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/BulkMarkResult' }
+
+  /chapter/add-history:
+    post:
+      tags: [Chapter]
+      summary: Create a chapter row as a read-history placeholder (not yet linked to a manga)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChapterMeta'
+      responses:
+        '201':
+          description: Created
+
+  /chapter/{chapter_id}/progress:
+    get:
+      tags: [Chapter]
+      summary: Get last_page_read/is_read for a chapter
+      parameters:
+        - $ref: '#/components/parameters/ChapterId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        nullable: true
+                        type: object
+                        properties:
+                          last_page_read: { type: integer }
+                          is_read: { type: boolean }
+
+  /chapter/recent:
+    get:
+      tags: [Chapter]
+      summary: The 10 most recently fetched chapters across the whole library
+      responses:
+        '200':
+          description: OK
+
+  /chapter/status/{chapter_id}:
+    get:
+      tags: [Chapter]
+      summary: Get is_read for a chapter
+      parameters:
+        - $ref: '#/components/parameters/ChapterId'
+      responses:
+        '200':
+          description: OK
+
+  /chapter/{manga_slug}:
+    get:
+      tags: [Chapter]
+      summary: List a manga's chapters
+      parameters:
+        - $ref: '#/components/parameters/MangaSlug'
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Manga not found
+
+  # ── History ────────────────────────────────────────────────────────────
+  /history:
+    get:
+      tags: [History]
+      summary: List reading history (most recent first)
+      responses:
+        '200':
+          description: OK
+
+    post:
+      tags: [History]
+      summary: (alias, see /history/add)
+      deprecated: true
+      responses:
+        '404': { description: Not routed — use POST /history/add }
+
+  /history/add:
+    post:
+      tags: [History]
+      summary: Record/update reading progress
+      description: >
+        Upserts by (manga_slug, chapter_id): if a matching row exists, pages_read/
+        time_read are updated (time_read accumulates) instead of creating a duplicate row.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MangaHistoryInput'
+      responses:
+        '201':
+          description: Created/updated
+
+  /history/{manga_slug}:
+    get:
+      tags: [History]
+      summary: Get history entries for one manga
+      parameters:
+        - $ref: '#/components/parameters/MangaSlug'
+      responses:
+        '200':
+          description: OK
+
+  # ── Downloads ──────────────────────────────────────────────────────────
+  /downloads/chapter:
+    post:
+      tags: [Downloads]
+      summary: Queue a chapter for download
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceId, mangaSlug, mangaTitle, chapter]
+              properties:
+                sourceId: { type: string }
+                mangaSlug: { type: string }
+                mangaTitle: { type: string }
+                downloadPath: { type: string }
+                chapter:
+                  type: object
+                  required: [id, chapter_number]
+                  properties:
+                    id: { type: string }
+                    name: { type: string }
+                    chapter_number: { type: number }
+      responses:
+        '200':
+          description: Queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id: { type: string }
+                          status: { type: string, example: PENDING }
+                          progress: { type: integer, example: 0 }
+                          message: { type: string }
+        '400':
+          description: chapter.id missing
+        '404':
+          description: Manga not found
+
+  /downloads/stats:
+    get:
+      tags: [Downloads]
+      summary: Aggregate download statistics
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DownloadStats' }
+
+  /downloads/chapter/{chapterId}/check:
+    get:
+      tags: [Downloads]
+      summary: Check whether a chapter has a completed download
+      parameters:
+        - $ref: '#/components/parameters/ChapterIdCamel'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          isDownloaded: { type: boolean }
+
+  /downloads/chapter/{chapterId}/pages:
+    get:
+      tags: [Downloads]
+      summary: List local page files for an offline-read chapter
+      parameters:
+        - $ref: '#/components/parameters/ChapterIdCamel'
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not downloaded, or the files are missing on disk
+
+  /downloads/directory:
+    get:
+      tags: [Downloads]
+      summary: Get the active download directory
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          path: { type: string }
+    patch:
+      tags: [Downloads]
+      summary: Set (or reset, if path is omitted/empty) the download directory
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path: { type: string }
+      responses:
+        '200':
+          description: OK
+
+  /downloads:
+    get:
+      tags: [Downloads]
+      summary: List all downloads
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/DownloadSummary' }
+
+  /downloads/{downloadId}:
+    get:
+      tags: [Downloads]
+      summary: Get one download's status
+      parameters:
+        - $ref: '#/components/parameters/DownloadId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/DownloadStatusResponse' }
+        '404':
+          description: Not found
+    delete:
+      tags: [Downloads]
+      summary: Cancel an active download, or delete a finished one's files + record
+      parameters:
+        - $ref: '#/components/parameters/DownloadId'
+      responses:
+        '200':
+          description: OK
+
+  /downloads/{downloadId}/pause:
+    patch:
+      tags: [Downloads]
+      summary: Pause a queued/in-progress download
+      parameters:
+        - $ref: '#/components/parameters/DownloadId'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Download already finished (COMPLETED/FAILED)
+        '404':
+          description: Not found
+
+  /downloads/{downloadId}/resume:
+    patch:
+      tags: [Downloads]
+      summary: Resume a paused download
+      parameters:
+        - $ref: '#/components/parameters/DownloadId'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Download already finished (COMPLETED/FAILED)
+        '404':
+          description: Not found
+
+  /downloads/events:
+    get:
+      tags: [Downloads]
+      summary: Server-Sent Events stream of live download progress
+      description: >
+        text/event-stream. Events: `connected` (initial worker status snapshot),
+        `progress` ({downloadId, currentPage, totalPages, pagesDownloaded}),
+        `complete` ({downloadId}), `failed` ({downloadId}). Not part of the
+        {success,message,data} envelope — this is a raw SSE stream.
+      responses:
+        '200':
+          description: SSE stream
+          content:
+            text/event-stream: {}
+
+  # ── Sources (manga-source extensions) ─────────────────────────────────
+  /source/sources:
+    get:
+      tags: [Sources]
+      summary: List loaded manga sources
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/SourceSummary' }
+
+  /source/{source_id}/manga:
+    get:
+      tags: [Sources]
+      summary: Browse a source's manga listing
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: category
+          in: query
+          schema: { type: string, default: latest }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/FiltersQuery'
+      responses:
+        '200':
+          description: OK
+        '503':
+          description: Unknown source_id
+
+  /source/{source_id}/search:
+    get:
+      tags: [Sources]
+      summary: Search a source
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: query
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+        - $ref: '#/components/parameters/FiltersQuery'
+      responses:
+        '200':
+          description: OK
+
+  /source/{source_id}/manga/{manga_id}:
+    get:
+      tags: [Sources]
+      summary: Get manga details directly from the source
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - $ref: '#/components/parameters/MangaId'
+      responses:
+        '200':
+          description: OK
+
+  /source/{source_id}/manga/{manga_id}/thumbnail:
+    get:
+      tags: [Sources]
+      summary: Get just the thumbnail URL from the source
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - $ref: '#/components/parameters/MangaId'
+      responses:
+        '200':
+          description: OK
+
+  /source/{source_id}/chapter/{chapter_id}/pages:
+    get:
+      tags: [Sources]
+      summary: Get a chapter's page image URLs from the source
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - $ref: '#/components/parameters/ChapterId'
+        - name: manga_slug
+          in: query
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: OK
+
+  /source/{source_id}/filters:
+    get:
+      tags: [Sources]
+      summary: Get a source's available browse/search filters
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: OK
+
+  /source/{source_id}/manga/{manga_slug}/updates:
+    post:
+      tags: [Sources]
+      summary: Check a source for new chapters and persist any that are new
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - $ref: '#/components/parameters/MangaSlug'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                manga_id: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          newChapters: { type: integer }
+                          thumbnail_url: { type: string }
+
+  /source/image-proxy:
+    get:
+      tags: [Sources]
+      summary: Proxy an image from a manga source (avoids browser CORS/hotlink issues)
+      description: >
+        Streams the upstream response through as-is (not the {success,message,data}
+        envelope). The target URL is validated against private/loopback/link-local IP
+        ranges before fetching (SSRF guard) — same protection is re-checked on redirects.
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+        - name: source_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Proxied image bytes
+        '400':
+          description: Missing/invalid/disallowed url
+
+  # ── Cache (thumbnail caching) ──────────────────────────────────────────
+  /cache/sync/{manga_id}:
+    post:
+      tags: [Cache]
+      summary: Force a fresh cached copy of a manga's thumbnail and repoint manga.thumbnail_url
+      parameters:
+        - $ref: '#/components/parameters/MangaId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source_thumbnail_url: { type: string, format: uri }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          updated: { type: boolean }
+                          hostedUrl: { type: string }
+        '404':
+          description: Manga not found
+
+  /cache/status/{manga_id}:
+    get:
+      tags: [Cache]
+      summary: Get cache status for a manga's thumbnail
+      parameters:
+        - $ref: '#/components/parameters/MangaId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CacheStatus' }
+
+  # ── Health ─────────────────────────────────────────────────────────────
+  # Operational endpoints. Unauthenticated: whatever supervises the process — a reverse
+  # proxy, systemd, the desktop app's own server supervisor — has no session to present.
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness — the process is up
+      description: >
+        Queries nothing, so it is safe to poll frequently and cannot report a broken
+        database. Use /health/ready for that.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status: { type: string, enum: [ok] }
+                          timestamp: { type: string, format: date-time }
+                          endpoints:
+                            type: array
+                            items: { type: string }
+
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness — the database answers
+      description: >
+        Runs `SELECT 1`. Answers 503 while the database is unreachable, which is the
+        signal a proxy or supervisor should read as "do not route traffic here yet".
+        Never cached.
+      responses:
+        '200':
+          description: Ready
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status: { type: string, enum: [ready] }
+                          database: { type: string, enum: [ok] }
+                          timestamp: { type: string, format: date-time }
+        '503':
+          $ref: '#/components/responses/Error'
+
+  /health/diagnostics:
+    get:
+      tags: [Health]
+      summary: Recent operational events
+      description: >
+        The newest 40 entries of a bounded in-memory ring. Every field is allowlisted
+        (see utils/diagnosticLog.ts) — no free-form messages, paths or identifiers.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            at: { type: string, format: date-time }
+                            level: { type: string, enum: [info, warn, error] }
+                            area: { type: string, enum: [api, download, restore, sync] }
+                            event: { type: string }
+                            requestId: { type: string, nullable: true }
+                            jobId: { type: string, nullable: true }
+                            code: { type: string, nullable: true }
+                            counts:
+                              type: object
+                              additionalProperties: { type: integer }
+
+  /health/scraper:
+    get:
+      tags: [Health]
+      summary: Anti-detection stack statistics
+      description: >
+        Requires a session. Reports proxy health, ban and rate-limit counts, HTML cache
+        hit rate and circuit-breaker state. Builds that ship no anti-detection stack (the
+        desktop installer) answer 200 with `available: false`.
+      responses:
+        '200':
+          description: OK, or OK-but-unavailable on a build without the stack
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          available: { type: boolean }
+                          reason: { type: string }
+                          enabled: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Error'
+
+components:
+  parameters:
+    MangaId:
+      name: manga_id
+      in: path
+      required: true
+      schema: { type: string }
+      description: manga.id or manga.slug
+    MangaSlug:
+      name: manga_slug
+      in: path
+      required: true
+      schema: { type: string }
+    CategoryId:
+      name: category_id
+      in: path
+      required: true
+      schema: { type: string }
+    ChapterId:
+      name: chapter_id
+      in: path
+      required: true
+      schema: { type: string }
+    ChapterIdCamel:
+      name: chapterId
+      in: path
+      required: true
+      schema: { type: string }
+    DownloadId:
+      name: downloadId
+      in: path
+      required: true
+      schema: { type: string }
+    SourceId:
+      name: source_id
+      in: path
+      required: true
+      schema: { type: string }
+    SortBy:
+      name: sortBy
+      in: query
+      schema: { type: string, enum: [title, dateAdded, recentlyRead] }
+    SortOrder:
+      name: sortOrder
+      in: query
+      schema: { type: string, enum: [asc, desc] }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer }
+    FiltersQuery:
+      name: filters
+      in: query
+      description: JSON-encoded object, e.g. filters={"status":"ongoing"}
+      schema: { type: string }
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+    MangaListItemArray:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/Envelope'
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MangaListItem'
+
+  schemas:
+    Envelope:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string }
+        data: {}
+
+    ErrorEnvelope:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+
+    Manga:
+      type: object
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        title: { type: string }
+        author: { type: string }
+        source: { type: string }
+        thumbnail_url: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    MangaDetailSummary:
+      type: object
+      properties:
+        status: { type: string, example: ONGOING }
+        genres: { type: string, description: comma-separated }
+        description: { type: string }
+
+    MangaListItem:
+      allOf:
+        - $ref: '#/components/schemas/Manga'
+        - type: object
+          properties:
+            chapter_count: { type: integer }
+            latest_chapter_date: { type: string, format: date-time, nullable: true }
+            unread_count: { type: integer }
+            manga_detail:
+              nullable: true
+              allOf: [{ $ref: '#/components/schemas/MangaDetailSummary' }]
+
+    MangaWithDetails:
+      allOf:
+        - $ref: '#/components/schemas/Manga'
+        - type: object
+          properties:
+            status: { type: string }
+            genres: { type: string }
+            description: { type: string }
+            rating: { type: number, nullable: true }
+            chapters:
+              type: array
+              items: { $ref: '#/components/schemas/ChapterRecord' }
+
+    AddMangaPayload:
+      type: object
+      required: [source, title, slug, author, thumbnail_url, description, genres, status]
+      properties:
+        source: { type: string }
+        title: { type: string }
+        slug: { type: string }
+        author: { type: string }
+        thumbnail_url: { type: string }
+        artist: { type: string }
+        description: { type: string }
+        genres: { type: string }
+        status:
+          type: string
+          description: Any string; mapped to the MangaStatus enum server-side, unrecognized values fall back to UNKNOWN.
+        rating: { type: number }
+        chapters:
+          type: array
+          items: { $ref: '#/components/schemas/ChapterMeta' }
+
+    MangaCategoryLink:
+      type: object
+      properties:
+        manga_id: { type: string }
+        category_id: { type: string }
+
+    Category:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ChapterMeta:
+      description: Partial chapter metadata sent from the client/source when a chapter may not exist in the DB yet.
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        url: { type: string }
+        chapter_number: { type: number }
+        scanlator: { type: string }
+        last_page_read: { type: integer }
+        page_count: { type: integer }
+        release_date: { type: string }
+        source: { type: string }
+
+    ChapterRecord:
+      type: object
+      properties:
+        id: { type: string }
+        manga_id: { type: string, nullable: true }
+        url: { type: string }
+        name: { type: string, nullable: true }
+        scanlator: { type: string, nullable: true }
+        is_read: { type: boolean }
+        is_bookmark: { type: boolean }
+        chapter_number: { type: number }
+        last_page_read: { type: integer }
+        page_count: { type: integer, nullable: true }
+        fetched_at: { type: string, format: date-time, nullable: true }
+        release_date: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    BulkMarkResult:
+      type: object
+      properties:
+        count: { type: integer }
+        failed_chapter_ids:
+          type: array
+          items: { type: string }
+
+    MangaHistoryInput:
+      type: object
+      required: [source, manga_slug, pages_read]
+      properties:
+        source: { type: string }
+        manga_id: { type: string }
+        manga_slug: { type: string }
+        chapter_id: { type: string }
+        thumbnail_url: { type: string }
+        pages_read: { type: integer }
+        time_read:
+          type: integer
+          description: Milliseconds; accumulates on repeat calls for the same chapter.
+
+    DownloadStatusResponse:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [PENDING, IN_PROGRESS, PAUSED, COMPLETED, FAILED] }
+        mangaTitle: { type: string }
+        chapterTitle: { type: string }
+        filePath: { type: string }
+        completedAt: { type: string, format: date-time, nullable: true }
+
+    DownloadSummary:
+      type: object
+      properties:
+        id: { type: string }
+        manga_id: { type: string }
+        chapter_id: { type: string }
+        source_id: { type: string }
+        mangaSlug: { type: string }
+        status: { type: string }
+        mangaTitle: { type: string }
+        chapterTitle: { type: string }
+        chapterNumber: { type: number }
+        pages_total: { type: integer }
+        pages_downloaded: { type: integer }
+        current_page: { type: integer }
+        filePath: { type: string }
+        downloaded_path: { type: string }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+
+    DownloadStats:
+      type: object
+      properties:
+        total: { type: integer }
+        completed: { type: integer }
+        inProgress: { type: integer }
+        failed: { type: integer }
+        totalSize: { type: integer, description: bytes }
+
+    SourceSummary:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        lang: { type: string }
+        base_url: { type: string }
+        isNSFW: { type: boolean }
+
+    CacheStatus:
+      type: object
+      properties:
+        exists: { type: boolean }
+        manga_id: { type: string }
+        thumbnail_url: { type: string }
+        sha256_url: { type: string }

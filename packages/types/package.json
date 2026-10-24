@@ -1,0 +1,21 @@
+{
+  "name": "@projekt-manga/types",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./*": "./dist/*.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write . --ignore-path ../../.prettierignore"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

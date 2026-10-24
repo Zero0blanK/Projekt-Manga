@@ -1,0 +1,119 @@
+# electron-builder packaging config.
+#
+# The installer is self-contained: the API and the web app are shipped alongside the shell
+# and supervised by the main process (src/main/servers.ts), rather than being started by
+# hand as they are in the dev setup.
+#
+# appId is a placeholder (reverse-DNS style, but not a domain anyone owns) — replace it
+# before any real distribution; it's what Windows/macOS use to identify updates and
+# app-specific storage.
+appId: com.projektmanga.desktop
+productName: Projekt Manga
+copyright: Copyright © 2026 Projekt Manga
+directories:
+  output: release
+  buildResources: build
+
+# Where the app looks for updates, and where `--publish` uploads them.
+#
+# Configuring this is also what makes electron-builder emit `latest.yml` next to the installer
+# — that file *is* the update feed, and without it a client has nothing to check against. The
+# `.exe.blockmap` emitted alongside is what lets electron-updater download only the changed
+# blocks of the next installer rather than all ~640MB of it.
+#
+# The repository is public, so the app reads releases anonymously and no token is shipped
+# inside it. A release must carry all three files (exe + latest.yml + blockmap) to be usable —
+# see .claude/plans/auto-update.md.
+publish:
+  provider: github
+  owner: Zero0blanK
+  repo: ProjektManga
+files:
+  - dist/**/*
+  - package.json
+
+# The API and web app, copied next to the shell from the staging tree that
+# scripts/stage-installer.mjs produces.
+#
+# Staged rather than copied straight from apps/*: npm workspaces hoist dependencies to the
+# repo root, so those directories have almost empty node_modules of their own. Packaging
+# them directly shipped a server whose only dependency was typescript, and without its
+# package.json — so Node parsed the ESM build as CommonJS and died on the first import.
+# The staging step installs real production trees outside the workspace.
+#
+# No manga source ships inside the binary, for any target — desktop, hosted, or dev. Every
+# source is installed at runtime from a repository (Discover -> Add sources) and run
+# sandboxed, which is also what lets a broken source be fixed without shipping a new
+# installer. apps/extensions has nothing to exclude here as a result: it carries the
+# anti-detection stack and the sandbox runner, not scraper code.
+extraResources:
+  # `!data/**` matters: running the staged server for testing creates a SQLite file there,
+  # and without this filter that database ships inside the installer. The real one lives in
+  # the user's app-data directory (see main/index.ts), so nothing here is ever wanted.
+  # Lockfiles are build inputs, not runtime files.
+  - from: staging/server
+    to: server
+    filter:
+      - '**/*'
+      - '!data/**'
+      - '!package-lock.json'
+  - from: staging/web
+    to: web
+    filter:
+      - '**/*'
+      - '!package-lock.json'
+  - from: ../extensions/dist
+    to: extensions/dist
+    filter:
+      - '**/*'
+  # A real Node >= 25 runtime, used only to run the API child.
+  #
+  # Electron's own binary cannot do that job: the extension sandbox refuses to start below
+  # Node 25, because `--allow-net` only became a gated permission there — on anything
+  # older a "sandboxed" source silently keeps full network access. Electron 43 bundles
+  # Node 24, so before this every installed source failed on first use in the packaged
+  # app, with nothing bundled to fall back on — there is no bundled source in any build.
+  #
+  # scripts/stage-node-runtime.mjs downloads and checksum-verifies it; only the executable
+  # is shipped, not the rest of the release.
+  - from: staging/node
+    to: node
+    filter:
+      - '**/*'
+
+# build/icon.ico (Windows, 16-256px) and build/icon.png (512px, used for macOS and Linux)
+# are generated from the brand mark in apps/web/public/brand/ProjektManga.icon.png, set on a
+# white rounded tile so it stays visible on dark taskbars. electron-builder auto-detects
+# build/icon.ico / icon.png without needing an explicit `icon:` key here.
+win:
+  target: nsis
+  # Signing switches on by itself when a certificate is supplied: CSC_LINK (a .pfx file or its
+  # base64) and CSC_KEY_PASSWORD in the environment. A certificate kept on a token or in the
+  # Windows store is picked with -c.win.signtoolOptions.certificateSha1=<thumbprint>. Without
+  # one the build is unsigned and SmartScreen warns on first run. See docs/releasing.md.
+  signtoolOptions:
+    signingHashAlgorithms: [sha256]
+    rfc3161TimeStampServer: http://timestamp.digicert.com
+  # Once releases are signed, uncomment so updates are only accepted from your certificate.
+  # The name must match the certificate's subject exactly.
+  # publisherName: Your Name As On The Certificate
+nsis:
+  # electron-builder's own default is oneClick: true — a minimal installer with no wizard
+  # at all: no directory page, no visible per-step progress, it just extracts to a fixed
+  # location and launches. That default was never overridden, which is why neither showed
+  # up. oneClick: false switches to the classic assisted wizard (welcome -> install-mode
+  # choice -> directory -> install-progress page with per-step status text -> finish),
+  # which is what surfaces both.
+  oneClick: false
+  # *Assisted installer only* — ignored while oneClick is true, which is why setting this
+  # alone previously did nothing.
+  allowToChangeInstallationDirectory: true
+  # Lists each file as it is unpacked (see build/installer.nsh and
+  # scripts/prepare-installer-script.mjs).
+  include: build/installer.nsh
+mac:
+  target: dmg
+  category: public.app-category.entertainment
+linux:
+  target: AppImage
+  category: Graphics

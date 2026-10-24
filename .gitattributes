@@ -1,0 +1,17 @@
+# Normalise line endings to LF in the repository and in the working tree.
+#
+# Prettier writes LF (its `endOfLine` default), while a Windows checkout with
+# core.autocrlf=true produces CRLF — so `prettier --check` and eslint's prettier rule
+# reported thousands of "Delete `␍`" errors on files nobody had touched, which is a large
+# part of why formatting was treated as unfixable here. Pinning eol=lf makes the checkout
+# match what the formatter produces on every platform.
+* text=auto eol=lf
+
+# Binary — never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

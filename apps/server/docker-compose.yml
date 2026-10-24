@@ -1,0 +1,35 @@
+# Local MySQL-protocol database for development/testing.
+# Image is `mariadb` (not `mysql`) to match this project's actual driver stack
+# (@prisma/adapter-mariadb + the `mariadb` npm package) — it speaks the same wire
+# protocol Prisma's datasource `provider = "mysql"` expects.
+#
+# Host port defaults to 3310, not 3306: this machine already has other, unrelated
+# MySQL containers bound to 3306/3307. Change DB_PORT in .env if that's not the case
+# for you.
+#
+# Usage:
+#   docker compose up -d          # start
+#   npm run db:migrate            # apply the schema (from apps/server)
+#   docker compose down           # stop (add -v to also drop the data volume)
+
+services:
+  mariadb:
+    image: mariadb:11
+    container_name: projekt-manga-mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${PASSWORD:-password}
+      MARIADB_DATABASE: ${DATABASE:-projekt_manga}
+    ports:
+      - '${DB_PORT:-3310}:3306'
+    volumes:
+      - projekt_manga_db_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  projekt_manga_db_data:

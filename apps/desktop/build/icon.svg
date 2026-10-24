@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <!-- Matches apps/web/src/styles.css's gradient-primary token exactly:
+         linear-gradient(primary, color-mix(in oklch, primary 65%, black)).
+         primary is oklch(0.78 0.14 55); mixing 65% of it against black (achromatic, so
+         CSS Color 4 treats black's hue as powerless and leaves the chromatic color's hue
+         unchanged) linearly scales L and C by 0.65, giving oklch(0.507 0.091 55). Both
+         converted to sRGB hex via culori for exact fidelity, not eyeballed. -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#fb9d59"/>
+      <stop offset="1" stop-color="#8d562e"/>
+    </linearGradient>
+    <linearGradient id="pageShade" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#5c2f12" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- App icon canvas: Windows 11 applies its own rounded square mask over whatever art
+       is given, so the corners are drawn square-ish here (radius about 21%) rather than
+       a circle. A circular badge inside a circular OS mask loses scale; this keeps
+       presence at every size the shell actually renders. -->
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#bg)"/>
+
+  <!-- The monogram: the same serif M the app already uses as its badge everywhere
+       (floating-nav.tsx, about-panel.tsx, account-panel.tsx) — that badge is deliberately
+       just a gradient plus the letter, no added motif, and an app icon that stays
+       faithful to it reads as unmistakably *this* app rather than a generic reader.
+       Drawn as a static path rather than a text element, so it renders identically
+       wherever this SVG gets rasterized into icon PNGs, independent of installed fonts. -->
+  <path filter="url(#soft)" d="
+    M 78 178
+    L 78 84
+    L 102 84
+    L 128 136
+    L 154 84
+    L 178 84
+    L 178 178
+    L 156 178
+    L 156 120
+    L 136 164
+    L 120 164
+    L 100 120
+    L 100 178
+    Z"
+    fill="#180f09"/>
+
+  <!-- A soft top-left sheen, echoing the app's own glow effect on its gradient badges,
+       kept subtle enough to survive being shrunk to 16px. -->
+  <rect x="8" y="8" width="240" height="120" rx="54" fill="url(#pageShade)"/>
+</svg>

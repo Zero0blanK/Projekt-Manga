@@ -1,0 +1,59 @@
+{
+  "search": [
+    {
+      "id": "fixture-manga-001",
+      "slug": "fixture-manga-001",
+      "title": "Fixture Manga",
+      "source": "mangadex",
+      "thumbnail_url": "https://uploads.mangadex.org/covers/fixture-manga-001/cover.jpg"
+    }
+  ],
+  "details": {
+    "id": "fixture-manga-001",
+    "slug": "fixture-manga-001",
+    "title": "Fixture Manga",
+    "source": "mangadex",
+    "thumbnail_url": "https://uploads.mangadex.org/covers/fixture-manga-001/cover.jpg",
+    "author": ["Fixture Author"],
+    "artist": ["Fixture Artist"],
+    "description": "Representative source description.",
+    "genres": ["Action", "Adventure"],
+    "status": "ongoing",
+    "chapters": [
+      {
+        "id": "chapter-002",
+        "name": "Chapter 2",
+        "url": "https://example.test/chapter-002",
+        "chapter_number": "2",
+        "release_date": "2026-01-02T00:00:00.000Z",
+        "pages": []
+      },
+      {
+        "id": "chapter-001",
+        "name": "Chapter 1",
+        "url": "https://example.test/chapter-001",
+        "chapter_number": 1,
+        "release_date": "2026-01-01T00:00:00.000Z",
+        "pages": []
+      }
+    ]
+  },
+  "pages": {
+    "items": [
+      { "index": "1", "image_url": "https://uploads.mangadex.org/data/fixture/1.jpg" },
+      { "index": 2, "image_url": "https://uploads.mangadex.org/data/fixture/2.jpg" }
+    ]
+  },
+  "filters": [
+    {
+      "label": "Status",
+      "value": "status",
+      "type": "select",
+      "options": [
+        { "label": "Ongoing", "value": "ongoing" },
+        { "label": "Completed", "value": "completed" }
+      ]
+    },
+    { "label": "Include mature", "value": "safe", "type": "tri-state" }
+  ]
+}

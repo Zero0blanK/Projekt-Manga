@@ -1,0 +1,46 @@
+name: Nightly smoke
+
+# The slower end-to-end smokes that need the Electron app: account switching and offline
+# sync, the local CBZ reader, and a restore that survives a restart. Windows, because that
+# is what the desktop app ships for and Electron needs a desktop session to start.
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '25'
+
+jobs:
+  desktop-smoke:
+    name: Desktop and restore smoke
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: development
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=@projekt-manga/server
+        env:
+          DATABASE_URL: file:./data/ci-generate.db
+
+      - name: Install Chromium for Playwright
+        run: npx --workspace=@projekt-manga/extensions playwright install chromium
+
+      - name: Smoke — desktop
+        run: npm run smoke -- desktop
+
+      - name: Smoke — restore across a restart
+        run: npm run smoke:restore-restart

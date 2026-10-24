@@ -1,0 +1,525 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model manga {
+  id             String           @id @default(cuid())
+  slug           String
+  title          String
+  author         String
+  source         String
+  thumbnail_url  String
+  /** Library membership. A row can exist without being in the library — previewing,
+   * reading, or downloading straight from a source creates one so chapters and downloads
+   * have something to hang off (both require a manga_id), while only an explicit "Add to
+   * Library" flips this true. Mirrors Mihon/Tachiyomi's `favorite` column. Defaults true
+   * so every pre-existing row stays in the library. */
+  in_library     Boolean          @default(true)
+  created_at     DateTime         @default(now())
+  updated_at     DateTime         @updatedAt
+  cache          cache?
+  chapter        chapter[]
+  download       download[]
+  history        history[]
+  manga_category manga_category[]
+  manga_detail   manga_detail?
+  manga_library  manga_library?
+  update_log     update_log[]
+  user_library         user_library[]
+  user_manga_state     user_manga_state[]
+  user_manga_category  user_manga_category[]
+  tracker_links        tracker_link[]
+
+  @@index([title])
+  @@index([author])
+  @@index([source])
+  @@index([slug])
+  @@unique([source, slug])
+  @@index([updated_at])
+  @@index([in_library])
+  @@map("mangas")
+}
+
+model manga_detail {
+  id          String      @id @default(cuid())
+  manga_id    String      @unique
+  artist      String
+  description String
+  genres      String
+  /// One of MangaStatus (packages/types). String, not an enum: SQLite has none.
+  status      String      @default("ONGOING")
+  rating      Float?
+  created_at  DateTime    @default(now())
+  updated_at  DateTime    @updatedAt
+  manga       manga       @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+
+  @@index([manga_id])
+  @@map("manga_details")
+}
+
+model chapter {
+  id             String     @id
+  manga_id       String?
+  url            String
+  name           String?
+  scanlator      String?
+  is_read        Boolean    @default(false)
+  is_bookmark    Boolean    @default(false)
+  chapter_number Float
+  last_page_read Int        @default(0)
+  page_count     Int?
+  fetched_at     DateTime?
+  release_date   DateTime?
+  created_at     DateTime   @default(now())
+  updated_at     DateTime   @updatedAt
+  manga          manga?     @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+  download       download[]
+  history        history[]
+  user_chapter_state user_chapter_state[]
+
+  @@unique([id, manga_id, scanlator])
+  @@index([last_page_read])
+  @@index([manga_id])
+  @@map("chapters")
+}
+
+model category {
+  id             String           @id
+  name           String           @unique
+  created_at     DateTime         @default(now())
+  updated_at     DateTime         @updatedAt
+  manga_category manga_category[]
+  user_manga_category user_manga_category[]
+
+  @@map("categories")
+}
+
+model manga_category {
+  manga_id    String
+  category_id String
+  category    category @relation(fields: [category_id], references: [id], onDelete: Cascade)
+  manga       manga    @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+
+  @@unique([manga_id, category_id])
+  @@index([category_id], map: "manga_categories_category_id_fkey")
+  @@map("manga_categories")
+}
+
+model download {
+  id               String         @id @default(cuid())
+  manga_id         String
+  chapter_id       String
+  source_id        String
+  /// HTTP request that created this durable download job, for safe operational correlation.
+  request_id       String?
+  file_path        String
+  downloaded_path  String?
+  /// One of DownloadStatus (packages/types).
+  status           String         @default("PENDING")
+  pages_total      Int            @default(0)
+  pages_downloaded Int            @default(0)
+  current_page     Int            @default(0)
+  started_at       DateTime?
+  completed_at     DateTime?
+  created_at       DateTime       @default(now())
+  chapter          chapter        @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
+  manga            manga          @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+
+  @@index([chapter_id], map: "downloads_chapter_id_fkey")
+  @@index([manga_id], map: "downloads_manga_id_fkey")
+  @@map("downloads")
+}
+
+model history {
+  id         String   @id @default(cuid())
+  source     String
+  manga_id   String?
+  manga_slug String
+  source_manga_id String?
+  title      String?
+  thumbnail_url String?
+  chapter_id String?
+  user_id    String?
+  /** Soft-delete tombstone: sync pull needs to tell other devices a row was removed, not
+   * just changed, so a real DELETE would lose that signal. Excluded from every normal
+   * read; only the sync endpoints look at it. */
+  deleted_at DateTime?
+  read_at    DateTime @default(now())
+  last_read  DateTime @default(now())
+  sync_updated_at DateTime?
+  pages_read Int      @default(0)
+  time_read  Int      @default(0)
+  chapter    chapter? @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
+  manga      manga?   @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+  user       user?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([manga_slug])
+  @@index([chapter_id])
+  @@index([manga_id], map: "histories_manga_id_fkey")
+    @@index([user_id])
+    @@index([user_id, sync_updated_at, id])
+    @@map("histories")
+}
+
+model cache {
+  manga_id      String @id
+  thumbnail_url String?
+  sha256_url    String
+  updated_at    DateTime @default(now()) @updatedAt
+  manga         manga  @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+
+  @@index([sha256_url])
+  @@index([thumbnail_url])
+  @@map("caches")
+}
+
+/** Per-manga library membership (bookmark / reading shelf / seen-notification state).
+ * Single-user app — no user_id column, one row per manga. */
+model manga_library {
+  manga_id           String       @id
+  is_bookmarked      Boolean      @default(false)
+  /// One of ShelfStatus (packages/types), or null for "not on a shelf".
+  shelf_status       String?
+  notification_read  Boolean      @default(false)
+  created_at         DateTime     @default(now())
+  updated_at         DateTime     @updatedAt
+  manga              manga        @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+
+  @@index([is_bookmarked])
+  @@index([shelf_status])
+  @@map("manga_library")
+}
+
+/** Audit trail of the "check source for new chapters" flow (both the on-demand
+ * per-manga trigger and the bulk "Update Library" job) — success and failure alike,
+ * so failures are visible for review instead of only reaching a server log. */
+model update_log {
+  id         String        @id @default(cuid())
+  source_id  String
+  manga_id   String?
+  /// One of UpdateLogKind (packages/types).
+  kind       String
+  message    String
+  detail     String
+  created_at DateTime      @default(now())
+  manga      manga?        @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+
+  @@index([source_id])
+  @@index([manga_id])
+  @@index([created_at])
+  @@map("update_logs")
+}
+
+/** An account is entirely optional — the app works fully anonymously otherwise (see
+ * manga_library's own comment). Creating one is how a user opts into cross-device sync;
+ * every table it can own is a new table of its own (user_library, user_manga_state,
+ * user_chapter_state, user_manga_category) rather than a retrofitted nullable user_id on
+ * today's singleton per-manga/per-chapter rows, since MariaDB's unique indexes treat NULL
+ * as distinct-per-row and would silently stop enforcing "one row per manga" for every
+ * anonymous visitor otherwise. history is the one exception — already an append-only log,
+ * not a singleton, so it gets a nullable user_id directly instead. */
+model user {
+  id                 String               @id @default(cuid())
+  sync_generation    Int                  @default(0)
+  email              String               @unique
+  password_hash      String
+  display_name       String?
+  created_at         DateTime             @default(now())
+  updated_at         DateTime             @updatedAt
+  sessions           session[]
+  devices            device[]
+  histories          history[]
+  libraries          user_library[]
+  manga_states       user_manga_state[]
+  chapter_states     user_chapter_state[]
+  manga_categories   user_manga_category[]
+  tracker_accounts   tracker_account[]
+  tracker_links      tracker_link[]
+
+  @@map("users")
+}
+
+model restore_job {
+  id          String   @id
+  owner       String
+  request_id  String?
+  state       String
+  payload     String
+  result      String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@index([owner, state])
+  @@map("restore_jobs")
+}
+
+/** Server-side session row behind an httpOnly cookie — not a JWT. Needs real
+ * revocation (logout, future "sign out other devices"), and desktop's offline auto-auth
+ * is a separate cached-credential concern (see apps/desktop's safeStorage-backed cache)
+ * that doesn't benefit from a stateless token either. */
+model session {
+  id           String    @id
+  user_id      String
+  device_id    String?
+  user_agent   String?
+  created_at   DateTime  @default(now())
+  expires_at   DateTime
+  last_seen_at DateTime  @default(now())
+  user         user      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  device       device?   @relation(fields: [device_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id])
+  @@index([expires_at])
+  @@map("sessions")
+}
+
+/** One row per device that has ever logged in — lets desktop cache an offline identity
+ * (apps/desktop's local SQLite DB is scoped to whichever device row it registered as) and
+ * gives a future "sign out other devices" UI something to list. */
+model device {
+  id           String         @id @default(cuid())
+  user_id      String
+  label        String
+  /// One of DevicePlatform (packages/types).
+  platform     String
+  created_at   DateTime       @default(now())
+  last_seen_at DateTime       @default(now())
+  last_sync_at DateTime?
+  user         user           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  sessions     session[]
+
+  @@index([user_id])
+  @@map("devices")
+}
+
+/** Per-user library membership overlay — mirrors manga.in_library but scoped to an
+ * account instead of shared. Row presence means "in this user's library"; deleted_at is
+ * the tombstone the sync pull uses to tell other devices a title was removed (a hard
+ * delete would lose that signal). */
+model user_library {
+  id         String    @id @default(cuid())
+  user_id    String
+  manga_id   String
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+  /// When the change was made on the device that made it, as that device reported it.
+  /// Set by sync pushes and cleared by direct writes; last-write-wins compares
+  /// `edited_at ?? updated_at`, while `updated_at` stays the server's own write time
+  /// that the pull cursor walks.
+  edited_at  DateTime?
+  deleted_at DateTime?
+  user       user      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  manga      manga     @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, manga_id])
+  @@index([manga_id], map: "user_library_manga_id_fkey")
+  @@index([user_id, updated_at])
+  @@map("user_library")
+}
+
+/** Per-user bookmark/shelf/notification state — mirrors manga_library, scoped to an
+ * account. Unlike user_library, a value here is only ever updated, never removed, so no
+ * tombstone is needed. */
+model user_manga_state {
+  id                String       @id @default(cuid())
+  user_id           String
+  manga_id          String
+  is_bookmarked     Boolean      @default(false)
+  /// One of ShelfStatus (packages/types), or null for "not on a shelf".
+  shelf_status      String?
+  /// Personal rating, 0-100 (this app's own fixed scale — tracker adapters convert
+  /// to/from their own native scale, e.g. AniList's per-account scoreFormat or MAL's
+  /// 0-10). Null means unscored. Independent of tracker sync: settable locally even
+  /// with no tracker linked, same as shelf_status.
+  score             Int?
+  notification_read Boolean      @default(false)
+  updated_at        DateTime     @updatedAt
+  /// When the change was made on the device that made it, as that device reported it.
+  /// Set by sync pushes and cleared by direct writes; last-write-wins compares
+  /// `edited_at ?? updated_at`, while `updated_at` stays the server's own write time
+  /// that the pull cursor walks.
+  edited_at  DateTime?
+  user              user         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  manga             manga        @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, manga_id])
+  @@index([manga_id], map: "user_manga_state_manga_id_fkey")
+  @@index([user_id, updated_at])
+  @@map("user_manga_state")
+}
+
+/** Per-user chapter read/bookmark/progress overlay — mirrors chapter.is_read/
+ * is_bookmark/last_page_read, scoped to an account. The monotonic-max exception for
+ * last_page_read/is_read (progress can only advance on merge, never regress) is applied
+ * by the sync service when reconciling two devices' pushes — it's a merge rule, not a
+ * storage constraint, so it isn't encoded here. */
+model user_chapter_state {
+  id             String   @id @default(cuid())
+  user_id        String
+  chapter_id     String
+  is_read        Boolean  @default(false)
+  is_bookmark    Boolean  @default(false)
+  last_page_read Int      @default(0)
+  updated_at     DateTime @updatedAt
+  user           user     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  chapter        chapter  @relation(fields: [chapter_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, chapter_id])
+  @@index([chapter_id], map: "user_chapter_state_chapter_id_fkey")
+  @@index([user_id, updated_at])
+  @@map("user_chapter_state")
+}
+
+/** Per-user category tagging. category.name stays one shared global vocabulary (find-or-
+ * create resolved in the sync/category services) — only which manga an account has
+ * tagged with it is private, via this join table. Untagging is a real deletion, so it
+ * carries a tombstone like user_library. */
+model user_manga_category {
+  id          String    @id @default(cuid())
+  user_id     String
+  manga_id    String
+  category_id String
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+  /// When the change was made on the device that made it, as that device reported it.
+  /// Set by sync pushes and cleared by direct writes; last-write-wins compares
+  /// `edited_at ?? updated_at`, while `updated_at` stays the server's own write time
+  /// that the pull cursor walks.
+  edited_at  DateTime?
+  deleted_at  DateTime?
+  user        user      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  manga       manga     @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+  category    category  @relation(fields: [category_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, manga_id, category_id])
+  @@index([manga_id], map: "user_manga_category_manga_id_fkey")
+  @@index([category_id], map: "user_manga_category_category_id_fkey")
+  @@index([user_id, updated_at])
+  @@map("user_manga_category")
+}
+
+/** A server-wide list of repos a user has added, each pointing at a JSON index of
+ * installable sources. Shared
+ * config, not per-account, same as the bundled source list in
+ * apps/extensions/config/source.config.ts. */
+model extension_repository {
+  id   String  @id @default(cuid())
+  url  String  @unique
+  /// How the repository describes itself, from the `repository` block of its index.
+  /// All nullable: a repository need not publish any of it, and the UI falls back to the
+  /// URL. Refreshed from the listing whenever the repository is refreshed.
+  name String?
+  /// Short chip shown beside sources from this repository. Six characters at the source.
+  badge_label          String?
+  description          String?
+  website              String?
+  added_at             DateTime               @default(now())
+  last_fetched_at      DateTime?
+  enabled              Boolean                @default(true)
+  installed_extensions installed_extension[]
+
+  @@map("extension_repositories")
+}
+
+/** One row per source installed from a repository's listing. `entry_url` is where the
+ * JS bundle was fetched from; `source_code_hash` is a sha256 of that bundle's bytes at
+ * install/update time, so a later "update" that silently changes the code is always a
+ * visible, comparable event rather than a surprise. The actual bundle file lives on
+ * disk (see the install flow in extensionRepository.service.ts), keyed by this row's
+ * own id — not stored in the database itself. */
+model installed_extension {
+  id               String               @id @default(cuid())
+  repository_id    String
+  source_key       String
+  name             String
+  /** Captured at install/update time from the repository listing entry, not re-fetched
+   * live on every use — these describe *this installed version* specifically (in
+   * particular, allowed_hosts is the sandbox's network allowlist, see
+   * spawnSandboxedSource.ts), so they should only ever change via an explicit "update"
+   * action, never silently because the repo's live listing happened to change. */
+  lang             String
+  base_url         String
+  is_nsfw          Boolean              @default(false)
+  /// How much adult content the source carries: `safe`, `mixed` or `nsfw`.
+  ///
+  /// `is_nsfw` above is derived from it and cannot replace it — it is true only for `nsfw`,
+  /// so a `mixed` source (a general catalogue that also carries adult titles) is
+  /// indistinguishable from a `safe` one by the boolean alone. That is the difference
+  /// between "badge it" and "show nothing". Nullable for rows installed before this was
+  /// recorded; treat null as unknown and fall back to `is_nsfw`.
+  content_rating   String?
+  allowed_hosts    Json
+  version          String
+  /// Extension API contract required by this installed bundle. Old rows default to v1.
+  api_version      Int                  @default(1)
+  /// `major*1e6 + minor*1e3 + patch` from the listing, for ordering two versions without
+  /// parsing strings. Nullable: a repository need not publish it, and the service falls
+  /// back to parsing `version`.
+  version_code     Int?
+  entry_url        String
+  /// Listing presentation, captured with everything else at install/update time.
+  description      String?
+  homepage         String?
+  icon_url         String?
+  source_code_hash String
+  installed_at     DateTime             @default(now())
+  updated_at       DateTime             @updatedAt
+  enabled          Boolean              @default(true)
+  repository       extension_repository @relation(fields: [repository_id], references: [id], onDelete: Cascade)
+
+  @@unique([repository_id, source_key])
+  @@index([repository_id])
+  @@map("installed_extensions")
+}
+
+
+/** One row per (account, tracker service) the account has connected.
+ * `access_token`/`refresh_token` are encrypted at
+ * rest (see apps/server/src/utils/tokenCrypto.ts), the same class of secret as a
+ * password hash, never returned to any client as plaintext. */
+model tracker_account {
+  id               String          @id @default(cuid())
+  user_id          String
+  /// One of TrackerService (packages/types).
+  tracker          String
+  access_token     String
+  refresh_token    String?
+  expires_at       DateTime?
+  tracker_user_id  String
+  tracker_username String
+  created_at       DateTime        @default(now())
+  updated_at       DateTime        @updatedAt
+  user             user            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, tracker])
+  @@map("tracker_accounts")
+}
+
+/** Links one manga (the shared catalog row) to its counterpart on a tracker, for one
+ * account. `tracker_media_id` is resolved via a search/match step at link time — titles
+ * don't line up 1:1 across services. `last_synced_at` anchors the last-write-wins
+ * comparison for status/score; reading progress itself uses a
+ * monotonic-max rule instead, applied in the sync service, not stored as a separate
+ * column here. */
+model tracker_link {
+  id               String         @id @default(cuid())
+  user_id          String
+  manga_id         String
+  /// One of TrackerService (packages/types).
+  tracker          String
+  tracker_media_id String
+  sync_enabled     Boolean        @default(true)
+  last_synced_at   DateTime?
+  created_at       DateTime       @default(now())
+  updated_at       DateTime       @updatedAt
+  user             user           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  manga            manga          @relation(fields: [manga_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, manga_id, tracker])
+  @@index([manga_id])
+  @@map("tracker_links")
+}

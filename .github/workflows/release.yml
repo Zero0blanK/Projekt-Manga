@@ -1,0 +1,78 @@
+name: Release
+
+# Pushing a tag like v1.2.0 runs the full CI, then builds the Windows installer and uploads
+# it to a draft GitHub release with the update feed (latest.yml) and blockmap. Publishing
+# the draft is a manual step: see docs/releasing.md.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# Read at the workflow level, write on the one job that publishes. `contents: write` is
+# needed by exactly one step — the upload to the draft release — so minting a
+# repo-writable token for the typecheck and build jobs this also runs buys nothing.
+#
+# Read rather than nothing: a called workflow's permissions can only narrow the caller's,
+# so an empty set here would leave the `ci` job unable to grant itself the `contents: read`
+# that actions/checkout needs.
+permissions:
+  contents: read
+
+concurrency:
+  # Distinct from ci.yml's own group, which it evaluates as "Release-<ref>" when called from here.
+  group: release-installer-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '25'
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  windows-installer:
+    name: Build and upload the Windows installer
+    needs: ci
+    runs-on: windows-latest
+    timeout-minutes: 60
+    # The one job that publishes. electron-builder's `--publish always` creates the draft
+    # release and uploads the installer, latest.yml and blockmap to it.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # The installer takes its version from apps/desktop/package.json, and the update feed
+      # compares that version. A tag that disagrees would publish a release the app never
+      # offers as an update.
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(node -p "require('./apps/desktop/package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match apps/desktop/package.json version $version"
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=@projekt-manga/server
+        env:
+          DATABASE_URL: file:./data/ci-generate.db
+
+      # RELEASE_TOKEN is only needed when electron-builder.yml publishes to a different
+      # repository (for example a public releases repo); this repo's own token covers itself.
+      - name: Package and upload to a draft release
+        run: npm run package --workspace=@projekt-manga/desktop -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          # Code signing: unset secrets mean an unsigned build (see docs/releasing.md).
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
