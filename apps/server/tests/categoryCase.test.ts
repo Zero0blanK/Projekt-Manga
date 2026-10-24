@@ -61,7 +61,9 @@ beforeAll(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'category-case-'));
   const dbPath = path.join(tmpDir, 'test.db').replace(/\\/g, '/');
   prisma = await createSchema(dbPath);
-});
+  // Replays every migration statement through Prisma: ~1s locally, but 9–17s on the Windows
+  // CI runner while the migration-matrix tests compete for its CPU.
+}, 60_000);
 
 afterAll(async () => {
   await prisma?.$disconnect();
