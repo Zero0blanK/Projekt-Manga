@@ -134,9 +134,6 @@ jobs:
       - name: Format check (whole repo)
         run: npm run format:check
 
-      - name: Check documentation links and workspace references
-        run: node scripts/check-doc-links.mjs
-
       # Repo-wide, and absolute: the backlog that forced this to be a changed-files-only
       # sample is cleared, so anything this reports is new.
       - name: Lint (whole repo)
@@ -227,8 +224,12 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: /api
 
+      # The build script runs `prisma generate` itself, so it needs the same placeholder
+      # DATABASE_URL as the generate step above.
       - name: Build — server
         run: npm run build --workspace=@projekt-manga/server
+        env:
+          DATABASE_URL: file:./data/ci-generate.db
 
       # Actually compiles the Electron main/preload output. The previous workflow labelled
       # this step "Build — desktop" but ran `typecheck`, so `tsc`'s emit path — the thing

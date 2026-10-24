@@ -124,5 +124,5 @@ describe('Prisma CLI migration compatibility', () => {
         title: 'Prisma CLI migration fixture',
       });
     }
-  }, 180_000);
+  }, 400_000); // Took 125s of the old 180s budget on the Windows CI runner.
 });

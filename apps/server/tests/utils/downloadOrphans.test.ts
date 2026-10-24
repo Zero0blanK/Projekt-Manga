@@ -35,7 +35,12 @@ describe('download orphan scanning', () => {
     await fs.utimes(oldOrphan, old, old);
     await fs.utimes(referenced, old, old);
 
-    const result = await listOrphanedDownloadFolders([root], new Set([referenced]));
+    // Canonical, as DownloadService passes it: on Windows the temp dir can be an 8.3 short
+    // name (RUNNER~1) that only realpath expands to the form the scanner compares.
+    const result = await listOrphanedDownloadFolders(
+      [root],
+      new Set([await fs.realpath(referenced)]),
+    );
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({

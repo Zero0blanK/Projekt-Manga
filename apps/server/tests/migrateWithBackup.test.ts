@@ -154,7 +154,7 @@ describe('migrateWithBackup', () => {
     expect(boundaryCount).toBe(
       committedMigrations.reduce((sum, item) => sum + item.statements.length, 0),
     );
-  }, 120_000);
+  }, 600_000); // ~35s locally; the Windows CI runner has taken over 200s.
 
   it('creates a fresh database and recognizes it as migrated after a restart', async () => {
     const migrationName = '20261010000000_fixture';

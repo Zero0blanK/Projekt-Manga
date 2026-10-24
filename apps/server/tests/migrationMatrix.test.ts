@@ -108,5 +108,6 @@ describe('SQLite migration compatibility matrix', () => {
       });
       upgraded.close();
     }
-  }, 60_000); // Replays every migration boundary; slow under a full parallel test run.
+  }, 300_000); // Replays every migration boundary; slow under a full parallel test run, and
+  // the Windows CI runner has taken ~2 minutes.
 });
