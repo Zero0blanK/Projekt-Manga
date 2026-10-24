@@ -44,7 +44,11 @@ describe('download orphan scanning', () => {
       pageCount: 1,
       sizeBytes: 12,
     });
-    expect(JSON.stringify(result)).not.toContain(root);
+    // absolutePath is internal (the service strips it); nothing else may carry the path.
+    // The basename check holds on Windows too, where JSON escaping hides `root` itself.
+    const { absolutePath, ...publicFields } = result[0];
+    expect(absolutePath).toBe(await fs.realpath(oldOrphan));
+    expect(JSON.stringify(publicFields)).not.toContain(path.basename(root));
   });
 
   it('does not follow symlinked title directories outside the root', async (ctx) => {

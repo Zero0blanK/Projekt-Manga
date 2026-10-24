@@ -27,7 +27,7 @@ directories:
 publish:
   provider: github
   owner: Zero0blanK
-  repo: ProjektManga
+  repo: Projekt-Manga
 files:
   - dist/**/*
   - package.json

@@ -13,7 +13,7 @@ import { formatRelative } from '@/lib/manga-data';
 import { CheckCircle2, XCircle, Loader2, ExternalLink } from 'lucide-react';
 
 /** The project's public repository; matches the `publish` block in apps/desktop/electron-builder.yml. */
-const REPOSITORY_URL = 'https://github.com/Zero0blanK/ProjektManga';
+const REPOSITORY_URL = 'https://github.com/Zero0blanK/Projekt-Manga';
 
 const RESOURCE_LINKS = [
   {

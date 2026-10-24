@@ -115,6 +115,7 @@ describe('isDisallowedRedirectHost', () => {
     expect(isDisallowedRedirectHost('127.0.0.1')).toBe(true);
     expect(isDisallowedRedirectHost('192.168.0.1')).toBe(true);
     expect(isDisallowedRedirectHost('localhost')).toBe(true);
+    expect(isDisallowedRedirectHost('[::1]')).toBe(true);
   });
 
   it('allows a public IP literal or hostname', () => {

@@ -16,7 +16,11 @@ router.post(
   validateBody(addExtensionRepositoryBodySchema),
   extensionRepositoryController.addRepository,
 );
-router.post('/repositories/:id/refresh', requireAdmin, extensionRepositoryController.refreshRepository);
+router.post(
+  '/repositories/:id/refresh',
+  requireAdmin,
+  extensionRepositoryController.refreshRepository,
+);
 router.delete('/repositories/:id', requireAdmin, extensionRepositoryController.deleteRepository);
 
 router.get('/installed', extensionRepositoryController.listInstalledExtensions);
@@ -26,7 +30,15 @@ router.post(
   validateBody(installExtensionBodySchema),
   extensionRepositoryController.installExtension,
 );
-router.post('/installed/:id/update', requireAdmin, extensionRepositoryController.updateInstalledExtension);
-router.delete('/installed/:id', requireAdmin, extensionRepositoryController.deleteInstalledExtension);
+router.post(
+  '/installed/:id/update',
+  requireAdmin,
+  extensionRepositoryController.updateInstalledExtension,
+);
+router.delete(
+  '/installed/:id',
+  requireAdmin,
+  extensionRepositoryController.deleteInstalledExtension,
+);
 
 export default router;

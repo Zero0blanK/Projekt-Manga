@@ -9,7 +9,7 @@ Your library stays on your machine.
 
 ![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black?style=flat-square&logo=next.js&logoColor=white) ![React](https://img.shields.io/badge/React-19-149eca?style=flat-square&logo=react&logoColor=white) ![Electron](https://img.shields.io/badge/Desktop-Electron-47848F?style=flat-square&logo=electron&logoColor=white) ![Express](https://img.shields.io/badge/Backend-Express-000000?style=flat-square&logo=express&logoColor=white) ![Prisma](https://img.shields.io/badge/ORM-Prisma-0284c7?style=flat-square&logo=prisma&logoColor=white) ![TypeScript](https://img.shields.io/badge/TypeScript-Strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
 
-[Documentation](docs/README.md) · [Report a bug](https://github.com/Zero0blanK/ProjektManga/issues) · [Request a feature](https://github.com/Zero0blanK/ProjektManga/issues)
+[Documentation](docs/README.md) · [Report a bug](https://github.com/Zero0blanK/Projekt-Manga/issues) · [Request a feature](https://github.com/Zero0blanK/Projekt-Manga/issues)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-0877d2?labelColor=27303D)](LICENSE)
 
@@ -17,7 +17,7 @@ Your library stays on your machine.
 
 ## Download
 
-Get the Windows installer from the [latest release](https://github.com/Zero0blanK/ProjektManga/releases/latest).
+Get the Windows installer from the [latest release](https://github.com/Zero0blanK/Projekt-Manga/releases/latest).
 The app updates itself when a new release is published.
 
 The installer isn't code-signed yet, so Windows may show "Windows protected your PC" on first
@@ -47,8 +47,8 @@ run. Choose **More info → Run anyway**.
 Requires **Node.js 25 or newer** (the source sandbox depends on it).
 
 ```bash
-git clone https://github.com/Zero0blanK/ProjektManga.git
-cd ProjektManga
+git clone https://github.com/Zero0blanK/Projekt-Manga.git
+cd Projekt-Manga
 npm install
 cp apps/server/.env.example apps/server/.env    # the defaults work as-is
 npm run db:migrate --workspace=@projekt-manga/server

@@ -3,7 +3,7 @@
  * running web app.
  */
 import path from 'node:path';
-import { app, BrowserWindow, session, shell } from 'electron';
+import { app, BrowserWindow, net, session, shell } from 'electron';
 import { resolveApiUrl, resolveWebUrl } from '../shared/config';
 
 const PRELOAD_PATH = path.join(__dirname, '..', 'preload', 'index.js');
@@ -69,10 +69,15 @@ const loadGenerations = new WeakMap<BrowserWindow, number>();
 
 /** Whether anything answers at `url`. Any HTTP response counts; only a network failure or
  * timeout doesn't. Probed from the main process so the window keeps showing the waiting
- * page instead of Chromium's blank error page between attempts. */
+ * page instead of Chromium's blank error page between attempts.
+ *
+ * Electron's `net.fetch`, not Node's: the installer serves on `projektmanga.localhost`,
+ * which Chromium resolves to loopback itself but Node hands to the OS resolver — and
+ * Windows answers ENOTFOUND for localhost subdomains, so a Node probe never succeeds and
+ * the window sits on "Starting…" with the server already up. */
 async function isServing(url: string): Promise<boolean> {
   try {
-    const response = await fetch(url, {
+    const response = await net.fetch(url, {
       redirect: 'manual',
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });

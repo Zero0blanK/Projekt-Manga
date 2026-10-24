@@ -137,11 +137,18 @@ function isPrivateOrReservedIp(ip: string): boolean {
   return isDisallowedIpAddress(ip);
 }
 
+/** `URL.hostname` keeps the brackets around an IPv6 literal (`[::1]`), which `net.isIP`
+ * does not accept. */
+function unbracketHost(hostname: string): string {
+  return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+}
+
 /** Synchronous check usable in axios's `beforeRedirect` hook: blocks a redirect hop
  * that points straight at a private/reserved IP literal. It only catches literals; the
  * authoritative check is `guardedHttpAgent`, which validates the address each connection
  * actually uses. */
-export function isDisallowedRedirectHost(hostname: string): boolean {
+export function isDisallowedRedirectHost(rawHostname: string): boolean {
+  const hostname = unbracketHost(rawHostname);
   return net.isIP(hostname) ? isPrivateOrReservedIp(hostname) : hostname === 'localhost';
 }
 
@@ -213,7 +220,7 @@ export async function assertPublicHttpUrl(rawUrl: string): Promise<URL> {
     throw new UnsafeUrlError('Unsupported URL protocol');
   }
 
-  const hostname = parsed.hostname;
+  const hostname = unbracketHost(parsed.hostname);
   if (hostname === 'localhost') {
     throw new UnsafeUrlError('URL resolves to a disallowed address');
   }

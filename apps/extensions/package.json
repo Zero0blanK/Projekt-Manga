@@ -19,7 +19,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "prebuild": "npm run build --workspace=@projekt-manga/types",
     "lint": "eslint .",
+    "pretypecheck": "npm run build",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write . --ignore-path ../../.prettierignore",
     "pretest": "npm run build",

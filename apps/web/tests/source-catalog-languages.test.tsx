@@ -139,7 +139,9 @@ describe('Extension catalogue language sections', () => {
         name: 'Install US source',
       }),
     );
-    await waitFor(() => expect(mocks.install).toHaveBeenCalledWith('repo-a', 'us', expect.any(Function)));
+    await waitFor(() =>
+      expect(mocks.install).toHaveBeenCalledWith('repo-a', 'us', expect.any(Function)),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Refresh Offline repository' }));
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith('offline'));
   });

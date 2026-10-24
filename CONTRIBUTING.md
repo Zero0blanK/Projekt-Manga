@@ -45,8 +45,8 @@ repository and each one runs in its own sandboxed process — see
 ## Setup
 
 ```bash
-git clone https://github.com/Zero0blanK/ProjektManga.git
-cd ProjektManga
+git clone https://github.com/Zero0blanK/Projekt-Manga.git
+cd Projekt-Manga
 npm install
 cp apps/server/.env.example apps/server/.env
 npm run db:migrate --workspace=@projekt-manga/server

@@ -119,7 +119,9 @@ describe('DownloadWorker queue scheduling', () => {
     const w = internals(worker);
     w.maxConcurrent = 1;
     (w as unknown as { activeDownloads: Map<string, unknown> }).activeDownloads = new Map([
-      ['running', {}],
+      // A real controller: the worker's SIGTERM handler aborts every active download, and
+      // vitest can signal the worker process at teardown.
+      ['running', new AbortController()],
     ]);
     w.queue = ['waiting'];
 

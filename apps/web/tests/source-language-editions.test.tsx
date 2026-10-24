@@ -95,7 +95,11 @@ describe('source language editions', () => {
       'true',
     );
     fireEvent.click(screen.getByRole('menuitemradio', { name: /Japanese/ }));
-    expect(mocks.install).toHaveBeenCalledExactlyOnceWith('repo', 'mangadex-ja', expect.any(Function));
+    expect(mocks.install).toHaveBeenCalledExactlyOnceWith(
+      'repo',
+      'mangadex-ja',
+      expect.any(Function),
+    );
     expect(screen.getByRole('status')).toHaveTextContent('Installing language edition');
     await act(async () => finish());
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
