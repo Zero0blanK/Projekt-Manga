@@ -86,22 +86,9 @@ npm run smoke -- browser       # end-to-end browser smoke against a fixture API
 
 CI runs these (plus integration tests, builds and a Windows job) on every push to `development`.
 
-## Deploying
-
-The installer is the intended way to run this — it has no ports to choose, no reverse proxy
-and no backup to arrange. To reach your library from more than one device you need the
-server instead: build, configuration, migrations, health checks, backups and rollback are in
-[docs/deployment-self-hosted.md](docs/deployment-self-hosted.md).
-
-## Releasing
-
-Push a version tag and GitHub Actions builds the installer into a draft release. Step by step,
-including code signing: [docs/releasing.md](docs/releasing.md).
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, conventions and how to write a source.
-More guides are listed in [docs/README.md](docs/README.md).
 
 ## Disclaimer
 

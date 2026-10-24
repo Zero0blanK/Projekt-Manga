@@ -1,9 +1,7 @@
 # Contributing to Projekt Manga
 
 This doc covers getting the project running locally, the checks to run before opening a
-PR, and how to write a manga source. Workspace boundaries and the safety rules for data
-and databases live in [`AGENTS.md`](AGENTS.md); the long-form guides are indexed in
-[`docs/README.md`](docs/README.md).
+PR, and how to write a manga source.
 
 ## Project layout
 
@@ -151,61 +149,6 @@ from existing data.
 - **Comments** explain why, not what. Match the surrounding code's naming and style.
 
 ---
-
-## Writing a manga source
-
-A source is one manga site wired up so Discover, the library and the reader can browse
-and read it without knowing anything site-specific. Sources are not part of this
-repository: you publish them as an **extension repository** — an `index.json` plus one
-built JavaScript bundle per source, served over HTTPS — and users add that repository's
-URL in the app.
-
-[`docs/extension-repository.md`](docs/extension-repository.md) is the full guide: the
-index format, signing, building the bundle, the development loop, and the installing and
-testing commands. What follows is the short version.
-
-### The contract
-
-A bundle is a single ES module whose default export implements `Source` from
-`packages/types/src/extension.ts`:
-
-```ts
-interface Source {
-  id: string;
-  name: string;
-  lang: string;
-  base_url: string;
-  isNSFW: boolean;
-
-  // Required
-  fetchManga(category?, pagination?, filters?): Promise<Mangas[]>;
-  searchManga(query?, pagination?, filters?): Promise<Mangas[]>;
-  fetchMangaDetails(manga_id: string): Promise<MangaDetails>;
-  fetchChapters(manga_id: string): Promise<Chapters[]>;
-  fetchChapterPages(chapter_id, manga_slug?, pagination?): Promise<ChapterPagesResult<Page>>;
-  getFilters(): Promise<MangaFilter[]>;
-  fetchMangaUpdates(manga_slug: string): Promise<Chapters[]>;
-
-  // Optional
-  getCapabilities?(): Promise<SourceCapabilities>;
-  fetchMangaPage?(category?, page?, filters?): Promise<SourceCataloguePage>;
-  searchMangaPage?(query?, page?, filters?): Promise<SourceCataloguePage>;
-  resolveMangaUrl?(url: string): Promise<Mangas | null>;
-  fetchMangaThumbnail?(manga_id: string): Promise<string>;
-}
-```
-
-Read the file for the exact shapes rather than guessing at optional fields. Two that are
-easy to miss:
-
-- `MangaDetails.url` — the title's page on the site (absolute, or relative to
-  `base_url`). The app can't derive it, and without it "Share" can't link back to the
-  source.
-- `fetchMangaPage` / `searchMangaPage` — cursor-based paging. Implement them when the
-  site's paging doesn't map cleanly onto `limit`/`offset`; Discover uses them when present.
-
-A source **only reports data**. It never persists anything; storing what it returns is
-`apps/server`'s job.
 
 ### What runs where
 
