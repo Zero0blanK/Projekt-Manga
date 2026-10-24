@@ -18,6 +18,8 @@
     "pretest": "npm run build:deps",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretest:migrations": "npm run build:deps",
+    "test:migrations": "vitest run --config vitest.migrations.config.ts",
     "pretest:integration": "npm run build:deps",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "verify:extensions": "tsx scripts/verify-extensions.ts"

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { migrationTestFiles } from './vitest.migrations.config';
 
 export default defineConfig({
   // Unit tests mock Prisma and set only the environment values their individual cases
@@ -10,7 +11,8 @@ export default defineConfig({
     globals: false,
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.test.ts'],
-    exclude: ['tests/integration/**', 'node_modules/**'],
+    // Migration suites run separately: `npm run test:migrations`.
+    exclude: ['tests/integration/**', 'node_modules/**', ...migrationTestFiles],
     testTimeout: 10000,
   },
 });
