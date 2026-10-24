@@ -8,7 +8,9 @@ const { resolveOpenableFolder } = require('../dist/main/openable-folder.js');
 test('opens an existing local folder', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-open-folder-'));
   try {
-    assert.equal(await resolveOpenableFolder(directory), fs.realpathSync(directory));
+    // .native, like the fs/promises realpath the code uses: the JS realpathSync leaves a
+    // Windows 8.3 short name (C:\Users\RUNNER~1) unexpanded, the native call does not.
+    assert.equal(await resolveOpenableFolder(directory), fs.realpathSync.native(directory));
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

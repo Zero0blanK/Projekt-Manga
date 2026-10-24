@@ -50,6 +50,16 @@ export function ChapterListPanel({
   const endIndex = Math.min(sorted.length, startIndex + WINDOW_ROWS);
   const visibleChapters = sorted.slice(startIndex, endIndex);
 
+  // A keyboard jump outside the window (Home/End/PageUp/PageDown) is focused in the commit
+  // that mounts its row. Polling a few animation frames instead gave up whenever a long
+  // list took longer than that to render, leaving focus on an unmounted row.
+  useLayoutEffect(() => {
+    const pending = pendingKeyboardFocusIndex.current;
+    if (pending === null || pending < startIndex || pending >= endIndex) return;
+    pendingKeyboardFocusIndex.current = null;
+    listRef.current?.querySelector<HTMLElement>(`[data-chapter-index="${pending}"]`)?.focus();
+  });
+
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
     const list = event.currentTarget;
     const nextScrollTop = list.scrollTop;
@@ -91,21 +101,15 @@ export function ChapterListPanel({
     event.preventDefault();
     const list = listRef.current;
     if (!list) return;
-    pendingKeyboardFocusIndex.current = nextIndex;
     list.scrollTop = Math.max(0, (nextIndex - OVERSCAN_ROWS) * ROW_HEIGHT);
+    const mounted = list.querySelector<HTMLElement>(`[data-chapter-index="${nextIndex}"]`);
+    if (mounted) {
+      mounted.focus();
+    } else {
+      // Picked up by the layout effect once the scroll re-renders the window.
+      pendingKeyboardFocusIndex.current = nextIndex;
+    }
     setScrollTop(list.scrollTop);
-    const focusTarget = (attempt: number) => {
-      const target = list.querySelector<HTMLElement>(`[data-chapter-index="${nextIndex}"]`);
-      if (target) {
-        target.focus();
-        pendingKeyboardFocusIndex.current = null;
-      } else if (attempt < 5) {
-        requestAnimationFrame(() => focusTarget(attempt + 1));
-      } else {
-        pendingKeyboardFocusIndex.current = null;
-      }
-    };
-    requestAnimationFrame(() => focusTarget(0));
   };
 
   return (
