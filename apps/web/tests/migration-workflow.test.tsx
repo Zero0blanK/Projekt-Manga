@@ -47,6 +47,8 @@ vi.mock('@/lib/library-store', () => ({
   useMangaLibrary: () => ({ manga: [], refresh: fixture.refresh }),
   useLibraryState: () => ({ shelf: {}, bookmarks: [] }),
   libraryActions: { setShelf: vi.fn(), setBookmark: vi.fn() },
+  // Membership changes go through the store, which calls the API.
+  setTitleInLibrary: (id: string, inLibrary: boolean) => fixture.membership(id, inLibrary),
 }));
 vi.mock('@/lib/extensions-store', () => ({ useInstalledExtensions: () => ({ installed: [] }) }));
 vi.mock('@/components/discover/content-privacy', () => ({

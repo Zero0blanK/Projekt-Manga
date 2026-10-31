@@ -23,6 +23,8 @@ import { RestoreJobMonitor } from '@/components/restore-job-monitor';
 import { useRestorePending } from '@/lib/restore-job';
 import { RestoreBlockingScreen } from '@/components/restore-blocking-screen';
 import { UpdatePrompt } from '@/components/update-prompt';
+import { CommandPalette } from '@/components/command-palette';
+import { DesktopIntegration } from '@/components/desktop-integration';
 
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -165,6 +167,12 @@ export function AppShell({ children }: { children: ReactNode }) {
       <SplashIntro ready={appReady} />
       <AutomaticLibraryUpdates suspended={restorePending} />
       <AutomaticDesktopSync ready={appReady && !restorePending} />
+      {!restorePending && (
+        <>
+          <CommandPalette />
+          <DesktopIntegration />
+        </>
+      )}
       <RestoreJobMonitor />
       <RestoreBlockingScreen />
       <div inert={restorePending}>

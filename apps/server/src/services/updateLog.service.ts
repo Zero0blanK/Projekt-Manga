@@ -39,6 +39,7 @@ const SOURCE_CODES: SourceErrorCode[] = [
   'NETWORK_ERROR',
   'TIMEOUT',
   'BLOCKED',
+  'CHALLENGE_REQUIRED',
   'RATE_LIMITED',
   'NOT_FOUND',
   'PARSE_ERROR',

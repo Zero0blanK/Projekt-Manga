@@ -3,7 +3,7 @@
   "releases": [
     {
       "version": "1.0.0",
-      "date": "2026-10-17",
+      "date": "2026-10-31",
       "changes": [
         {
           "type": "added",
@@ -11,7 +11,15 @@
         },
         {
           "type": "added",
+          "text": "Linked sources — attach other sources' copies of a title, and the reader offers them when a chapter won't load or the next one is missing"
+        },
+        {
+          "type": "added",
           "text": "Discover — browse and search any source you have installed, with previews before you add a title"
+        },
+        {
+          "type": "added",
+          "text": "Migrate a whole source at once — find matches across sources in your chosen order, check or pick them by hand, and keep the progress running while you browse"
         },
         {
           "type": "added",
@@ -23,6 +31,10 @@
         },
         {
           "type": "added",
+          "text": "Sources behind a browser check can be opened once in the desktop app, or given a session pasted from your own browser that you can view, edit and delete"
+        },
+        {
+          "type": "added",
           "text": "Reader with two-page, single page and long strip layouts, configurable preloading, brightness, page gap and reading direction"
         },
         {
@@ -31,7 +43,27 @@
         },
         {
           "type": "added",
+          "text": "Reader image tools — crop borders, split or rotate wide pages, spreads on their own screen, colour filters, a custom tint, and 2× enhancement for low-resolution pages"
+        },
+        {
+          "type": "added",
+          "text": "Rebindable keys, a shortcut sheet, mouse-wheel page turns, double-click zoom, click-zone layouts and gamepad controls"
+        },
+        {
+          "type": "added",
+          "text": "Guided view, which steps through a page one panel at a time"
+        },
+        {
+          "type": "added",
+          "text": "Translate a Japanese page in place — the text is read on your device and translated through your own LibreTranslate or DeepL"
+        },
+        {
+          "type": "added",
           "text": "Offline downloads with a per-chapter queue, live progress, and pause and resume"
+        },
+        {
+          "type": "added",
+          "text": "Automatic downloads — download new chapters, read ahead, and delete chapters after reading"
         },
         {
           "type": "added",
@@ -39,11 +71,31 @@
         },
         {
           "type": "added",
+          "text": "Local comics also take ZIP, EPUB and folders of images, read ComicInfo.xml, read library folders in place, and open by drag and drop or from .cbz files"
+        },
+        {
+          "type": "added",
           "text": "Reading history, a recents view, and a notifications centre for new chapters"
         },
         {
           "type": "added",
+          "text": "Library update rules — skip titles with unread chapters or not started, include or exclude categories, per-category intervals, and smart updates by expected release"
+        },
+        {
+          "type": "added",
+          "text": "An Upcoming page with a release calendar"
+        },
+        {
+          "type": "added",
+          "text": "New-chapter alerts outside the app through ntfy, Discord, Telegram or webhooks"
+        },
+        {
+          "type": "added",
           "text": "Statistics covering read duration, chapter totals and how your library breaks down"
+        },
+        {
+          "type": "added",
+          "text": "Reading goals and a \"year in manga\" summary you can save as an image"
         },
         {
           "type": "added",
@@ -63,11 +115,31 @@
         },
         {
           "type": "added",
+          "text": "Automatic backups on a schedule, restored through the same preview as an imported file"
+        },
+        {
+          "type": "added",
+          "text": "Import a Mihon or Tachiyomi backup, searching your sources by name, in your order, for titles from sources you don't have"
+        },
+        {
+          "type": "added",
           "text": "Progress tracking against AniList and MyAnimeList for linked titles"
         },
         {
           "type": "added",
+          "text": "More trackers — MangaUpdates, Kitsu, Shikimori and Bangumi, plus self-hosted Komga and Kavita"
+        },
+        {
+          "type": "added",
+          "text": "App-wide incognito mode, which saves no history or progress and sends nothing to trackers"
+        },
+        {
+          "type": "added",
           "text": "Desktop app — one installer that runs the reader, its API and its database on your machine, and updates itself from GitHub Releases"
+        },
+        {
+          "type": "added",
+          "text": "Desktop app lock with a PIN or password, and hiding the window from screen capture"
         },
         {
           "type": "added",

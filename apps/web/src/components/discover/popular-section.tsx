@@ -7,6 +7,7 @@ import type { Mangas } from '@projekt-manga/types';
 import { useDuplicateCheckedAdd } from '@/components/discover/duplicate-manga-dialog';
 import { buildImageProxyUrl } from '@projekt-manga/api-client';
 import { useMangaLibrary } from '@/lib/library-store';
+import { isInLibrary } from '@/lib/library-titles';
 import { Cover, GRID_COVER_SIZES } from '@/components/cover';
 import { Check, Plus } from 'lucide-react';
 
@@ -20,11 +21,7 @@ export function SourceResultCard({ sourceId, item }: { sourceId: string; item: M
 
   // A title added in an earlier session (or from its preview page) must read as "In
   // library" here too, so this is derived from the library rather than local add state.
-  // Sources identify a title by the same value that becomes its slug, which is what the
-  // library stores.
-  const alreadyInLibrary = library.some(
-    (m) => m.source === sourceId && m.inLibrary && (m.slug === item.slug || m.slug === item.id),
-  );
+  const alreadyInLibrary = isInLibrary(library, sourceId, item);
   const added = alreadyInLibrary || justAdded;
 
   // Stays put rather than navigating away — adding from a grid shouldn't cost you your

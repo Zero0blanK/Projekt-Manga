@@ -321,13 +321,10 @@ function SignedInAccount({ email, displayName }: { email: string; displayName: s
         <span className="text-xs text-muted-foreground">{email}</span>
       </Field>
       {/* Local-only: there is no PATCH /api/auth/me to update the account's display_name. */}
-      <Field label="Display name" hint="Stored on this device only, same as before signing in">
+      <Field label="Display name" hint="Stored on this device only">
         <TextInput settingKey="displayName" placeholder={displayName || 'Reader'} />
       </Field>
-      <Field
-        label="Other devices"
-        hint="Signs out every other browser or desktop app signed into this account"
-      >
+      <Field label="Other devices" hint="Signs out every other device">
         <ActionButton onClick={handleSignOutOtherDevices} disabled={revoking}>
           {revoking ? 'Signing out…' : 'Sign out other devices'}
         </ActionButton>
@@ -387,15 +384,12 @@ export function AccountPanel() {
       )}
 
       <Panel title="Library" subtitle="Defaults for titles you add">
-        <Field label="Default shelf" hint="Where a title is filed when you add it from Discover">
+        <Field label="Default shelf" hint="Where titles added from Discover go">
           <OptionSelect settingKey="defaultShelf" options={SHELF_CHOICES} defaultValue="none" />
         </Field>
 
         <Group label="Covers" />
-        <Field
-          label="Show unread count"
-          hint="A badge with the number of chapters you haven't read yet"
-        >
+        <Field label="Show unread count" hint="Unread chapter count on covers">
           <Toggle settingKey="showUnreadBadge" defaultOn />
         </Field>
       </Panel>

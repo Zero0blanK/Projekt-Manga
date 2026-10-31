@@ -21,17 +21,21 @@ import {
   sourceCapabilitiesSchema,
   sourceCataloguePageSchema,
 } from '@projekt-manga/schemas';
+import type { SandboxedSource, UrlKeysResult } from '@projekt-manga/extensions/sandbox';
+import type { SourceUrlKeysBody } from '@projekt-manga/schemas';
 import {
   getInstalledSandboxedSource,
   getInstalledSandboxedSources,
 } from './sandboxedSourceRegistry.service.js';
 import chapterService from './chapter.service.js';
+import type { AddedChapter } from '../repositories/chapter.repository.js';
 import mangaRepository from '../repositories/manga.repository.js';
 import libraryService from './library.service.js';
 import updateLogService from './updateLog.service.js';
 import { recordSourceAttempt, recordSourceOperation } from './sourceHealth.service.js';
 import {
   ServiceUnavailableError,
+  ChallengeRequiredError,
   TimeoutError,
   NotFoundError,
   RateLimitedError,
@@ -126,6 +130,8 @@ function translateSourceError(error: unknown): never {
         throw new RateLimitedError(error.message);
       case 'BLOCKED':
         throw new ServiceUnavailableError(error.message);
+      case 'CHALLENGE_REQUIRED':
+        throw new ChallengeRequiredError(error.message);
       case 'PARSE_ERROR':
         if (error.reason === 'INVALID_CURSOR' || error.reason === 'INVALID_PAGINATION') {
           throw new ValidationError('Invalid catalogue pagination. Restart the search or browse.');
@@ -380,7 +386,14 @@ const fetchMangaUpdates = async (
   source_id: string,
   manga_slug: string,
   manga_id?: string,
-): Promise<{ newChapters: number; thumbnail_url: string; failed: boolean }> => {
+): Promise<{
+  newChapters: number;
+  /** The new chapters, so a client can queue them for download. */
+  newChapterList: AddedChapter[];
+  changedChapters: number;
+  thumbnail_url: string;
+  failed: boolean;
+}> => {
   const source = await getSourceById(source_id);
   // Resolves the library row (if any) so log entries can carry a real manga_id/title
   // even when the caller only supplied the slug.
@@ -392,14 +405,13 @@ const fetchMangaUpdates = async (
 
   recordSourceAttempt(source_id, 'update');
   let newChapters = 0;
+  let newChapterList: AddedChapter[] = [];
+  let changedChapters = 0;
   let failed = false;
   let updateErrorCode: SourceErrorCode | 'UNCLASSIFIED' = 'UNCLASSIFIED';
   let updateRetryAfterMs: number | undefined;
   try {
-    const [rawChapters, existingChapters] = await Promise.all([
-      source.fetchMangaUpdates(manga_slug),
-      chapterService.getChapter(manga_slug, undefined, source_id),
-    ]);
+    const rawChapters = await source.fetchMangaUpdates(manga_slug);
 
     // Validated harder than the read-only paths above, because this is the one place a
     // source's output is *written to the database* rather than passed through to a
@@ -412,26 +424,13 @@ const fetchMangaUpdates = async (
       'fetchMangaUpdates',
     );
 
-    const existingIds = new Set(existingChapters.map((chapter) => chapter.id));
-    const chaptersToAdd = latestChapters.filter((chapter) => !existingIds.has(chapter.id));
-
-    // Only unseen ids are inserted, so stored chapters would keep stale numbers; the source
-    // is the authority on its own numbering.
-    const storedNumber = new Map(
-      existingChapters.map((chapter) => [chapter.id, Number(chapter.chapter_number)]),
-    );
-    const renumbered = latestChapters
-      .filter((chapter) => {
-        const stored = storedNumber.get(chapter.id);
-        const reported = Number(chapter.chapter_number);
-        return (
-          stored !== undefined && Number.isFinite(reported) && reported > 0 && reported !== stored
-        );
-      })
-      .map((chapter) => ({ id: chapter.id, chapter_number: Number(chapter.chapter_number) }));
-    await chapterService.renumberChapters(renumbered);
-
-    newChapters = await chapterService.addChapters(manga_slug, chaptersToAdd, source_id);
+    // Not a plain "insert unseen ids": a chapter whose link changed on the site comes back
+    // under a new id, and is relinked (state carried over) rather than counted as new. The
+    // source is also the authority on its own numbering and metadata for known ids.
+    const sync = await chapterService.syncChapters(manga_slug, latestChapters, source_id);
+    newChapters = sync.added;
+    newChapterList = sync.addedChapters;
+    changedChapters = sync.relinked + sync.updated + sync.removed;
 
     if (newChapters > 0 && resolvedMangaId) {
       await updateLogService.logNewChapters(source_id, resolvedMangaId, mangaTitle, newChapters);
@@ -474,6 +473,8 @@ const fetchMangaUpdates = async (
 
   return {
     newChapters,
+    newChapterList,
+    changedChapters,
     thumbnail_url,
     failed,
   };
@@ -527,6 +528,41 @@ const runLibraryUpdateSweep = async (): Promise<LibraryUpdateResult> => {
   };
 };
 
+const urlKeysResultSchema = z.object({
+  supported: z.boolean(),
+  manga: z.array(z.string().min(1).max(512).nullable()),
+  chapters: z.array(z.string().min(1).max(512).nullable()),
+});
+
+/**
+ * Turns Mihon/Tachiyomi URLs into this app's title slugs and chapter keys through the
+ * source's own `keyFromUrl`, for a backup import. No network: the source only parses the
+ * URLs. A source without `keyFromUrl` answers `supported: false`, and the importer then
+ * falls back to matching read state by chapter number.
+ */
+const keysFromUrls = async (sourceId: string, body: SourceUrlKeysBody): Promise<UrlKeysResult> => {
+  const source = (await getSourceById(sourceId)) as Partial<SandboxedSource>;
+  const unsupported = {
+    supported: false,
+    manga: body.manga.map(() => null),
+    chapters: body.chapters.map(() => null),
+  };
+  if (typeof source.keysFromUrls !== 'function') return unsupported;
+  try {
+    const result = urlKeysResultSchema.parse(await source.keysFromUrls(body));
+    // A result that does not line up with the request cannot be trusted at all.
+    if (
+      result.manga.length !== body.manga.length ||
+      result.chapters.length !== body.chapters.length
+    )
+      return unsupported;
+    return result;
+  } catch (error) {
+    if (error instanceof z.ZodError) return unsupported;
+    translateSourceError(error);
+  }
+};
+
 const checkAllLibraryUpdates = async (): Promise<LibraryUpdateResult> => {
   if (inFlightSweep) {
     const result = await inFlightSweep;
@@ -552,6 +588,7 @@ const sourceService = {
   getChapterPages,
   getFilters,
   fetchMangaUpdates,
+  keysFromUrls,
   checkAllLibraryUpdates,
 };
 

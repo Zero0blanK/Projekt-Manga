@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { getHistory, type HistoryEntry } from '@projekt-manga/api-client';
+import { getAllMangaLinks, getHistory, type HistoryEntry } from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
 import { useMangaLibrary, useLibraryState } from '@/lib/library-store';
 import { useAppState } from '@/lib/app-store';
@@ -12,18 +12,21 @@ import { ViewToggle } from '@/components/library/view-toggle';
 import { SortMenu } from '@/components/library/sort-menu';
 import { UpdateLibraryButton } from '@/components/library/update-library-button';
 import { ContinueReadingHero } from '@/components/library/continue-reading-hero';
+import { ReadingGoalProgress } from '@/components/library/reading-goal';
 import { LibraryGrid } from '@/components/library/library-grid';
 import { useDownloadRows } from '@/components/downloads/row-data';
 import { RecentlyUpdatedRail } from '@/components/library/recently-updated-rail';
 import { EmptyState } from '@/components/page-shell';
 import { MangaGridSkeleton } from '@/components/skeletons';
-import { mostRecentlyReadLibraryManga } from '@/lib/recent-reading';
+import { creditLinkedReading, mostRecentlyReadLibraryManga } from '@/lib/recent-reading';
 import { LibrarySelectionBar, parseDensity } from '@/components/library/library-tools';
 import { useProfilePreference } from '@/lib/profile-preferences';
-import { Download, Eye } from 'lucide-react';
+import { ArrowRightLeft, CalendarDays, Download, Eye, Shuffle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useCurrentUser } from '@/lib/session-resource';
 
 export function LibraryPageClient() {
+  const router = useRouter();
   const [filter, setFilter] = useState<string>('all');
   const [historyRows, setHistory] = useState<HistoryEntry[] | null>(null);
   const [historyOwner, setHistoryOwner] = useState<string | null>(null);
@@ -38,10 +41,15 @@ export function LibraryPageClient() {
     setHistory(null);
     if (sessionLoading) return;
     const controller = new AbortController();
-    getHistory(controller.signal)
-      .then((rows) => {
+    // Linked sources: reading on one counts as reading its library entry. A failed link
+    // lookup just leaves history as it is.
+    Promise.all([
+      getHistory(controller.signal),
+      getAllMangaLinks(controller.signal).catch(() => []),
+    ])
+      .then(([rows, groups]) => {
         if (!controller.signal.aborted) {
-          setHistory(rows);
+          setHistory(creditLinkedReading(rows, groups));
           setHistoryOwner(owner);
         }
       })
@@ -222,8 +230,44 @@ export function LibraryPageClient() {
                 Find manga
               </Link>
             )}
+            {historyRows && <ReadingGoalProgress history={historyRows} compact />}
+            {mangaLibrary.length > 1 && (
+              <button
+                type="button"
+                aria-label="Random title"
+                title="Open a random library title"
+                onClick={() =>
+                  router.push(
+                    `/manga/${encodeURIComponent(mangaLibrary[Math.floor(Math.random() * mangaLibrary.length)].id)}`,
+                  )
+                }
+                className="grid h-9 w-9 place-items-center rounded-lg border border-border/60 text-muted-foreground transition hover:text-foreground"
+              >
+                <Shuffle className="h-4 w-4" />
+              </button>
+            )}
+            {mangaLibrary.length > 0 && (
+              <Link
+                href="/upcoming"
+                aria-label="Upcoming releases"
+                title="Upcoming releases"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-border/60 text-muted-foreground transition hover:text-foreground"
+              >
+                <CalendarDays className="h-4 w-4" />
+              </Link>
+            )}
+            {mangaLibrary.length > 0 && (
+              <Link
+                href="/migrate"
+                aria-label="Migrate a source"
+                title="Move every title from one source to another"
+                className="grid h-9 w-9 place-items-center rounded-lg border border-border/60 text-muted-foreground transition hover:text-foreground"
+              >
+                <ArrowRightLeft className="h-4 w-4" />
+              </Link>
+            )}
             <Link href="/local" className="rounded-full border border-border px-3 py-2 text-xs">
-              Local CBZ collection
+              Local comics
             </Link>
           </div>
         </div>

@@ -2,7 +2,13 @@ import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 
-vi.mock('axios', () => ({ default: { get: vi.fn() } }));
+vi.mock('axios', () => ({
+  default: {
+    get: vi.fn(),
+    isAxiosError: (error: unknown) =>
+      !!error && typeof error === 'object' && 'isAxiosError' in error,
+  },
+}));
 vi.mock('../src/utils/ssrfGuard.js', () => ({
   assertPublicHttpUrl: vi.fn(async (rawUrl: string) => new URL(rawUrl)),
   isDisallowedRedirectHost: vi.fn(() => false),
@@ -11,7 +17,13 @@ vi.mock('../src/utils/ssrfGuard.js', () => ({
   freshGuardedAgents: vi.fn(() => ({ httpAgent: { fresh: true }, httpsAgent: { fresh: true } })),
 }));
 
+vi.mock('../src/services/sourceBrowserSession.service.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/services/sourceBrowserSession.service.js')>()),
+  imageSessionHeaders: vi.fn(async () => ({})),
+}));
+
 import axios from 'axios';
+import { imageSessionHeaders } from '../src/services/sourceBrowserSession.service.js';
 import { prismaMock } from './mocks/prismaMock.js';
 
 const { default: app } = await import('../src/app.js');
@@ -32,6 +44,31 @@ describe('GET /api/source/image-proxy', () => {
     const calls = vi.mocked(axios.get).mock.calls.slice(-2);
     expect(calls[0][1]).not.toHaveProperty('httpsAgent.fresh');
     expect(calls[1][1]).toHaveProperty('httpsAgent.fresh', true);
+  });
+
+  it("sends the source's saved browser session with its images", async () => {
+    const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
+    vi.mocked(imageSessionHeaders).mockResolvedValueOnce({
+      Cookie: 'cf_clearance=abc',
+      'User-Agent': 'Firefox UA',
+    });
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      data: Readable.from([png]),
+    });
+
+    const response = await request(app)
+      .get('/api/source/image-proxy')
+      .query({ url: 'https://manhuaus.com/cover.png', source_id: 'ManhuaUS' });
+
+    expect(response.status).toBe(200);
+    const [source, url] = vi.mocked(imageSessionHeaders).mock.calls.at(-1)!;
+    expect(source).toBe('manhuaus');
+    expect(String(url)).toBe('https://manhuaus.com/cover.png');
+    const sent = vi.mocked(axios.get).mock.calls.at(-1)![1] as { headers: Record<string, string> };
+    expect(sent.headers.Cookie).toBe('cf_clearance=abc');
+    expect(sent.headers['User-Agent']).toBe('Firefox UA');
   });
 
   it('presents the installed source site as the Referer on the retry', async () => {
@@ -65,6 +102,42 @@ describe('GET /api/source/image-proxy', () => {
     expect(response.status).toBe(502);
     expect(response.headers['content-type']).toBe('image/png');
     expect(response.headers['x-proxy-error']).toBe('The source did not return a supported image');
+  });
+
+  it('answers 404 for an image the source deleted, and does not ask again', async () => {
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      status: 404,
+      headers: {},
+      data: Readable.from(['not found']),
+    });
+    const url = 'https://cdn.example/deleted-cover.jpg';
+
+    const first = await request(app).get('/api/source/image-proxy').query({ url });
+    expect(first.status).toBe(404);
+    const calls = vi.mocked(axios.get).mock.calls.length;
+
+    const second = await request(app).get('/api/source/image-proxy').query({ url });
+    expect(second.status).toBe(404);
+    expect(vi.mocked(axios.get).mock.calls.length).toBe(calls);
+  });
+
+  it('answers 502 when the image host refuses the connection, without calling it a database error', async () => {
+    vi.mocked(axios.get).mockRejectedValueOnce(
+      Object.assign(new Error('write EPROTO handshake failure'), {
+        isAxiosError: true,
+        code: 'EPROTO',
+      }),
+    );
+    const url = 'https://tls-broken.example/cover.jpg';
+
+    const first = await request(app).get('/api/source/image-proxy').query({ url });
+    expect(first.status).toBe(502);
+    expect(first.body.message).toBe('The image host could not be reached');
+    const calls = vi.mocked(axios.get).mock.calls.length;
+
+    const second = await request(app).get('/api/source/image-proxy').query({ url });
+    expect(second.status).toBe(502);
+    expect(vi.mocked(axios.get).mock.calls.length).toBe(calls);
   });
 
   it('streams a verified raster image with a fixed safe content type', async () => {

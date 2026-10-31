@@ -155,48 +155,63 @@ export function InstalledSourceCard({
     websiteUrl(record?.homepage) ??
     (source.id.startsWith('mangadex') ? 'https://mangadex.org/' : websiteUrl(source.base_url));
   return (
-    <article className="rounded-2xl border border-border/60 bg-surface/40 p-4 transition hover:border-primary/30">
-      <div className="flex items-start gap-3">
+    <article className="flex flex-col rounded-2xl border border-border/60 bg-surface/40 p-3 transition hover:border-primary/30">
+      <div className="mb-3 flex items-start gap-3">
         <SourceAvatar name={source.name} accent={source.accent} iconUrl={record?.icon_url} />
         <div className="min-w-0 flex-1">
           <h2 className="truncate font-semibold">{source.name}</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span>
-              {displayLanguage === 'all'
-                ? languageName(source.lang)
-                : (languages.find((language) => language.value === displayLanguage)?.label ??
-                  languageName(source.lang))}
-            </span>
+          {/* Language and version always share the first line; status badges get their own
+              row, so where they land doesn't depend on how long the language name is. */}
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {displayLanguage === 'all'
+              ? languageName(source.lang)
+              : (languages.find((language) => language.value === displayLanguage)?.label ??
+                languageName(source.lang))}
             <span className="tabular-nums">
+              {' · '}
               {record ? `v${record.version}` : 'Version unavailable'}
             </span>
-            {rating === 'nsfw' && <span className="text-destructive">Adult</span>}
-            {rating === 'mixed' && <span className="text-primary">Mixed</span>}
-            {health === 'failing' && (
-              <span
-                className="inline-flex items-center gap-1 text-destructive"
-                title="The last request to this source failed. Settings → About has details."
-              >
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-destructive" />
-                Failing
-              </span>
-            )}
-            {health === 'cooling-down' && (
-              <span
-                className="inline-flex items-center gap-1 text-amber-500"
-                title="This source asked for a pause; requests resume automatically."
-              >
-                <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-500" />
-                Cooling down
-              </span>
-            )}
-            {privateReading && (
-              <span className="inline-flex items-center gap-1 text-primary">
-                <EyeOff size={12} />
-                Incognito
-              </span>
-            )}
-          </div>
+          </p>
+          {(rating === 'nsfw' ||
+            rating === 'mixed' ||
+            health === 'failing' ||
+            health === 'cooling-down' ||
+            privateReading) && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
+              {rating === 'nsfw' && (
+                <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-destructive">
+                  Adult
+                </span>
+              )}
+              {rating === 'mixed' && (
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary">Mixed</span>
+              )}
+              {health === 'failing' && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-destructive"
+                  title="The last request to this source failed. Settings → About has details."
+                >
+                  <span aria-hidden="true" className="size-1.5 rounded-full bg-destructive" />
+                  Failing
+                </span>
+              )}
+              {health === 'cooling-down' && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-500"
+                  title="This source asked for a pause; requests resume automatically."
+                >
+                  <span aria-hidden="true" className="size-1.5 rounded-full bg-amber-500" />
+                  Cooling down
+                </span>
+              )}
+              {privateReading && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary">
+                  <EyeOff size={12} />
+                  Incognito
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <button
           aria-label={`${pinned ? 'Unpin' : 'Pin'} ${source.name}`}
@@ -299,11 +314,12 @@ export function InstalledSourceCard({
         </DropdownMenu>
       </div>
       {installing && (
-        <p role="status" className="mt-3 text-xs text-muted-foreground">
+        <p role="status" className="mb-3 text-xs text-muted-foreground">
           Installing language edition…
         </p>
       )}
-      <div className="mt-5 flex items-center gap-2 border-t border-border/50 pt-3">
+      {/* Pinned to the bottom so cards in one row line up whether or not they show badges. */}
+      <div className="mt-auto flex items-center gap-2 border-t border-border/50 pt-3">
         <Link
           href={`/discover/popular?source=${encodeURIComponent(source.id)}`}
           className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/20"

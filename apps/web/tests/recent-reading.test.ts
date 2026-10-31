@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryEntry } from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
-import { mostRecentlyReadLibraryManga } from '@/lib/recent-reading';
+import { creditLinkedReading, mostRecentlyReadLibraryManga } from '@/lib/recent-reading';
 
 function manga(id: string, source = 'source-a'): Manga {
   return {
@@ -83,5 +83,22 @@ describe('most recently read library title', () => {
         library,
       ),
     ).toEqual(library[0]);
+  });
+});
+
+describe('reading on a linked source', () => {
+  it('is credited to the library entry it is linked under', () => {
+    const history = [
+      { manga_id: 'linked-1', title: 'On the other source' },
+      { manga_id: 'main', title: 'On the main source' },
+      { manga_id: null, title: 'A source preview' },
+    ];
+    expect(
+      creditLinkedReading(history, [{ primary_id: 'main', linked: [{ id: 'linked-1' }] }]),
+    ).toEqual([
+      { manga_id: 'main', title: 'On the other source' },
+      { manga_id: 'main', title: 'On the main source' },
+      { manga_id: null, title: 'A source preview' },
+    ]);
   });
 });

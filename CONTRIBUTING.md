@@ -110,6 +110,13 @@ npm run format:check
 `npm run typecheck` and `npm test` from the root run every workspace. For an end-to-end
 pass, `npm run smoke -- browser` drives the web app against a fixture API.
 
+### Migration tests
+
+`npm run test:migrations --workspace=@projekt-manga/server` replays every committed
+migration, including through the real Prisma CLI, against throwaway SQLite files in the
+OS temp directory. It is not part of `npm test` because it takes minutes on CI; run it
+when you change anything under `prisma/migrations` or `src/configs/migrate.ts`.
+
 ### Integration tests
 
 `npm run test:integration --workspace=@projekt-manga/server` runs against a real SQLite

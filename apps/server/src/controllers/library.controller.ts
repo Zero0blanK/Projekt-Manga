@@ -12,6 +12,15 @@ const getLibraryState = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
+const getReleaseEstimates = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const estimates = await libraryService.getReleaseEstimates(req.user?.id);
+    return HTTPSuccessResponse(res, 200, 'Release estimates retrieved successfully', estimates);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const updateLibraryState = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { manga_id } = req.params as { manga_id: string };
@@ -26,6 +35,7 @@ const updateLibraryState = async (req: Request, res: Response, next: NextFunctio
 
 const libraryController = {
   getLibraryState,
+  getReleaseEstimates,
   updateLibraryState,
 };
 

@@ -12,12 +12,14 @@ import {
   markChapterByLastPage,
   markChapterAsRead,
   addHistory,
+  getAllDownloads,
   hasLocalDataBridge,
   type MangaChapterRecord,
 } from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
 import {
   useReaderSettings,
+  ReaderColorFilterContext,
   SCROLL_SPEED_MIN,
   SCROLL_SPEED_MAX,
   SCROLL_SPEED_STEP,
@@ -44,15 +46,39 @@ import {
   selectChapterRelease,
 } from '@/lib/reader-preferences';
 import { ReaderPersonalTools } from '@/components/reader/reader-personal-tools';
+import { ReaderTintOverlay } from '@/components/reader/reader-tint';
+import { afterChapterRead, downloadAhead } from '@/lib/auto-downloads';
+import { markDuplicatesRead } from '@/lib/chapter-gaps';
 import { isSourceIncognito, useSourceIncognito } from '@/lib/incognito';
 import { useAutoAdvanceCountdown } from '@/lib/auto-advance';
+import { useReaderZoom, ZOOM_MAX, ZOOM_MIN } from '@/lib/reader-zoom';
+import {
+  SKIP_DUPLICATE_CHAPTERS,
+  SKIP_READ_CHAPTERS,
+  adjacentChapter,
+  adjacentRelease,
+  releaseStops,
+} from '@/lib/chapter-skip';
+import {
+  DEFAULT_CHAPTER_FILTER,
+  SKIP_FILTERED_CHAPTERS,
+  chapterFilterKey,
+  isFilterActive,
+  parseChapterFilter,
+  releasePassesFilter,
+} from '@/lib/chapter-filter';
+import { useChapterBookmarks } from '@/lib/chapter-bookmarks';
+import { toast } from '@/hooks/use-toast';
+import { useSetting } from '@/lib/app-store';
+import { useReaderInput } from '@/components/reader/use-reader-input';
+import { ReaderShortcuts } from '@/components/reader/reader-shortcuts';
+import { WebtoonSuggestion } from '@/components/reader/webtoon-suggestion';
+import { setPageAsCover } from '@/components/reader/set-page-as-cover';
+import { LinkedSourceFallback } from '@/components/reader/linked-source-fallback';
+import { ReaderContextMenu } from '@/components/reader/reader-context-menu';
 
 /** How long the reader chrome stays up after the last thing the reader did. */
 const CHROME_IDLE_MS = 2200;
-
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 2.5;
-const ZOOM_STEP = 0.25;
 
 function positiveIntParam(searchParams: URLSearchParams, key: string): number | undefined {
   const raw = Number(searchParams.get(key));
@@ -65,7 +91,10 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   const router = useRouter();
   const requestedChapter = parseChapterParam(searchParams.get('ch')) ?? manga.currentChapter ?? 1;
   const requestedPage = positiveIntParam(searchParams, 'page');
-  const requestedChapterId = searchParams.get('chapterId');
+  // A release is named by row id (`chapterId`), or by the source's key (`chapterKey`) when
+  // the link came from a source listing, which has no row ids.
+  const requestedRowId = searchParams.get('chapterId');
+  const requestedChapterKey = searchParams.get('chapterKey');
   const [queue, setQueue] = useReadingQueue();
   const { manga: library } = useMangaLibrary();
   const queuedIds = queue.filter((id) => id !== manga.id);
@@ -98,11 +127,20 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     autoScroll: autoScrollOnOpen,
     autoScrollSpeed,
     autoScrollPixelsPerSecond,
+    colorFilter,
+    tint,
+    tintStrength,
   } = useReaderSettings(manga.source, manga.id);
 
   useWakeLock(keepScreenAwake);
 
   const [chapters, setChapters] = useState<MangaChapterRecord[]>([]);
+  const requestedChapterId =
+    requestedRowId ??
+    (requestedChapterKey
+      ? (chapters.find((record) => record.source_chapter_key === requestedChapterKey)?.id ??
+        requestedChapterKey)
+      : null);
   const [chaptersLoaded, setChaptersLoaded] = useState(false);
   const [chaptersError, setChaptersError] = useState(false);
   const [chaptersRetry, setChaptersRetry] = useState(0);
@@ -119,7 +157,8 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     urls: string[];
   } | null>(null);
   const [page, setPage] = useState(requestedPage ?? 1);
-  const [zoom, setZoom] = useState(1);
+  const { zoom, setZoom, zoomIn, zoomOut, zoomReset } = useReaderZoom();
+  const [looksLikeWebtoon, setLooksLikeWebtoon] = useState(false);
   // Seeded from the setting, then toggled for the session by the "F" key. The initial
   // useState value is the *pre-hydration* default (the store only reads localStorage in an
   // effect), so it has to be re-synced once the real setting arrives — otherwise turning
@@ -156,10 +195,57 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     () => [...new Set(chapters.map((c) => c.chapter_number))].sort((a, b) => a - b),
     [chapters],
   );
+  // Settings › Reader › Skip read chapters / Skip filtered chapters. A release is passed
+  // over when it is read, or when the title's chapter-list filter hides it; a chapter
+  // number is passed over when every release of it is.
+  const skipRead = useSetting(SKIP_READ_CHAPTERS, false) as boolean;
+  const skipFiltered = useSetting(SKIP_FILTERED_CHAPTERS, false) as boolean;
+  const skipDuplicates = useSetting(SKIP_DUPLICATE_CHAPTERS, false) as boolean;
+  const [listFilter] = useProfilePreference(
+    chapterFilterKey(manga.id),
+    parseChapterFilter,
+    DEFAULT_CHAPTER_FILTER,
+  );
+  const filtering = skipFiltered && isFilterActive(listFilter);
+  const bookmarkTargets = useMemo(
+    () => chapters.map((c) => ({ id: c.source_chapter_key, is_bookmark: c.is_bookmark })),
+    [chapters],
+  );
+  const { isBookmarked, toggle: toggleChapterBookmark } = useChapterBookmarks(bookmarkTargets);
+  // Only fetched when the filter is "Downloaded", the one filter that needs it.
+  const [downloadedIds, setDownloadedIds] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (!filtering || listFilter.status !== 'Downloaded') return;
+    let live = true;
+    getAllDownloads()
+      .then((all) => {
+        if (live)
+          setDownloadedIds(
+            new Set(
+              all.filter((d) => d.status === 'COMPLETED' && d.chapter_id).map((d) => d.chapter_id),
+            ),
+          );
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [filtering, listFilter.status, manga.id]);
+  const skipRelease = (record: MangaChapterRecord) =>
+    (skipRead && record.is_read) ||
+    (filtering &&
+      !releasePassesFilter(record, listFilter, { downloaded: downloadedIds, isBookmarked }));
+  const releasesByNumber = useMemo(() => {
+    const map = new Map<number, MangaChapterRecord[]>();
+    for (const c of chapters) map.set(c.chapter_number, [...(map.get(c.chapter_number) ?? []), c]);
+    return map;
+  }, [chapters]);
+  const skipChapter = (n: number) =>
+    (skipRead || filtering) && (releasesByNumber.get(n) ?? []).every(skipRelease);
   const nextChapterAfter = (n: number): number | null =>
-    sortedChapterNumbers.find((c) => c > n) ?? null;
+    adjacentChapter(sortedChapterNumbers, n, 1, skipChapter);
   const prevChapterBefore = (n: number): number | null =>
-    [...sortedChapterNumbers].reverse().find((c) => c < n) ?? null;
+    adjacentChapter(sortedChapterNumbers, n, -1, skipChapter);
 
   const maxChapter = chapters.reduce((max, c) => Math.max(max, c.chapter_number), 0);
   const currentRecord = chapterByNumber.get(chapter);
@@ -233,8 +319,9 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
    */
   const fetchPages = async (chapterNumber: number): Promise<string[]> => {
     const record = chapterByNumber.get(chapterNumber);
-    if (!record) return [];
-
+    return record ? fetchReleasePages(record) : [];
+  };
+  const fetchReleasePages = async (record: MangaChapterRecord): Promise<string[]> => {
     try {
       const offline = await getDownloadedChapterPages(record.id);
       if (offline.length > 0) {
@@ -247,7 +334,9 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
       // Not downloaded, or the stored files went missing — read it from the source.
     }
 
-    const result = await getSourceChapterPages(manga.source, record.id, { mangaSlug: manga.slug });
+    const result = await getSourceChapterPages(manga.source, record.source_chapter_key, {
+      mangaSlug: manga.slug,
+    });
     return result.items
       .sort((a, b) => a.index - b.index)
       .map((p) => (p.image_url ? buildImageProxyUrl(p.image_url, manga.source) : ''))
@@ -356,10 +445,6 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     effectiveLayout,
     chapters,
   ]);
-
-  const zoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, Math.round((z + ZOOM_STEP) * 100) / 100));
-  const zoomOut = () => setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - ZOOM_STEP) * 100) / 100));
-  const zoomReset = () => setZoom(1);
 
   /**
    * Set while the reader is scrolling down, so the inactivity timer below does not
@@ -521,51 +606,13 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     };
   }, [immersive, longStrip, revealChrome]);
 
-  // Reader shortcuts: arrows/space page through (paged layouts only — long strip scrolls
-  // natively), "f" toggles immersive chrome, "+"/"=" zoom in, "-" out, "0" resets zoom.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      // Leave browser shortcuts (Ctrl +/-/0 zoom, Ctrl+F find) alone.
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const el = e.target instanceof Element ? e.target : null;
-      // Buttons and links are not excluded: none of these keys activate them, and a
-      // control the reader just clicked keeps focus, which would otherwise kill the shortcuts.
-      if (
-        document.querySelector('[role="dialog"]') ||
-        el?.closest('input,textarea,select,[contenteditable="true"],[role="menu"]')
-      )
-        return;
-      if (e.key === '+' || e.key === '=') {
-        e.preventDefault();
-        zoomIn();
-      } else if (e.key === '-' || e.key === '_') {
-        e.preventDefault();
-        zoomOut();
-      } else if (e.key === '0') {
-        e.preventDefault();
-        zoomReset();
-      } else if (e.key.toLowerCase() === 'f') {
-        e.preventDefault();
-        setImmersive((v) => !v);
-      } else if (e.key.toLowerCase() === 'a' && longStripRef.current) {
-        // Only where there is something to scroll — in a paged layout "a" would toggle a
-        // control the reader cannot see and nothing would happen.
-        e.preventDefault();
-        setAutoScrolling((v) => !v);
-      }
-      // Arrow/space paging is handled inside PagedViewer itself (it owns the scroll
-      // container that IntersectionObserver tracks position from).
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
   /* ----------------------------------------------------- progress persistence */
 
   // Latest position worth saving, kept in a ref so the flush paths (debounce timer,
   // unmount, tab close) always send the newest value rather than a stale closure's.
+  // Progress writes name the chapter by the source's key, like every chapter write.
   const pendingProgress = useRef<{
-    chapterId: string;
+    sourceChapterKey: string;
     page: number;
     pageCount: number;
   } | null>(null);
@@ -593,7 +640,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
         flushTimer.current = null;
       }
 
-      const path = `/chapter/${encodeURIComponent(manga.slug)}/${encodeURIComponent(pending.chapterId)}/${pending.page}/mark-by-page`;
+      const path = `/chapter/${encodeURIComponent(manga.slug)}/${encodeURIComponent(pending.sourceChapterKey)}/${pending.page}/mark-by-page`;
       const body = { page_count: pending.pageCount, source: manga.source };
       // Time since the last flush, not a running total — the server adds it to what it
       // already has. Reading it here means it's taken exactly once per flush.
@@ -602,7 +649,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
         manga_id: manga.id,
         manga_slug: manga.slug,
         title: manga.title,
-        chapter_id: pending.chapterId,
+        source_chapter_key: pending.sourceChapterKey,
         pages_read: pending.page,
         time_read: takeElapsed(),
       };
@@ -625,7 +672,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
           return;
         }
         if (queued?.historyQueued) {
-          markChapterByLastPage(manga.slug, pending.chapterId, pending.page, body)
+          markChapterByLastPage(manga.slug, pending.sourceChapterKey, pending.page, body)
             .then(invalidateSavedReadingProgress)
             .catch((error) => reportError(error, "Your reading progress isn't being saved."));
           return;
@@ -638,7 +685,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
       saveQueue.current = saveQueue.current.then(async () => {
         if (isSourceIncognito(manga.source)) return;
         await Promise.all([
-          markChapterByLastPage(manga.slug, pending.chapterId, pending.page, body)
+          markChapterByLastPage(manga.slug, pending.sourceChapterKey, pending.page, body)
             .then(invalidateSavedReadingProgress)
             .catch((error) => reportError(error, "Your reading progress isn't being saved.")),
           addHistory(history).catch((error) =>
@@ -670,7 +717,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     if (incognito || !record || knownTotal === 0 || !imageReady || invalidChapterId) return;
 
     pendingProgress.current = {
-      chapterId: record.id,
+      sourceChapterKey: record.source_chapter_key,
       page: Math.min(page, knownTotal),
       pageCount: knownTotal,
     };
@@ -707,6 +754,18 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     };
   }, [flushProgress]);
 
+  // Settings > Sync & Storage > Download ahead: keep the next chapters downloaded while
+  // reading. Once per chapter opened, and never in incognito.
+  const downloadAheadFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (incognito || chapters.length === 0 || downloadAheadFor.current === chapter) return;
+    downloadAheadFor.current = chapter;
+    void downloadAhead(manga, chapter, sortedChapterNumbers, (number) =>
+      chapterByNumber.get(number),
+    ).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per chapter, not per render
+  }, [chapter, chapters.length, incognito]);
+
   // Finishing the last page marks the chapter read, without the reader having to do it
   // by hand. Only fires on a real, known page total and only once per chapter.
   useEffect(() => {
@@ -716,20 +775,36 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     if (record.is_read || autoReadSent.current.has(record.id)) return;
 
     autoReadSent.current.add(record.id);
-    markChapterAsRead(manga.slug, record.id, { page_count: knownTotal, source: manga.source })
+    markChapterAsRead(manga.slug, record.source_chapter_key, {
+      page_count: knownTotal,
+      source: manga.source,
+    })
       .then(() => {
         invalidateSavedReadingProgress();
         // Reflect it locally so the header/chapter list update without a refetch.
         setChapters((prev) => prev.map((c) => (c.id === record.id ? { ...c, is_read: true } : c)));
+        // Settings > Sync & Storage > Delete after reading. Best effort, never blocks reading.
+        void afterChapterRead(manga, record.chapter_number, sortedChapterNumbers, (number) =>
+          chapterByNumber.get(number),
+        ).catch(() => undefined);
+        // Settings > Reader > Mark duplicates read. Best effort, like the line above.
+        void markDuplicatesRead(manga, chapters, record.chapter_number, record.id)
+          .then((marked) => {
+            if (marked.length === 0) return;
+            const ids = new Set(marked);
+            setChapters((prev) => prev.map((c) => (ids.has(c.id) ? { ...c, is_read: true } : c)));
+          })
+          .catch(() => undefined);
       })
       .catch(() => autoReadSent.current.delete(record.id));
   }, [
     chapter,
     page,
     knownTotal,
+    chapters,
     chapterByNumber,
-    manga.slug,
-    manga.source,
+    sortedChapterNumbers,
+    manga,
     imageReady,
     invalidChapterId,
     incognito,
@@ -740,12 +815,14 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   /** Moves to another chapter, keeping the URL (chapter + page) in sync without a full
    * route reload — the page is encoded too so the URL-driven effect above lands on the
    * same page we set directly, instead of resetting it back to 1. */
-  const goToChapter = (target: number, atPage: number) => {
+  const goToChapter = (target: number, atPage: number, releaseId?: string) => {
     if (!Number.isFinite(target) || target < 0 || !chapterByNumber.has(target)) return;
     flushProgress();
     setChapter(target);
     setPage(atPage);
-    const record = selectChapterRelease(chapters, target, preferredGroup);
+    const record =
+      (releaseId && chapters.find((c) => c.id === releaseId)) ||
+      selectChapterRelease(chapters, target, preferredGroup);
     router.replace(
       `/reader/${manga.id}?ch=${target}&page=${atPage}${record ? `&chapterId=${encodeURIComponent(record.id)}` : ''}`,
     );
@@ -753,8 +830,19 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
 
   const pagesPerView = effectiveLayout === 'Single page' ? 1 : 2;
 
-  const nextChapter = nextChapterAfter(chapter);
-  const prevChapter = prevChapterBefore(chapter);
+  // Settings › Reader › Skip duplicate chapters, off: each group's release of a chapter is
+  // its own stop, so next and previous move between releases rather than numbers.
+  const stops = useMemo(
+    () => (skipDuplicates ? [] : releaseStops(chapters, preferredGroup, currentRecord?.id)),
+    [skipDuplicates, chapters, preferredGroup, currentRecord?.id],
+  );
+  const byRelease = !skipDuplicates && !!currentRecord;
+  const nextRelease = byRelease ? adjacentRelease(stops, currentRecord, 1, skipRelease) : null;
+  const prevRelease = byRelease ? adjacentRelease(stops, currentRecord, -1, skipRelease) : null;
+  const nextChapter = byRelease ? (nextRelease?.chapter_number ?? null) : nextChapterAfter(chapter);
+  const prevChapter = byRelease
+    ? (prevRelease?.chapter_number ?? null)
+    : prevChapterBefore(chapter);
   const hasNextChapter = nextChapter !== null;
   const hasPrevChapter = prevChapter !== null;
   // Opening a library title that sits on no shelf files it under Reading, so the library
@@ -778,22 +866,102 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
       effectiveLayout !== 'Long strip',
     currentRecord?.id,
     () => {
-      if (nextChapter !== null) goToChapter(nextChapter, 1);
+      if (nextChapter !== null) goToChapter(nextChapter, 1, nextRelease?.id);
     },
   );
 
   /** Reaching the end/start of the chapter's own page strip only ever surfaces an
    * explicit "continue" panel (see PagedViewer) — it never jumps chapters on its own. */
   const requestNextChapter = () => {
-    if (nextChapter !== null) goToChapter(nextChapter, 1);
+    if (nextChapter !== null) goToChapter(nextChapter, 1, nextRelease?.id);
   };
   const requestPrevChapter = () => {
     if (prevChapter === null) return;
-    goToChapter(prevChapter, chapterByNumber.get(prevChapter)?.page_count || 1);
+    goToChapter(
+      prevChapter,
+      (prevRelease ?? chapterByNumber.get(prevChapter))?.page_count || 1,
+      prevRelease?.id,
+    );
   };
+
+  /** The chapter list's bookmark, kept by the source's key, so both show the same. */
+  const toggleCurrentBookmark = () => {
+    if (!currentRecord) return;
+    const key = currentRecord.source_chapter_key;
+    const next = !isBookmarked(key);
+    toggleChapterBookmark(key);
+    toast({ description: next ? `Bookmarked ${title}` : `Removed the bookmark from ${title}` });
+  };
+
+  // Settings › Reader › Keyboard. Page turning belongs to the viewers, which own the
+  // scroll position; the chapter list to the header.
+  useReaderInput({
+    zoomIn,
+    zoomOut,
+    zoomReset,
+    toggleControls: () => setImmersive((v) => !v),
+    // Only where there is something to scroll — in a paged layout the key would toggle
+    // a control the reader cannot see.
+    autoScroll: () => {
+      if (!longStripRef.current) return false;
+      setAutoScrolling((v) => !v);
+    },
+    nextChapter: () => {
+      if (nextChapter === null) return false;
+      requestNextChapter();
+    },
+    bookmarkChapter: () => {
+      if (!currentRecord) return false;
+      toggleCurrentBookmark();
+    },
+    prevChapter: () => {
+      if (prevChapter === null) return false;
+      requestPrevChapter();
+    },
+  });
 
   // Long strip streams chapter-to-chapter itself; only sync the URL when the chapter
   // it's currently showing actually changes, so page-only scroll doesn't spam history.
+  // Long strip with "Skip duplicate chapters" off: the strip runs through the same stops as
+  // next/previous in the paged reader, each group's release in turn. Its segments are
+  // numbered by position in `stops` (stable: `keep` only swaps which release of one
+  // chapter-and-group stands for it), and translated back to releases here.
+  const stopIndexOf = (record: MangaChapterRecord | undefined) => {
+    if (!record) return -1;
+    const exact = stops.findIndex((stop) => stop.id === record.id);
+    if (exact !== -1) return exact;
+    const next = adjacentRelease(stops, record, 1);
+    const previous = adjacentRelease(stops, record, -1);
+    return stops.indexOf(
+      stops.find(
+        (stop) =>
+          stop.chapter_number === record.chapter_number &&
+          (stop.scanlator ?? '') === (record.scanlator ?? ''),
+      ) ??
+        next ??
+        previous ??
+        stops[0],
+    );
+  };
+  const stripStop = (index: number) => stops[index];
+  const nextStopAfter = (index: number): number | null => {
+    const stop = stripStop(index);
+    const next = stop ? adjacentRelease(stops, stop, 1, skipRelease) : null;
+    return next ? stops.indexOf(next) : null;
+  };
+  const handleStripRelease = (index: number, streamPage: number, streamTotal: number) => {
+    const record = stripStop(index);
+    if (!record) return;
+    if (record.id !== currentRecord?.id) {
+      setChapter(record.chapter_number);
+      router.replace(
+        `/reader/${manga.id}?ch=${record.chapter_number}&page=${streamPage}&chapterId=${encodeURIComponent(record.id)}`,
+      );
+    }
+    setPage(streamPage);
+    if (streamTotal > 0) setObservedTotal({ chapter: record.chapter_number, total: streamTotal });
+  };
+
   const handleStreamPosition = (streamChapter: number, streamPage: number, streamTotal: number) => {
     if (streamChapter !== chapter) {
       setChapter(streamChapter);
@@ -880,221 +1048,291 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background }}>
-      {/* Settings > Reader > Brightness. Sits above the pages at z-20; the header,
+    <ReaderColorFilterContext.Provider value={colorFilter}>
+      <div className="fixed inset-0 z-50 flex flex-col" style={{ background }}>
+        {/* Settings > Reader > Brightness. Sits above the pages at z-20; the header,
           progress bar, page counter and paging arrows are all z-30, so the controls stay
           legible however far the brightness is turned down. */}
-      {brightness < 100 && (
+        {brightness < 100 && (
+          <div
+            aria-hidden
+            className="pointer-events-none fixed inset-0 z-20 bg-black"
+            style={{ opacity: (100 - brightness) / 100 }}
+          />
+        )}
+        <ReaderTintOverlay tint={tint} strength={tintStrength} />
+        <ReaderShortcuts />
+        {/* Linked sources: this chapter won't load, or the title has no next chapter here. */}
+        <LinkedSourceFallback
+          mangaId={manga.id}
+          chapterNumber={chapter}
+          need={
+            pagesError
+              ? 'same'
+              : chaptersLoaded && nextChapter === null && page >= totalPages
+                ? 'next'
+                : null
+          }
+        />
+        <WebtoonSuggestion
+          source={manga.source}
+          mangaId={manga.id}
+          visible={looksLikeWebtoon && effectiveLayout !== 'Long strip'}
+          base={{
+            zoomBehavior,
+            brightness,
+            stripGap,
+            pagePrefetchAhead,
+            chapterPrefetchCount,
+            colorFilter,
+            tint,
+            tintStrength,
+          }}
+        />
+        {/* Always present for screen readers, even while the reader chrome is hidden. */}
+        <h1 className="sr-only">
+          {manga.title}, Chapter {chapter}
+        </h1>
         <div
-          aria-hidden
-          className="pointer-events-none fixed inset-0 z-20 bg-black"
-          style={{ opacity: (100 - brightness) / 100 }}
-        />
-      )}
-      {/* Always present for screen readers, even while the reader chrome is hidden. */}
-      <h1 className="sr-only">
-        {manga.title}, Chapter {chapter}
-      </h1>
-      <div
-        {...chromeInteraction}
-        inert={chromeHidden}
-        aria-hidden={chromeHidden || undefined}
-        className={immersive ? `${chromeWrap} top-0` : chromeShown ? 'relative z-30' : 'hidden'}
-      >
-        <ReaderHeader
-          manga={manga}
-          chapters={chapters}
+          {...chromeInteraction}
+          inert={chromeHidden}
+          aria-hidden={chromeHidden || undefined}
+          className={immersive ? `${chromeWrap} top-0` : chromeShown ? 'relative z-30' : 'hidden'}
+        >
+          <ReaderHeader
+            manga={manga}
+            chapters={chapters}
+            chapter={chapter}
+            chapterId={currentRecord?.id}
+            title={incognito ? `Incognito · ${title}` : title}
+            zoom={zoom}
+            zoomMin={ZOOM_MIN}
+            zoomMax={ZOOM_MAX}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+            onZoomReset={zoomReset}
+            page={page}
+            pageImageUrl={pageUrls[page - 1]}
+            bookmarked={currentRecord ? isBookmarked(currentRecord.source_chapter_key) : false}
+            onToggleBookmark={currentRecord ? toggleCurrentBookmark : undefined}
+          />
+          <div className="flex flex-wrap items-center justify-center gap-2 bg-black/80 px-3 py-1 text-xs text-white">
+            {longStrip && (
+              <ReaderSpeedSlider
+                label="Scroll"
+                settingKey="readerScrollSpeed"
+                value={scrollSpeed}
+                min={SCROLL_SPEED_MIN}
+                max={SCROLL_SPEED_MAX}
+                step={SCROLL_SPEED_STEP}
+                format={formatScrollSpeed}
+              />
+            )}
+            {longStrip && (
+              <button
+                type="button"
+                onClick={() => setAutoScrolling((v) => !v)}
+                aria-pressed={autoScrolling}
+                // The label says what pressing it does, which is what a screen reader reads
+                // out; aria-pressed carries the current state separately.
+                aria-label={autoScrolling ? 'Stop auto-scrolling' : 'Start auto-scrolling'}
+                title="Auto-scroll (A)"
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition ${
+                  autoScrolling
+                    ? 'border-primary/60 bg-primary/20 text-primary'
+                    : 'border-white/20 text-white/70 hover:border-white/40 hover:text-white'
+                }`}
+              >
+                {autoScrolling ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                Auto-scroll
+              </button>
+            )}
+            {/* Only while it is running: a speed control for something that is not moving
+              has nothing to show for being dragged. */}
+            {longStrip && autoScrolling && (
+              <ReaderSpeedSlider
+                label="Speed"
+                settingKey="readerAutoScrollSpeed"
+                value={autoScrollSpeed}
+                min={1}
+                max={AUTO_SCROLL_PIXELS_PER_SECOND.length}
+                step={1}
+                format={(value) => `${value}×`}
+              />
+            )}
+            <label>
+              Translation group{' '}
+              <select
+                aria-label="Translation group"
+                value={currentRecord?.id ?? ''}
+                onChange={(event) => {
+                  const record = chapters.find((item) => item.id === event.target.value);
+                  if (!record) return;
+                  flushProgress();
+                  setPreferredGroup(record.scanlator ?? '');
+                  setPagesData(null);
+                  router.replace(
+                    `/reader/${manga.id}?ch=${record.chapter_number}&page=1&chapterId=${encodeURIComponent(record.id)}`,
+                  );
+                }}
+                className="rounded border border-white/20 bg-black p-1"
+              >
+                {chapters
+                  .filter((record) => record.chapter_number === chapter)
+                  .map((record) => (
+                    <option key={record.id} value={record.id}>
+                      {record.scanlator || 'Unknown group'}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {preferredGroup && currentRecord && currentRecord.scanlator !== preferredGroup && (
+              <span role="status">
+                {preferredGroup} has no release here; using{' '}
+                {currentRecord.scanlator || 'an available group'}.
+              </span>
+            )}
+            <ReaderPersonalTools
+              source={manga.source}
+              mangaId={manga.id}
+              chapterId={currentRecord?.id}
+              page={page}
+            />
+          </div>
+        </div>
+
+        <ReaderContextMenu
+          pageUrls={pageUrls}
+          page={page}
+          mangaTitle={manga.title}
           chapter={chapter}
-          chapterId={currentRecord?.id}
-          title={incognito ? `Incognito · ${title}` : title}
-          zoom={zoom}
-          zoomMin={ZOOM_MIN}
-          zoomMax={ZOOM_MAX}
-          onZoomIn={zoomIn}
-          onZoomOut={zoomOut}
-          onZoomReset={zoomReset}
-        />
-        <div className="flex flex-wrap items-center justify-center gap-2 bg-black/80 px-3 py-1 text-xs text-white">
-          {longStrip && (
-            <ReaderSpeedSlider
-              label="Scroll"
-              settingKey="readerScrollSpeed"
-              value={scrollSpeed}
-              min={SCROLL_SPEED_MIN}
-              max={SCROLL_SPEED_MAX}
-              step={SCROLL_SPEED_STEP}
-              format={formatScrollSpeed}
+          onSetCover={(url) => void setPageAsCover(manga.id, url)}
+        >
+          {effectiveLayout === 'Long strip' ? (
+            <LongStripViewer
+              key={`${manga.id}:${preferredGroup}:${byRelease ? 'releases' : 'numbers'}`}
+              manga={manga}
+              ready={chapters.length > 0 && !invalidChapterId}
+              startPage={page}
+              {...(byRelease
+                ? {
+                    startChapter: Math.max(0, stopIndexOf(currentRecord)),
+                    getNextChapter: nextStopAfter,
+                    getChapterLabel: (i: number) => {
+                      const stop = stripStop(i);
+                      return stop
+                        ? `Chapter ${stop.chapter_number}${stop.scanlator ? ` · ${stop.scanlator}` : ''}`
+                        : '';
+                    },
+                    getChapterTitle: (i: number) => stripStop(i)?.name ?? '',
+                    getChapterPageCount: (i: number) => stripStop(i)?.page_count ?? 0,
+                    fetchPages: (i: number) => {
+                      const stop = stripStop(i);
+                      return stop ? fetchReleasePages(stop) : Promise.resolve([]);
+                    },
+                    onPositionChange: handleStripRelease,
+                    onPageReady: (i: number, p: number) => {
+                      const stop = stripStop(i);
+                      if (stop) onPageReady(stop.chapter_number, p);
+                    },
+                    getChapterIdentity: (i: number) => stripStop(i)?.id ?? '',
+                  }
+                : {
+                    startChapter: chapter,
+                    getNextChapter: nextChapterAfter,
+                    getChapterTitle: (n: number) => chapterByNumber.get(n)?.name ?? `Chapter ${n}`,
+                    getChapterPageCount: (n: number) => chapterByNumber.get(n)?.page_count ?? 0,
+                    fetchPages,
+                    onPositionChange: handleStreamPosition,
+                    onPageReady,
+                    getChapterIdentity: (n: number) => chapterByNumber.get(n)?.id ?? '',
+                  })}
+              zoom={zoom}
+              pageGap={stripGap}
+              autoAdvance={autoAdvance}
+              completionActions={completionActions}
+              releaseVersion={requestedChapterId}
+              onScrollDirection={onScrollDirection}
+              scrollSpeed={scrollSpeed}
+              autoScrollPixelsPerSecond={autoScrolling ? autoScrollPixelsPerSecond : 0}
+            />
+          ) : (
+            <PagedViewer
+              key={currentRecord?.id ?? chapter}
+              manga={manga}
+              page={page}
+              totalPages={totalPages}
+              pageUrls={pageUrls}
+              pagesPerView={pagesPerView}
+              readingDirection={readingDirection}
+              onPositionChange={setPage}
+              hasNextChapter={hasNextChapter}
+              nextChapterNumber={nextChapter ?? 0}
+              onRequestNextChapter={requestNextChapter}
+              hasPrevChapter={hasPrevChapter}
+              prevChapterNumber={prevChapter ?? 0}
+              onRequestPrevChapter={requestPrevChapter}
+              zoom={zoom}
+              onZoomChange={setZoom}
+              offsetFirstPage={offsetFirstPage}
+              onPageReady={(p) => onPageReady(chapter, p)}
+              tapActions={tapActions}
+              onToggleControls={() => setChromeShown((value) => !value)}
+              completionActions={completionActions}
+              fitOverride={zoomBehavior}
+              autoAdvanceSecondsLeft={autoAdvanceCountdown.secondsLeft}
+              onCancelAutoAdvance={autoAdvanceCountdown.cancel}
+              onLooksLikeWebtoon={() => setLooksLikeWebtoon(true)}
             />
           )}
-          {longStrip && (
+        </ReaderContextMenu>
+
+        {chaptersError && (
+          <div
+            role="alert"
+            className="fixed inset-x-4 top-20 z-40 mx-auto max-w-md rounded-xl border border-destructive/40 bg-black/90 p-4 text-center text-sm text-white"
+          >
+            Couldn&apos;t load the chapter list.
             <button
               type="button"
-              onClick={() => setAutoScrolling((v) => !v)}
-              aria-pressed={autoScrolling}
-              // The label says what pressing it does, which is what a screen reader reads
-              // out; aria-pressed carries the current state separately.
-              aria-label={autoScrolling ? 'Stop auto-scrolling' : 'Start auto-scrolling'}
-              title="Auto-scroll (A)"
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition ${
-                autoScrolling
-                  ? 'border-primary/60 bg-primary/20 text-primary'
-                  : 'border-white/20 text-white/70 hover:border-white/40 hover:text-white'
-              }`}
+              onClick={() => setChaptersRetry((value) => value + 1)}
+              className="ml-2 text-primary hover:underline"
             >
-              {autoScrolling ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-              Auto-scroll
+              Try again
             </button>
-          )}
-          {/* Only while it is running: a speed control for something that is not moving
-              has nothing to show for being dragged. */}
-          {longStrip && autoScrolling && (
-            <ReaderSpeedSlider
-              label="Speed"
-              settingKey="readerAutoScrollSpeed"
-              value={autoScrollSpeed}
-              min={1}
-              max={AUTO_SCROLL_PIXELS_PER_SECOND.length}
-              step={1}
-              format={(value) => `${value}×`}
-            />
-          )}
-          <label>
-            Translation group{' '}
-            <select
-              aria-label="Translation group"
-              value={currentRecord?.id ?? ''}
-              onChange={(event) => {
-                const record = chapters.find((item) => item.id === event.target.value);
-                if (!record) return;
-                flushProgress();
-                setPreferredGroup(record.scanlator ?? '');
-                setPagesData(null);
-                router.replace(
-                  `/reader/${manga.id}?ch=${record.chapter_number}&page=1&chapterId=${encodeURIComponent(record.id)}`,
-                );
-              }}
-              className="rounded border border-white/20 bg-black p-1"
+          </div>
+        )}
+        {pagesError && effectiveLayout !== 'Long strip' && (
+          <div
+            role="alert"
+            className="fixed inset-x-4 top-20 z-40 mx-auto max-w-md rounded-xl border border-destructive/40 bg-black/90 p-4 text-center text-sm text-white"
+          >
+            Couldn&apos;t load this chapter&apos;s pages.
+            <button
+              type="button"
+              onClick={() => setPagesRetry((value) => value + 1)}
+              className="ml-2 text-primary hover:underline"
             >
-              {chapters
-                .filter((record) => record.chapter_number === chapter)
-                .map((record) => (
-                  <option key={record.id} value={record.id}>
-                    {record.scanlator || 'Unknown group'}
-                  </option>
-                ))}
-            </select>
-          </label>
-          {preferredGroup && currentRecord && currentRecord.scanlator !== preferredGroup && (
-            <span role="status">
-              {preferredGroup} has no release here; using{' '}
-              {currentRecord.scanlator || 'an available group'}.
-            </span>
-          )}
-          <ReaderPersonalTools
-            source={manga.source}
-            mangaId={manga.id}
-            chapterId={currentRecord?.id}
-            page={page}
-          />
+              Try again
+            </button>
+          </div>
+        )}
+
+        {showPageNumber && (
+          <div className="pointer-events-none fixed bottom-16 right-5 z-30 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium tabular-nums text-white/80 backdrop-blur">
+            {page} / {totalPages}
+          </div>
+        )}
+
+        <div
+          {...chromeInteraction}
+          inert={chromeHidden}
+          aria-hidden={chromeHidden || undefined}
+          className={immersive ? `${chromeWrap} bottom-0` : 'relative z-30'}
+        >
+          <ReaderProgressBar page={page} totalPages={totalPages} onSeek={goToPage} />
         </div>
       </div>
-
-      {effectiveLayout === 'Long strip' ? (
-        <LongStripViewer
-          key={`${manga.id}:${preferredGroup}`}
-          manga={manga}
-          ready={chapters.length > 0 && !invalidChapterId}
-          startChapter={chapter}
-          startPage={page}
-          getNextChapter={nextChapterAfter}
-          getChapterTitle={(n) => chapterByNumber.get(n)?.name ?? `Chapter ${n}`}
-          getChapterPageCount={(n) => chapterByNumber.get(n)?.page_count ?? 0}
-          fetchPages={fetchPages}
-          onPositionChange={handleStreamPosition}
-          zoom={zoom}
-          pageGap={stripGap}
-          autoAdvance={autoAdvance}
-          onPageReady={onPageReady}
-          completionActions={completionActions}
-          getChapterIdentity={(number) => chapterByNumber.get(number)?.id ?? ''}
-          releaseVersion={requestedChapterId}
-          onScrollDirection={onScrollDirection}
-          scrollSpeed={scrollSpeed}
-          autoScrollPixelsPerSecond={autoScrolling ? autoScrollPixelsPerSecond : 0}
-        />
-      ) : (
-        <PagedViewer
-          key={currentRecord?.id ?? chapter}
-          manga={manga}
-          page={page}
-          totalPages={totalPages}
-          pageUrls={pageUrls}
-          pagesPerView={pagesPerView}
-          readingDirection={readingDirection}
-          onPositionChange={setPage}
-          hasNextChapter={hasNextChapter}
-          nextChapterNumber={nextChapter ?? 0}
-          onRequestNextChapter={requestNextChapter}
-          hasPrevChapter={hasPrevChapter}
-          prevChapterNumber={prevChapter ?? 0}
-          onRequestPrevChapter={requestPrevChapter}
-          zoom={zoom}
-          offsetFirstPage={offsetFirstPage}
-          onPageReady={(p) => onPageReady(chapter, p)}
-          tapActions={tapActions}
-          onToggleControls={() => setChromeShown((value) => !value)}
-          completionActions={completionActions}
-          fitOverride={zoomBehavior}
-          autoAdvanceSecondsLeft={autoAdvanceCountdown.secondsLeft}
-          onCancelAutoAdvance={autoAdvanceCountdown.cancel}
-        />
-      )}
-
-      {chaptersError && (
-        <div
-          role="alert"
-          className="fixed inset-x-4 top-20 z-40 mx-auto max-w-md rounded-xl border border-destructive/40 bg-black/90 p-4 text-center text-sm text-white"
-        >
-          Couldn&apos;t load the chapter list.
-          <button
-            type="button"
-            onClick={() => setChaptersRetry((value) => value + 1)}
-            className="ml-2 text-primary hover:underline"
-          >
-            Try again
-          </button>
-        </div>
-      )}
-      {pagesError && effectiveLayout !== 'Long strip' && (
-        <div
-          role="alert"
-          className="fixed inset-x-4 top-20 z-40 mx-auto max-w-md rounded-xl border border-destructive/40 bg-black/90 p-4 text-center text-sm text-white"
-        >
-          Couldn&apos;t load this chapter&apos;s pages.
-          <button
-            type="button"
-            onClick={() => setPagesRetry((value) => value + 1)}
-            className="ml-2 text-primary hover:underline"
-          >
-            Try again
-          </button>
-        </div>
-      )}
-
-      {showPageNumber && (
-        <div className="pointer-events-none fixed bottom-16 right-5 z-30 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium tabular-nums text-white/80 backdrop-blur">
-          {page} / {totalPages}
-        </div>
-      )}
-
-      <div
-        {...chromeInteraction}
-        inert={chromeHidden}
-        aria-hidden={chromeHidden || undefined}
-        className={immersive ? `${chromeWrap} bottom-0` : 'relative z-30'}
-      >
-        <ReaderProgressBar page={page} totalPages={totalPages} onSeek={goToPage} />
-      </div>
-    </div>
+    </ReaderColorFilterContext.Provider>
   );
 }

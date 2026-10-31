@@ -1,0 +1,40 @@
+{
+  "_note": "Shaped after Bangumi's documented v0 API responses (bangumi.github.io/api); trimmed, not a live capture.",
+  "token": {
+    "access_token": "bgm-access",
+    "expires_in": 604800,
+    "token_type": "Bearer",
+    "scope": null,
+    "refresh_token": "bgm-refresh",
+    "user_id": 99
+  },
+  "me": { "id": 99, "username": "reader", "nickname": "Reader" },
+  "search": {
+    "total": 2,
+    "limit": 10,
+    "offset": 0,
+    "data": [
+      {
+        "id": 8000,
+        "type": 1,
+        "name": "ベルセルク",
+        "name_cn": "剑风传奇",
+        "images": {
+          "small": "https://lain.bgm.tv/pic/cover/s/8000.jpg",
+          "common": "https://lain.bgm.tv/pic/cover/c/8000.jpg"
+        }
+      },
+      { "id": 8001, "type": 1, "name": "No CN Title", "name_cn": "", "images": null }
+    ]
+  },
+  "collection": {
+    "subject_id": 8000,
+    "subject_type": 1,
+    "type": 3,
+    "rate": 8,
+    "ep_status": 57,
+    "vol_status": 5,
+    "private": false,
+    "updated_at": "2026-08-20T10:00:00+08:00"
+  }
+}

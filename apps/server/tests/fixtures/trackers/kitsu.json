@@ -1,0 +1,52 @@
+{
+  "_note": "Shaped after Kitsu's documented JSON:API responses (kitsu.app/api/edge); trimmed, not a live capture.",
+  "token": {
+    "access_token": "kitsu-access",
+    "token_type": "bearer",
+    "expires_in": 2592000,
+    "refresh_token": "kitsu-refresh",
+    "scope": "public",
+    "created_at": 1730000000
+  },
+  "self": { "data": [{ "id": "123456", "type": "users", "attributes": { "name": "reader" } }] },
+  "search": {
+    "data": [
+      {
+        "id": "38",
+        "type": "manga",
+        "attributes": {
+          "canonicalTitle": "Berserk",
+          "titles": { "en": "Berserk", "en_jp": "Berserk", "ja_jp": "ベルセルク" },
+          "posterImage": {
+            "tiny": "https://media.kitsu.app/manga/poster_images/38/tiny.jpg",
+            "small": "https://media.kitsu.app/manga/poster_images/38/small.jpg"
+          }
+        }
+      },
+      {
+        "id": "1",
+        "type": "manga",
+        "attributes": {
+          "canonicalTitle": "Shingeki no Kyojin",
+          "titles": { "en": "", "en_jp": "Shingeki no Kyojin" },
+          "posterImage": null
+        }
+      }
+    ]
+  },
+  "entry": {
+    "data": [
+      {
+        "id": "9001",
+        "type": "libraryEntries",
+        "attributes": {
+          "status": "current",
+          "progress": 42,
+          "ratingTwenty": 17,
+          "updatedAt": "2026-10-01T12:00:00.000Z"
+        }
+      }
+    ]
+  },
+  "emptyEntry": { "data": [] }
+}

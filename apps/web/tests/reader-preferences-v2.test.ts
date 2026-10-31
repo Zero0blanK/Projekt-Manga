@@ -59,4 +59,22 @@ describe('local reader preference validation', () => {
     expect(parseReaderPresets([{ ...preset, pagePrefetchAhead: 1000 }])).toEqual([]);
     expect(parseReaderPresets([{ ...preset, pageLayout: 'unsupported' }])).toEqual([]);
   });
+  it('keeps presets saved before colour filters, and checks the filter when present', () => {
+    const preset = {
+      name: 'Night',
+      pageLayout: 'Long strip',
+      readingDirection: 'Vertical (webtoon)',
+      zoomBehavior: 'Fit width',
+      brightness: 60,
+      stripGap: 0,
+      pagePrefetchAhead: 4,
+      chapterPrefetchCount: 1,
+    };
+    expect(parseReaderPresets([{ ...preset, colorFilter: 'Sepia' }])).toHaveLength(1);
+    expect(parseReaderPresets([preset])).toHaveLength(1);
+    expect(parseReaderPresets([{ ...preset, colorFilter: 'blur(9px)' }])).toEqual([]);
+    expect(parseReaderPresets([{ ...preset, tint: 'Warm', tintStrength: 30 }])).toHaveLength(1);
+    expect(parseReaderPresets([{ ...preset, tint: 'url(x)' }])).toEqual([]);
+    expect(parseReaderPresets([{ ...preset, tint: 'Warm', tintStrength: 95 }])).toEqual([]);
+  });
 });

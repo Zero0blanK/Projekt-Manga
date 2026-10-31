@@ -7,10 +7,10 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react';
-import { setMangaInLibrary, type PublicUser } from '@projekt-manga/api-client';
+import type { PublicUser } from '@projekt-manga/api-client';
 import { MoreVertical, X, Bookmark, Folder, Trash2, BookOpen } from 'lucide-react';
 import { actions, getAppState, useAppState } from '@/lib/app-store';
-import { libraryActions, useLibraryState } from '@/lib/library-store';
+import { libraryActions, setTitleInLibrary, useLibraryState } from '@/lib/library-store';
 import type { Manga } from '@/lib/manga-data';
 import { useCurrentUser } from '@/lib/session-resource';
 import { queryClient, queryKeys } from '@/lib/query-client';
@@ -115,7 +115,8 @@ export function LibrarySelectionBar({
       while (cursor < ids.length && current()) {
         const id = ids[cursor++];
         try {
-          if (operation === 'remove') await setMangaInLibrary(id, false);
+          // Each removal leaves the list at once; one refresh at the end below.
+          if (operation === 'remove') await setTitleInLibrary(id, false, { refresh: false });
           else if (operation === 'bookmark' || operation === 'unbookmark')
             await libraryActions.setBookmark(id, operation === 'bookmark');
           else if (operation === 'category') {

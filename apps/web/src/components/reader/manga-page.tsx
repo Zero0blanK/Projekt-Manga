@@ -1,6 +1,20 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useSetting } from '@/lib/app-store';
+import { usePageColorFilter } from '@/lib/reader-settings';
+import {
+  FULL_VIEW,
+  READER_CROP_BORDERS,
+  colorFilterStyle,
+  halfOf,
+  isFullView,
+  measureContentBounds,
+  type ViewRect,
+} from '@/lib/page-image';
 import { cn } from '@/lib/utils';
+import { measurePanels } from '@/lib/panel-detect';
+import { READER_ENHANCE, enhancedPageUrl, shouldEnhance } from '@/lib/enhance';
+import { fitFontSize, usePageTranslation } from '@/lib/page-translation';
 import type { Manga } from '@/lib/manga-data';
 
 export function MangaPage({
@@ -14,6 +28,13 @@ export function MangaPage({
    * tall single pages to wide double-page spreads. "fixed" means className sets both. */
   fit = 'height',
   seamless = false,
+  half,
+  rotate = false,
+  focus,
+  panelsRtl,
+  onPanels,
+  cropAxis = 'both',
+  onNaturalSize,
   onReady,
 }: {
   manga: Manga;
@@ -25,23 +46,98 @@ export function MangaPage({
   fit?: 'width' | 'height' | 'fixed';
   /** Webtoon-style: no rounded corners or border, so adjacent pages butt together. */
   seamless?: boolean;
+  /** Show only this half of the image: one side of a split double page. */
+  half?: 'left' | 'right';
+  /** Turn the page a quarter clockwise: a double page shown upright on a tall screen. */
+  rotate?: boolean;
+  /** Which margins "Crop borders" may remove. The long strip keeps top and bottom, which
+   * are the gaps between panels. */
+  cropAxis?: 'both' | 'horizontal';
+  /** Guided view: show only this panel (fractions of the page) instead of the page. */
+  focus?: ViewRect | null;
+  /** Guided view: find the page's panels once it loads, in this reading direction. */
+  panelsRtl?: boolean;
+  onPanels?: (panels: ViewRect[]) => void;
+  /** The image's real size once it loads, for spotting double pages. */
+  onNaturalSize?: (width: number, height: number) => void;
   onReady?: () => void;
 }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const colorFilter = usePageColorFilter();
+  const cropBorders = useSetting(READER_CROP_BORDERS, false) as boolean;
+  const enhance = useSetting(READER_ENHANCE, false) as boolean;
+  // The enhanced copy of a low-resolution page, once made (lib/enhance.ts).
+  const [enhancedSrc, setEnhancedSrc] = useState<string | null>(null);
+  const pageKey = useRef('');
+  pageKey.current = `${manga.id}:${pageNumber}:${imageUrl}`;
+  // Reading pixels needs a CORS-approved image. Should the server not allow this origin,
+  // the image is loaded again the ordinary way and shown uncropped instead of failing.
+  const [corsRefused, setCorsRefused] = useState(false);
+  // Guided view reads pixels too, to find panels.
+  const readPixels = (cropBorders || !!onPanels || enhance) && !corsRefused && fit !== 'fixed';
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const [content, setContent] = useState<ViewRect>(FULL_VIEW);
+  const translation = usePageTranslation(imageUrl);
 
   useEffect(() => {
     setLoaded(false);
     setFailed(false);
     setAttempt(0);
+    setCorsRefused(false);
+    setNatural(null);
+    setContent(FULL_VIEW);
+    setEnhancedSrc(null);
   }, [manga.id, pageNumber, imageUrl]);
+  useEffect(() => {
+    if (!enhance) setEnhancedSrc(null);
+  }, [enhance]);
 
   if (!imageUrl) {
     return (
       <Skeleton className={cn('aspect-2/3 bg-white/10', !seamless && 'rounded-lg', className)} />
     );
   }
+
+  // A turned page isn't cropped or halved: it is shown whole, on its side.
+  const turned = rotate && natural && fit !== 'fixed';
+  const view =
+    natural && fit !== 'fixed' && !turned
+      ? (focus ?? (half ? halfOf(content, half) : content))
+      : FULL_VIEW;
+  const viewed = !isFullView(view) && natural;
+  // A cropped or halved page: the wrapper takes the visible part's shape and clips, and
+  // the image is scaled and shifted so only that part shows through.
+  // Turned: the box takes the turned page's (portrait) shape, and the image, sized to the
+  // box's height, is centred and rotated into it.
+  const wrapperStyle: CSSProperties | undefined = turned
+    ? { aspectRatio: `${natural.height} / ${natural.width}` }
+    : viewed
+      ? { aspectRatio: `${view.w * natural.width} / ${view.h * natural.height}` }
+      : undefined;
+  const imgStyle: CSSProperties = {
+    filter: colorFilterStyle(colorFilter),
+    ...(turned && {
+      position: 'absolute',
+      left: '50%',
+      top: '50%',
+      width: `${(natural.width / natural.height) * 100}%`,
+      height: 'auto',
+      maxWidth: 'none',
+      maxHeight: 'none',
+      transform: 'translate(-50%, -50%) rotate(90deg)',
+    }),
+    ...(viewed && {
+      position: 'absolute',
+      width: `${100 / view.w}%`,
+      height: `${100 / view.h}%`,
+      maxWidth: 'none',
+      maxHeight: 'none',
+      left: `${(-view.x / view.w) * 100}%`,
+      top: `${(-view.y / view.h) * 100}%`,
+    }),
+  };
 
   const imgSizeClass =
     fit === 'fixed'
@@ -63,6 +159,11 @@ export function MangaPage({
         seamless ? '' : 'rounded-lg border border-white/5',
         className,
       )}
+      style={wrapperStyle}
+      data-page={pageNumber}
+      data-image-url={imageUrl}
+      data-enhanced={enhancedSrc ? 'true' : undefined}
+      data-translated={translation?.status === 'done' && translation.shown ? 'true' : undefined}
     >
       {!loaded && !failed && (
         <Skeleton className={cn('absolute inset-0 bg-white/10', !seamless && 'rounded-lg')} />
@@ -88,21 +189,96 @@ export function MangaPage({
       )}
       {/* eslint-disable-next-line @next/next/no-img-element -- arbitrary external hosts via the server's image proxy */}
       <img
-        key={attempt}
-        src={imageUrl}
+        key={`${attempt}:${readPixels}`}
+        src={enhancedSrc ?? imageUrl}
+        crossOrigin={readPixels ? 'use-credentials' : undefined}
         alt={`${manga.title} — page ${pageNumber} of ${totalPages}`}
-        onLoad={() => {
+        onLoad={(event) => {
+          const img = event.currentTarget;
+          setNatural({ width: img.naturalWidth, height: img.naturalHeight });
+          onNaturalSize?.(img.naturalWidth, img.naturalHeight);
+          setContent(
+            readPixels && cropBorders
+              ? measureContentBounds(img, cropAxis === 'horizontal')
+              : FULL_VIEW,
+          );
+          if (onPanels) onPanels(readPixels ? measurePanels(img, panelsRtl ?? true) : []);
+          // A page smaller than it's shown gets the enhanced copy once it's ready; the
+          // copy's own load lands here too, and is left alone.
+          if (
+            enhance &&
+            readPixels &&
+            !enhancedSrc &&
+            shouldEnhance(
+              img.naturalWidth,
+              img.naturalHeight,
+              img.parentElement?.getBoundingClientRect().width ?? 0,
+              window.devicePixelRatio || 1,
+            )
+          ) {
+            const key = pageKey.current;
+            void enhancedPageUrl(img).then((url) => {
+              if (url && pageKey.current === key) setEnhancedSrc(url);
+            });
+          }
           setLoaded(true);
           setFailed(false);
           onReady?.();
         }}
         onError={() => {
+          if (readPixels) {
+            setCorsRefused(true);
+            return;
+          }
           setFailed(true);
           setLoaded(false);
         }}
         loading={seamless ? 'lazy' : 'eager'}
-        className={cn(imgSizeClass, 'object-contain')}
+        className={cn(viewed || turned ? '' : imgSizeClass, 'object-contain')}
+        style={imgStyle}
       />
+      {/* Translate page: each translation over the text it replaces, in page fractions
+          mapped through the visible part. A turned page shows the original. */}
+      {translation?.status === 'done' && translation.shown && natural && !turned && (
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ containerType: 'inline-size' }}
+          aria-label={`Translation of page ${pageNumber}`}
+        >
+          {translation.regions.map((region, index) => {
+            const size = fitFontSize(
+              region.text,
+              region.w / view.w,
+              region.h / view.h,
+              (view.h * natural.height) / (view.w * natural.width),
+            );
+            return (
+              <p
+                key={index}
+                lang={translation.target}
+                className="absolute flex items-center justify-center overflow-hidden rounded-[0.4em] bg-white/95 text-center leading-tight font-medium text-black"
+                style={{
+                  left: `${((region.x - view.x) / view.w) * 100}%`,
+                  top: `${((region.y - view.y) / view.h) * 100}%`,
+                  width: `${(region.w / view.w) * 100}%`,
+                  height: `${(region.h / view.h) * 100}%`,
+                  fontSize: `${size * 100}cqw`,
+                }}
+              >
+                {region.text}
+              </p>
+            );
+          })}
+        </div>
+      )}
+      {translation?.status === 'working' && (
+        <div
+          role="status"
+          className="absolute top-2 left-1/2 z-10 -translate-x-1/2 rounded-full bg-black/80 px-3 py-1 text-xs text-white"
+        >
+          Translating page {pageNumber}…
+        </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,21 @@
+{
+  "_note": "Shaped after Kavita's documented API responses (/api/Plugin, /api/Search, /api/Series, /api/Tachiyomi); trimmed, not a live capture.",
+  "authenticate": {
+    "username": "reader",
+    "email": "reader@example.com",
+    "token": "kavita-jwt",
+    "refreshToken": "kavita-refresh",
+    "apiKey": "redacted"
+  },
+  "search": {
+    "series": [
+      { "seriesId": 17, "name": "Berserk", "localizedName": "", "libraryId": 1 },
+      { "seriesId": 18, "name": "Vagabond", "localizedName": "バガボンド", "libraryId": 1 }
+    ],
+    "collections": [],
+    "readingLists": []
+  },
+  "series": { "id": 17, "name": "Berserk", "pages": 4000, "pagesRead": 1200 },
+  "seriesDone": { "id": 17, "name": "Berserk", "pages": 4000, "pagesRead": 4000 },
+  "latestChapter": { "id": 501, "minNumber": 120.5, "number": "120.5", "range": "120.5" }
+}

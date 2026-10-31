@@ -1,0 +1,40 @@
+{
+  "_note": "Shaped after MangaUpdates' documented v1 API responses (api.mangaupdates.com/v1); trimmed, not a live capture.",
+  "login": {
+    "status": "success",
+    "reason": "Successfully logged in",
+    "context": { "session_token": "mu-session", "uid": 777 }
+  },
+  "search": {
+    "total_hits": 2,
+    "page": 1,
+    "per_page": 10,
+    "results": [
+      {
+        "record": {
+          "series_id": 55099564912,
+          "title": "Berserk",
+          "image": {
+            "url": {
+              "original": "https://cdn.mangaupdates.com/image/i1.jpg",
+              "thumb": "https://cdn.mangaupdates.com/image/thumb/i1.jpg"
+            }
+          }
+        },
+        "hit_title": "Berserk"
+      },
+      {
+        "record": { "series_id": 12345, "title": "No Cover", "image": { "url": null } },
+        "hit_title": "No Cover"
+      }
+    ]
+  },
+  "listEntry": {
+    "series": { "id": 55099564912, "title": "Berserk" },
+    "list_id": 4,
+    "status": { "volume": 3, "chapter": 120 },
+    "priority": 0,
+    "time_added": { "timestamp": 1700000000 }
+  },
+  "rating": { "rating": 8.5 }
+}

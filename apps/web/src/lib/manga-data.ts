@@ -2,6 +2,7 @@ import {
   buildApiUrl,
   buildImageProxyUrl,
   type MangaListItem,
+  type MangaOverride,
   type MangaWithDetails,
   type SourceSummary,
 } from '@projekt-manga/api-client';
@@ -49,6 +50,15 @@ export type Manga = {
   rating: number | null;
   /** API-served cover image URL, or null when the source didn't provide one. */
   thumbnailUrl: string | null;
+  /** The stored values the edit dialog starts from, with this reader's edits applied.
+   * Only the detail endpoint carries them, so listing rows and source previews omit it. */
+  editable?: {
+    title: string;
+    author: string;
+    description: string;
+    status: string;
+    override: MangaOverride | null;
+  };
   /** In the user's library. False for source-backed rows that exist only so a preview,
    * download or read has something to attach to. */
   inLibrary: boolean;
@@ -65,7 +75,15 @@ function proxiedThumbnail(
   source: string,
   mangaId?: string,
   cacheHash?: string | null,
+  override?: MangaOverride | null,
 ): string | null {
+  // A custom cover is served from the same endpoint; versioned by the edit so a new upload
+  // is never hidden behind the browser's cached copy of the old one.
+  if (mangaId && override?.has_cover) {
+    return buildApiUrl(`/cache/thumbnail/${encodeURIComponent(mangaId)}`, {
+      v: `custom-${override.updated_at}`,
+    });
+  }
   if (!url || !/^https?:\/\//i.test(url)) return null;
   if (mangaId)
     return buildApiUrl(
@@ -178,6 +196,7 @@ export function fromMangaListItem(item: MangaListItem): Manga {
       item.source,
       item.id,
       item.cache?.sha256_url,
+      item.override,
     ),
     inLibrary: true,
   };
@@ -246,8 +265,16 @@ export function fromMangaDetails(item: MangaWithDetails): Manga {
       item.source,
       item.id,
       item.cache?.sha256_url,
+      item.override,
     ),
     inLibrary: item.in_library ?? true,
+    editable: {
+      title: item.title,
+      author: item.author,
+      description: item.description,
+      status: item.status,
+      override: item.override ?? null,
+    },
   };
 }
 

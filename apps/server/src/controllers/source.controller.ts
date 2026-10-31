@@ -4,6 +4,9 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { HTTPErrorResponse, HTTPSuccessResponse } from '../utils/responseHandlers.js';
 import sourceService from '../services/source.service.js';
+import sourceBrowserSessionService, {
+  imageSessionHeaders,
+} from '../services/sourceBrowserSession.service.js';
 import { getSourceHealthSnapshot } from '../services/sourceHealth.service.js';
 import type { FilterValue } from '@projekt-manga/types';
 import type {
@@ -14,6 +17,8 @@ import type {
   FetchMangaUpdatesBody,
   SourceCatalogueQuery,
   SourceSearchPageQuery,
+  SourceBrowserSessionBody,
+  SourceUrlKeysBody,
 } from '@projekt-manga/schemas';
 import { createImageRequestHeaders, hasImageReferer } from '../utils/userAgent.js';
 import extensionRepository from '../repositories/extensionRepository.repository.js';
@@ -48,6 +53,32 @@ function parseContentLength(value: unknown): number | null {
 // Not 429: that is an explicit "slow down" with its own Retry-After, passed on below.
 const RETRYABLE_UPSTREAM_STATUSES = new Set([403, 503]);
 const UPSTREAM_RETRY_DELAY_MS = 300;
+/** Images the source answered 404/410 for, by URL → when the answer expires. A cover the
+ * site deleted stays deleted; remembering that spares the site the browser's retries. */
+const missingImages = new Map<string, number>();
+const MISSING_IMAGE_TTL_MS = 60 * 60 * 1000;
+/** An image host that could not be reached at all (refused TLS, DNS, reset) is asked
+ * again after this, rather than on every retry of every cover it serves. */
+const UNREACHABLE_IMAGE_TTL_MS = 10 * 60 * 1000;
+const MISSING_IMAGE_LIMIT = 2000;
+function rememberMissingImage(url: string) {
+  missingImages.delete(url);
+  missingImages.set(url, Date.now() + MISSING_IMAGE_TTL_MS);
+  // Oldest first: a Map iterates in insertion order.
+  while (missingImages.size > MISSING_IMAGE_LIMIT)
+    missingImages.delete(missingImages.keys().next().value!);
+}
+function isKnownMissingImage(url: string) {
+  const expires = missingImages.get(url);
+  if (expires === undefined) return false;
+  if (expires > Date.now()) return true;
+  missingImages.delete(url);
+  return false;
+}
+const MISSING_IMAGE_MESSAGE = 'The source no longer has this image';
+const UNREACHABLE_IMAGE_MESSAGE = 'The image host could not be reached';
+/** Image URL → when an "unreachable" answer expires. */
+const unreachableImages = new Map<string, number>();
 /** Concurrent image requests allowed per upstream host. */
 const imageProxyLimiter = new HostLimiter(4);
 
@@ -253,6 +284,16 @@ const fetchMangaUpdates = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+const keysFromUrls = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { source_id } = req.params as { source_id: string };
+    const result = await sourceService.keysFromUrls(source_id, req.validated as SourceUrlKeysBody);
+    return HTTPSuccessResponse(res, 200, 'Source keys resolved', result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 const checkLibraryUpdates = async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await sourceService.checkAllLibraryUpdates();
@@ -274,13 +315,25 @@ const proxyImage = async (req: Request, res: Response, next: NextFunction) => {
       return proxyError(req, res, 400, 'Invalid or disallowed url');
     }
 
+    if (isKnownMissingImage(targetUrl)) return proxyError(req, res, 404, MISSING_IMAGE_MESSAGE);
+    const unreachableUntil = unreachableImages.get(targetUrl);
+    if (unreachableUntil !== undefined) {
+      if (unreachableUntil > Date.now())
+        return proxyError(req, res, 502, UNREACHABLE_IMAGE_MESSAGE);
+      unreachableImages.delete(targetUrl);
+    }
+
+    // A source behind Cloudflare serves its images behind the same check: send the
+    // session saved for it, only to its own hosts.
+    const sessionHeaders = sourceId ? await imageSessionHeaders(sourceId, new URL(targetUrl)) : {};
+
     // Held until the image has been streamed out, so the cap covers the whole transfer.
     return await imageProxyLimiter.run(new URL(targetUrl).hostname, async () => {
       const requestUpstream = (fresh: boolean, extraHeaders: Record<string, string> = {}) =>
         axios.get(targetUrl, {
           responseType: 'stream',
           timeout: 30000,
-          headers: createImageRequestHeaders(sourceId, extraHeaders),
+          headers: createImageRequestHeaders(sourceId, { ...extraHeaders, ...sessionHeaders }),
           validateStatus: () => true,
           // Validates the address every hop actually connects to, which beforeRedirect
           // (hostname only) and a pre-flight DNS check (TOCTOU) both miss.
@@ -294,7 +347,18 @@ const proxyImage = async (req: Request, res: Response, next: NextFunction) => {
           },
         });
 
-      let upstream = await requestUpstream(false);
+      let upstream;
+      try {
+        upstream = await requestUpstream(false);
+      } catch (error) {
+        // No HTTP answer at all: the host refused the connection or its TLS handshake.
+        if (!axios.isAxiosError(error) || error.response) throw error;
+        unreachableImages.delete(targetUrl);
+        unreachableImages.set(targetUrl, Date.now() + UNREACHABLE_IMAGE_TTL_MS);
+        while (unreachableImages.size > MISSING_IMAGE_LIMIT)
+          unreachableImages.delete(unreachableImages.keys().next().value!);
+        return proxyError(req, res, 502, UNREACHABLE_IMAGE_MESSAGE);
+      }
       // A CDN that has started refusing the pooled connection keeps refusing it; one retry
       // on a brand-new connection, after a short pause, is usually accepted.
       if (RETRYABLE_UPSTREAM_STATUSES.has(upstream.status)) {
@@ -324,6 +388,10 @@ const proxyImage = async (req: Request, res: Response, next: NextFunction) => {
             429,
             'The image source is temporarily rate-limiting requests',
           );
+        }
+        if (upstream.status === 404 || upstream.status === 410) {
+          rememberMissingImage(targetUrl);
+          return proxyError(req, res, 404, MISSING_IMAGE_MESSAGE);
         }
         return proxyError(req, res, 502, 'The source did not return a supported image');
       }
@@ -411,6 +479,41 @@ const proxyImage = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+const getBrowserSession = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { source_id } = req.params as { source_id: string };
+    const status = await sourceBrowserSessionService.getStatus(source_id);
+    return HTTPSuccessResponse(res, 200, 'Browser session retrieved', status);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Stores the cookies the desktop app's source window earned. The response describes the
+ * stored session but never echoes a cookie. */
+const saveBrowserSession = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { source_id } = req.params as { source_id: string };
+    const status = await sourceBrowserSessionService.saveSession(
+      source_id,
+      req.body as SourceBrowserSessionBody,
+    );
+    return HTTPSuccessResponse(res, 200, 'Browser session saved', status);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const clearBrowserSession = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { source_id } = req.params as { source_id: string };
+    await sourceBrowserSessionService.clearSession(source_id);
+    return HTTPSuccessResponse(res, 200, 'Browser session cleared');
+  } catch (error) {
+    next(error);
+  }
+};
+
 const sourceController = {
   getCapabilities,
   getCataloguePage,
@@ -424,8 +527,12 @@ const sourceController = {
   getChapterPages,
   getFilters,
   fetchMangaUpdates,
+  keysFromUrls,
   checkLibraryUpdates,
   proxyImage,
+  getBrowserSession,
+  saveBrowserSession,
+  clearBrowserSession,
 };
 
 export default sourceController;

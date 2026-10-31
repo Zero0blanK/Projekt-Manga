@@ -18,13 +18,17 @@ import syncRoutes from './routes/sync.route.js';
 import extensionRepositoryRoutes from './routes/extensionRepository.route.js';
 import trackerRoutes from './routes/tracker.route.js';
 import restoreRoutes from './routes/restore.route.js';
+import backupRoutes from './routes/backup.route.js';
+import sourceNetworkRoutes from './routes/sourceNetwork.route.js';
+import notificationChannelRoutes from './routes/notificationChannel.route.js';
+import translateRoutes from './routes/translate.route.js';
 import errorHandler from './middleware/error.middleware.js';
 import captureUserAgent from './middleware/userAgent.middleware.js';
 import { attachUser } from './middleware/auth.middleware.js';
 import { initializeUserAgentRefresh } from './utils/userAgent.js';
 import cors from 'cors';
 import helmet from 'helmet';
-import { RESTORE_UPLOAD_LIMIT_BYTES } from '@projekt-manga/schemas';
+import { MANGA_COVER_MAX_BYTES, RESTORE_UPLOAD_LIMIT_BYTES } from '@projekt-manga/schemas';
 import requestId from './middleware/requestId.middleware.js';
 import rejectCrossSiteWrites from './middleware/crossSite.middleware.js';
 
@@ -58,6 +62,8 @@ app.use(
   cors({
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
     credentials: true,
+    // Lets the page read a file download's name (the CBZ export). Nothing else.
+    exposedHeaders: ['Content-Disposition'],
   }),
 );
 
@@ -68,6 +74,11 @@ app.use(requestId);
 // form bodies is what let any website POST to it (see crossSite.middleware.ts).
 app.use(rejectCrossSiteWrites);
 app.use('/api/restore', express.json({ limit: RESTORE_UPLOAD_LIMIT_BYTES }));
+// A custom cover arrives base64-encoded (4/3 of its size) inside JSON.
+app.use(
+  '/api/manga/:manga_id/override/cover',
+  express.json({ limit: Math.ceil(MANGA_COVER_MAX_BYTES / 3) * 4 + 1024 }),
+);
 app.use(express.json({ limit: '5mb' }));
 // Not a constant: this decides req.ip, which is the auth rate limiter's counting key. See
 // resolveTrustProxy for why the default is `loopback` rather than a hop count.
@@ -94,6 +105,10 @@ app.use('/api/sync', syncRoutes);
 app.use('/api/extensions', extensionRepositoryRoutes);
 app.use('/api/trackers', trackerRoutes);
 app.use('/api/restore', restoreRoutes);
+app.use('/api/backup', backupRoutes);
+app.use('/api/source-network', sourceNetworkRoutes);
+app.use('/api/notification-channels', notificationChannelRoutes);
+app.use('/api/translate', translateRoutes);
 
 app.use(errorHandler);
 

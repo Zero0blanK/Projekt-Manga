@@ -6,7 +6,10 @@ import { getHealth, getApiBaseUrl } from '@projekt-manga/api-client';
 import { Panel, Field, Group } from '@/components/settings/field-controls';
 import { DiagnosticReportButton } from '@/components/settings/diagnostic-report-button';
 import { UpdateControls } from '@/components/settings/update-controls';
-import { StartupBackgroundControl } from '@/components/settings/startup-background-control';
+import {
+  CloseToTrayControl,
+  StartupBackgroundControl,
+} from '@/components/settings/startup-background-control';
 import { SourceHealthPanel } from '@/components/settings/source-health-panel';
 import { CURRENT_RELEASE, RELEASES } from '@/lib/changelog';
 import { formatRelative } from '@/lib/manga-data';
@@ -23,12 +26,12 @@ const RESOURCE_LINKS = [
   },
   {
     label: 'Report a problem',
-    hint: 'Open an issue — the diagnostic report above is the useful thing to paste in',
+    hint: 'Open an issue and paste the diagnostic report',
     href: `${REPOSITORY_URL}/issues/new`,
   },
   {
     label: 'Releases',
-    hint: 'Every published version, and what changed in it',
+    hint: 'Every release and what changed',
     href: `${REPOSITORY_URL}/releases`,
   },
 ];
@@ -132,11 +135,9 @@ export function AboutPanel() {
         {/* Render their own Group/Fields, or nothing outside the desktop app. */}
         <UpdateControls />
         <StartupBackgroundControl />
+        <CloseToTrayControl />
 
-        <Field
-          label="Diagnostics"
-          hint="Versions, installed sources, scraper health and recent logs — with secrets left out"
-        >
+        <Field label="Diagnostics" hint="Versions, sources and logs, with secrets removed">
           <DiagnosticReportButton />
         </Field>
 

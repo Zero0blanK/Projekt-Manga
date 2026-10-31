@@ -52,7 +52,7 @@ describe('POST /api/sync/push', () => {
     const res = await request(app)
       .post('/api/sync/push')
       .set('Cookie', ['pm_session=sess-1'])
-      .send({ chapter_state: [{ chapter_id: 'c-1' }] }); // missing is_read/last_page_read/updated_at
+      .send({ chapter_state: [{ source_chapter_key: 'c-1' }] }); // missing everything else
 
     expect(res.status).toBe(400);
     expect(prismaMock.user_chapter_state.upsert).not.toHaveBeenCalled();

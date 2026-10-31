@@ -4,6 +4,14 @@ import { useState } from 'react';
 import { useProfilePreference } from '@/lib/profile-preferences';
 import { actions } from '@/lib/app-store';
 import { useReaderSettings } from '@/lib/reader-settings';
+import {
+  COLOR_FILTERS,
+  READER_COLOR_FILTER,
+  READER_TINT,
+  READER_TINT_STRENGTH,
+  READER_TINTS,
+  tintOpacity,
+} from '@/lib/page-image';
 import { useCurrentUser } from '@/lib/session-resource';
 import {
   parsePageNotes,
@@ -22,6 +30,13 @@ import {
 
 const EMPTY_PRESETS: ReaderPreset[] = [];
 const EMPTY_NOTES: PageNote[] = [];
+// The settings controls' input and button styles (see components/settings/field-controls),
+// shared by the presets and the page-note dialog.
+const PRESET_INPUT =
+  'mt-1 w-full rounded-lg border border-border/60 bg-background px-3 py-1.5 text-xs text-foreground outline-none focus:border-primary/60';
+const PRESET_BUTTON =
+  'rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50';
+
 export function ReaderPresets({ source, mangaId }: { source?: string; mangaId?: string }) {
   const { user, loading } = useCurrentUser();
   return (
@@ -65,6 +80,13 @@ function ReaderPresetsContent({ source, mangaId }: { source?: string; mangaId?: 
       stripGap: settings.stripGap,
       pagePrefetchAhead: settings.pagePrefetchAhead,
       chapterPrefetchCount: settings.chapterPrefetchCount,
+      // Normalised, because one out-of-range field makes parseReaderPresets drop the whole
+      // list: a hand-edited or stale stored setting must not cost every saved preset.
+      colorFilter: (COLOR_FILTERS as readonly string[]).includes(settings.colorFilter)
+        ? settings.colorFilter
+        : 'None',
+      tint: READER_TINTS.some((tint) => tint.label === settings.tint) ? settings.tint : 'None',
+      tintStrength: Math.round(tintOpacity(settings.tintStrength) * 100),
     };
     setPresets([...presets.filter((item) => item.name !== trimmed), value]);
     setSelected(trimmed);
@@ -80,21 +102,24 @@ function ReaderPresetsContent({ source, mangaId }: { source?: string; mangaId?: 
       stripGap: preset.stripGap,
       pagePrefetchAhead: preset.pagePrefetchAhead,
       chapterPrefetchCount: preset.chapterPrefetchCount,
+      ...(preset.colorFilter !== undefined && { [READER_COLOR_FILTER]: preset.colorFilter }),
+      ...(preset.tint !== undefined && { [READER_TINT]: preset.tint }),
+      ...(preset.tintStrength !== undefined && { [READER_TINT_STRENGTH]: preset.tintStrength }),
     };
     for (const [key, value] of Object.entries(keys)) actions.setSetting(key, value);
   };
   return (
     <div className="space-y-3 text-sm">
-      <p className="text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         Presets stay on this device and are included in settings backups.
       </p>
-      <label className="block">
+      <label className="block text-xs text-muted-foreground">
         Preset name
         <input
           maxLength={60}
           value={name}
           onChange={(event) => setName(event.target.value)}
-          className="mt-1 w-full rounded border bg-background p-2"
+          className={PRESET_INPUT}
         />
       </label>
       <button
@@ -104,16 +129,16 @@ function ReaderPresetsContent({ source, mangaId }: { source?: string; mangaId?: 
           !name.trim() ||
           (presets.length >= 30 && !presets.some((item) => item.name === name.trim()))
         }
-        className="rounded border p-2 disabled:opacity-50"
+        className={PRESET_BUTTON}
       >
         Save current settings
       </button>
-      <label className="block">
+      <label className="block text-xs text-muted-foreground">
         Saved preset
         <select
           value={selected}
           onChange={(event) => setSelected(event.target.value)}
-          className="mt-1 w-full rounded border bg-background p-2"
+          className={PRESET_INPUT}
         >
           <option value="">Choose a preset</option>
           {presets.map((item) => (
@@ -122,12 +147,7 @@ function ReaderPresetsContent({ source, mangaId }: { source?: string; mangaId?: 
         </select>
       </label>
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          disabled={!preset}
-          onClick={applyGlobal}
-          className="rounded border p-2 disabled:opacity-50"
-        >
+        <button type="button" disabled={!preset} onClick={applyGlobal} className={PRESET_BUTTON}>
           Apply globally
         </button>
         {mangaId && (
@@ -135,7 +155,7 @@ function ReaderPresetsContent({ source, mangaId }: { source?: string; mangaId?: 
             type="button"
             disabled={!preset}
             onClick={() => preset && setOverride(preset)}
-            className="rounded border p-2 disabled:opacity-50"
+            className={PRESET_BUTTON}
           >
             Apply to this title
           </button>
@@ -147,12 +167,12 @@ function ReaderPresetsContent({ source, mangaId }: { source?: string; mangaId?: 
             setPresets(presets.filter((item) => item.name !== selected));
             setSelected('');
           }}
-          className="rounded border p-2 disabled:opacity-50"
+          className={PRESET_BUTTON}
         >
           Delete preset
         </button>
         {mangaId && override && (
-          <button type="button" onClick={() => setOverride(null)} className="rounded border p-2">
+          <button type="button" onClick={() => setOverride(null)} className={PRESET_BUTTON}>
             Use global settings for this title
           </button>
         )}
@@ -238,7 +258,7 @@ function ReaderPersonalToolsContent({
       <DialogTrigger asChild>
         <button
           type="button"
-          className="rounded border border-white/20 px-2 py-1 text-xs text-white"
+          className="rounded-lg border border-white/20 px-2 py-1 text-xs text-white"
         >
           Notes & presets
         </button>
@@ -249,14 +269,14 @@ function ReaderPersonalToolsContent({
           Notes and title presets are stored on this device. Notes do not change reading progress.
         </DialogDescription>
         <ReaderPresets source={source} mangaId={mangaId} />
-        <label className="text-sm">
+        <label className="block text-xs text-muted-foreground">
           Note for page {page}
           <textarea
             disabled={!chapterId}
             maxLength={10000}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            className="mt-1 min-h-24 w-full rounded border bg-background p-2"
+            className={`${PRESET_INPUT} min-h-24`}
           />
         </label>
         {existing && <p className="whitespace-pre-wrap break-words text-sm">{existing.text}</p>}
@@ -271,7 +291,7 @@ function ReaderPersonalToolsContent({
                 { source, mangaId, chapterId, page, text: draft.trim() },
               ]);
             }}
-            className="rounded border p-2"
+            className={PRESET_BUTTON}
           >
             Save note
           </button>
@@ -282,11 +302,11 @@ function ReaderPersonalToolsContent({
               setNotes(notes.filter((note) => !matches(note)));
               setDraft('');
             }}
-            className="rounded border p-2"
+            className={PRESET_BUTTON}
           >
             Delete note
           </button>
-          <button type="button" onClick={exportNotes} className="rounded border p-2">
+          <button type="button" onClick={exportNotes} className={PRESET_BUTTON}>
             Export this title&apos;s notes
           </button>
         </div>

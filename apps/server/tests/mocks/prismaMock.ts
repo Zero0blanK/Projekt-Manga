@@ -55,6 +55,9 @@ export interface PrismaMock {
   installed_extension: ModelMock;
   tracker_account: ModelMock;
   tracker_link: ModelMock;
+  manga_override: ModelMock;
+  manga_link: ModelMock;
+  source_browser_session: ModelMock;
   $transaction: ReturnType<typeof vi.fn>;
   /** Used by the readiness probe's `SELECT 1`, and by the startup pragmas. */
   $queryRawUnsafe: ReturnType<typeof vi.fn>;
@@ -84,6 +87,9 @@ export function createPrismaMock(): PrismaMock {
     installed_extension: createModelMock(),
     tracker_account: createModelMock(),
     tracker_link: createModelMock(),
+    manga_override: createModelMock(),
+    manga_link: createModelMock(),
+    source_browser_session: createModelMock(),
   } as PrismaMock;
 
   for (const key of Object.keys(mock) as (keyof PrismaMock)[]) {

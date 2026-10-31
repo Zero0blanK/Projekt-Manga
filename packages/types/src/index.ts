@@ -4,3 +4,5 @@ export * from './history.js';
 export * from './updateLog.js';
 export * from './enums.js';
 export * from './auth.js';
+export * from './backup.js';
+export * from './sourceNetwork.js';

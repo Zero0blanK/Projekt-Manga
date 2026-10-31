@@ -145,13 +145,15 @@ describe('migration source and option interactions', () => {
     expect(order()).toEqual(['Beta', 'Gamma', 'Alpha']);
     expect(apply).not.toHaveBeenCalled();
   });
-  it('reorders from the source name area and suppresses the trailing click', () => {
+  it('carries a row from the source name area, commits on release, and suppresses the trailing click', () => {
     render(<Fixture />);
     fireEvent.pointerDown(within(row('Alpha')).getByText('Alpha'), point(100));
-    hit = row('Gamma');
     fireEvent.pointerMove(selectedList().querySelector('ul')!, point(220));
-    expect(order()).toEqual(['Beta', 'Gamma', 'Alpha']);
+    // Carried, not yet moved: the order only changes when the row is dropped.
+    expect(order()).toEqual(['Alpha', 'Beta', 'Gamma']);
+    expect(row('Alpha').closest('li')!.style.transform).toContain('translateY');
     fireEvent.pointerUp(selectedList().querySelector('ul')!, point(220));
+    expect(order()).toEqual(['Beta', 'Gamma', 'Alpha']);
     fireEvent.click(row('Alpha'), { detail: 1 });
     expect(order()).toEqual(['Beta', 'Gamma', 'Alpha']);
     expect(changed).toHaveBeenCalledTimes(1);
@@ -163,6 +165,7 @@ describe('migration source and option interactions', () => {
     fireEvent.pointerDown(row('Alpha'), point(100));
     fireEvent.pointerMove(selectedList().querySelector('ul')!, point(102));
     fireEvent.pointerUp(selectedList().querySelector('ul')!, point(102));
+    fireEvent.click(row('Alpha'), { detail: 1 });
     expect(order()).toEqual(['Beta', 'Gamma']);
     expect(changed).toHaveBeenCalledTimes(1);
     fireEvent.pointerDown(row('Beta'), point(130));

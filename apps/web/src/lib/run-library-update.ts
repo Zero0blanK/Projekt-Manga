@@ -1,7 +1,12 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
-import { fetchSourceMangaUpdates, triggerCacheSync } from '@projekt-manga/api-client';
+import { autoDownloadNewChapters } from '@/lib/auto-downloads';
+import {
+  fetchSourceMangaUpdates,
+  getAllMangaLinks,
+  triggerCacheSync,
+} from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
 import { invalidateRecentChapters } from '@/lib/notifications-store';
 
@@ -16,6 +21,11 @@ export type LibraryUpdateResult = {
   found: number;
   failed: string[];
   foundBySource: Record<string, number>;
+  /** New chapters per library entry id, so notifications can honour muted categories. */
+  foundByManga: Record<string, number>;
+  /** The titles named in foundByManga, linked sources included (they aren't in the
+   * library list the caller holds). */
+  foundTitles: Record<string, string>;
   failedBySource: Record<string, number>;
   cancelled: boolean;
 };
@@ -75,8 +85,38 @@ export async function runLibraryUpdate(
   }
 }
 
+/**
+ * The linked sources (other sources' copies) of the titles being checked, so chapters only
+ * a linked source has arrive with the update: linked titles are outside the library, so
+ * nothing else would check them. Looked up while the titles themselves are checked; a
+ * failed lookup checks the titles alone.
+ */
+async function linkedSourcesOf(manga: Manga[], signal: AbortSignal): Promise<Manga[]> {
+  let groups: Awaited<ReturnType<typeof getAllMangaLinks>>;
+  try {
+    groups = await getAllMangaLinks(signal);
+  } catch {
+    return [];
+  }
+  const linkedOf = new Map(groups.map((group) => [group.primary_id, group.linked]));
+  const seen = new Set(manga.map((entry) => entry.id));
+  return manga.flatMap((entry) =>
+    (linkedOf.get(entry.id) ?? [])
+      .filter((linked) => !seen.has(linked.id) && seen.add(linked.id))
+      .map(
+        (linked) =>
+          ({
+            id: linked.id,
+            title: linked.title,
+            source: linked.source,
+            slug: linked.slug,
+          }) as Manga,
+      ),
+  );
+}
+
 async function performLibraryUpdate(
-  manga: Manga[],
+  requested: Manga[],
   options: {
     refreshCovers: boolean;
     onProgress?: (progress: LibraryUpdateProgress) => void;
@@ -87,11 +127,23 @@ async function performLibraryUpdate(
   let found = 0;
   const failed: string[] = [];
   const foundBySource: Record<string, number> = {};
+  const foundByManga: Record<string, number> = {};
+  const foundTitles: Record<string, string> = {};
   const failedBySource: Record<string, number> = {};
   const startedSources = new Set<string>();
   let cancelled = false;
+  const manga = [...requested];
+  const linkedPromise = linkedSourcesOf(requested, signal);
+  let linkedAppended = false;
 
-  for (let i = 0; i < manga.length; i++) {
+  for (let i = 0; ; i++) {
+    // Linked titles go last, so the library's own titles start at once.
+    if (i >= manga.length) {
+      if (linkedAppended || signal.aborted) break;
+      linkedAppended = true;
+      manga.push(...(await linkedPromise));
+      if (i >= manga.length) break;
+    }
     if (signal.aborted) {
       cancelled = true;
       break;
@@ -113,8 +165,15 @@ async function performLibraryUpdate(
       if (result.newChapters > 0) {
         found += result.newChapters;
         foundBySource[entry.source] = (foundBySource[entry.source] ?? 0) + result.newChapters;
+        foundByManga[entry.id] = (foundByManga[entry.id] ?? 0) + result.newChapters;
+        foundTitles[entry.id] = entry.title;
         // Make the notification feed reflect each completed source call immediately.
         invalidateRecentChapters();
+      }
+      // Not awaited: queueing downloads must not slow the scan, and a failure to queue
+      // (storage limit, full queue) is not a failed update.
+      if (result.newChapterList?.length) {
+        void autoDownloadNewChapters(entry, result.newChapterList).catch(() => undefined);
       }
       if (result.failed) {
         failed.push(entry.title);
@@ -140,5 +199,5 @@ async function performLibraryUpdate(
   }
 
   if (!cancelled) invalidateRecentChapters();
-  return { found, failed, foundBySource, failedBySource, cancelled };
+  return { found, failed, foundBySource, foundByManga, foundTitles, failedBySource, cancelled };
 }

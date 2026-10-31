@@ -2,6 +2,7 @@ import prisma from '../configs/prisma.config.js';
 import type { MangaHistory } from '@projekt-manga/types';
 import { withBusyRetry } from '../utils/sqliteRetry.js';
 import { DuplicateResourceError } from '../utils/customErrors.js';
+import chapterRepository from './chapter.repository.js';
 
 const getHistory = async (user_id?: string) => {
   const rows = await prisma.history.findMany({
@@ -14,6 +15,7 @@ const getHistory = async (user_id?: string) => {
       chapter: {
         select: {
           id: true,
+          source_chapter_key: true,
           name: true,
           chapter_number: true,
           is_read: true,
@@ -79,6 +81,7 @@ const getHistory = async (user_id?: string) => {
       manga_slug: row.manga_slug,
       source_manga_id: row.source_manga_id ?? undefined,
       chapter_id: row.chapter_id ?? undefined,
+      source_chapter_key: row.chapter?.source_chapter_key ?? undefined,
       pages_read: row.pages_read,
       time_read: row.time_read,
       last_read: row.last_read,
@@ -98,7 +101,18 @@ const getHistory = async (user_id?: string) => {
   });
 };
 
-const addHistory = async (historyData: MangaHistory, user_id?: string) => {
+const addHistory = async (input: MangaHistory, user_id?: string) => {
+  // An older client names the chapter by row id: read on as its key.
+  const legacy = !input.source_chapter_key && input.chapter_id;
+  const historyData = legacy
+    ? {
+        ...input,
+        source_chapter_key:
+          (await chapterRepository.keyOfRow(input.chapter_id!, input.source, input.manga_slug)) ??
+          // Rows from before app-owned ids were keyed by the source's own id.
+          input.chapter_id,
+      }
+    : input;
   let mangaId = historyData.manga_id;
   if (!mangaId && historyData.manga_slug) {
     const manga = await prisma.manga.findUnique({
@@ -107,9 +121,9 @@ const addHistory = async (historyData: MangaHistory, user_id?: string) => {
     });
     mangaId = manga?.id;
   }
-  let chapterId = historyData.chapter_id;
-  if (!chapterId && historyData.manga_slug) {
-    // Falls back to the manga's highest-numbered chapter when the caller gave no chapter id.
+  let chapterId: string | undefined;
+  if (!historyData.source_chapter_key && historyData.manga_slug) {
+    // Falls back to the manga's highest-numbered chapter when the caller named none.
     const chapter = await prisma.chapter.findFirst({
       where: { manga: { source: historyData.source, slug: historyData.manga_slug } },
       orderBy: { chapter_number: 'desc' },
@@ -123,15 +137,20 @@ const addHistory = async (historyData: MangaHistory, user_id?: string) => {
   return withBusyRetry(
     () =>
       prisma.$transaction(async (tx) => {
-        if (chapterId) {
+        if (historyData.source_chapter_key) {
           // Progress and history are sent as separate requests (and as independent
-          // beacons on exit). History can arrive first; stand up the nullable chapter
-          // row so the history write never loses the race to a foreign key constraint.
-          await tx.chapter.upsert({
-            where: { id: chapterId },
-            create: { id: chapterId, url: '', chapter_number: 0 },
-            update: {},
-          });
+          // beacons on exit). History can arrive first; stand up the chapter row so the
+          // history write never loses the race to a foreign key constraint.
+          const chapter = await chapterRepository.resolveChapter(
+            {
+              source: historyData.source,
+              manga_slug: historyData.manga_slug,
+              source_chapter_key: historyData.source_chapter_key,
+            },
+            {},
+            tx,
+          );
+          chapterId = chapter.id;
         }
         const existingHistory = await tx.history.findFirst({
           where: {
@@ -196,6 +215,7 @@ const getHistoryByMangaSlug = async (manga_slug: string, user_id?: string, sourc
       chapter: {
         select: {
           id: true,
+          source_chapter_key: true,
           chapter_number: true,
           name: true,
           is_read: true,
@@ -222,9 +242,10 @@ const softDeleteHistory = async (id: string, user_id: string) => {
   });
 };
 
-/** Pull by server mutation time, not client read time. */
+/** Pull by server mutation time, not client read time. Each row names its chapter by
+ * source key, the way devices push it. */
 const getChangedSince = async (user_id: string, since: Date, limit?: number, afterId?: string) => {
-  return await prisma.history.findMany({
+  const rows = await prisma.history.findMany({
     where: {
       user_id,
       ...(afterId
@@ -238,11 +259,18 @@ const getChangedSince = async (user_id: string, since: Date, limit?: number, aft
     },
     orderBy: [{ sync_updated_at: 'asc' }, { id: 'asc' }],
     ...(limit !== undefined ? { take: limit } : {}),
+    include: { chapter: { select: { source_chapter_key: true } } },
   });
+  return rows.map(({ chapter, ...row }) => ({
+    ...row,
+    source_chapter_key: chapter?.source_chapter_key ?? null,
+  }));
 };
 
 /** Applies one incoming sync row via last-write-wins on last_read, keyed by the client-
- * generated id. A stale push (the server's row is already newer) is discarded. */
+ * generated id. A stale push (the server's row is already newer) is discarded. The row's
+ * chapter is resolved by source key, creating a placeholder for one this server has not
+ * stored yet. */
 const applyIncoming = async (
   user_id: string,
   row: {
@@ -253,7 +281,7 @@ const applyIncoming = async (
     source_manga_id: string | null;
     title: string | null;
     thumbnail_url: string | null;
-    chapter_id: string | null;
+    source_chapter_key: string | null;
     read_at: Date;
     last_read: Date;
     pages_read: number;
@@ -272,9 +300,19 @@ const applyIncoming = async (
   if (existing && existing.last_read >= row.last_read) {
     return existing;
   }
+  const { source_chapter_key, ...fields } = row;
+  const chapter_id = source_chapter_key
+    ? (
+        await chapterRepository.resolveChapter({
+          source: row.source,
+          manga_slug: row.manga_slug,
+          source_chapter_key,
+        })
+      ).id
+    : null;
   return await prisma.history.upsert({
     where: { id: row.id },
-    create: { ...row, user_id, sync_updated_at: new Date() },
+    create: { ...fields, chapter_id, user_id, sync_updated_at: new Date() },
     update: {
       source: row.source,
       manga_id: row.manga_id,
@@ -282,7 +320,7 @@ const applyIncoming = async (
       source_manga_id: row.source_manga_id,
       title: row.title,
       thumbnail_url: row.thumbnail_url,
-      chapter_id: row.chapter_id,
+      chapter_id,
       read_at: row.read_at,
       last_read: row.last_read,
       pages_read: row.pages_read,

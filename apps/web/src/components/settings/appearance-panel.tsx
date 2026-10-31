@@ -138,10 +138,7 @@ export function AppearancePanel() {
       </Panel>
 
       <Panel title="Layout" subtitle="How much fits on screen">
-        <Field
-          label="Interface scale"
-          hint="Scales every element — text, spacing, and controls together"
-        >
+        <Field label="Interface scale" hint="Scales text, spacing and controls">
           <Select settingKey="uiScale" options={[...UI_SCALES]} defaultValue={DEFAULT_UI_SCALE} />
         </Field>
         <Field label="Interface density" hint="Padding inside cards and settings rows">
@@ -165,10 +162,7 @@ export function AppearancePanel() {
 
       <Panel title="Motion" subtitle="Animation and transitions">
         <Group label="Accessibility" />
-        <Field
-          label="Reduce motion"
-          hint="Near-instant transitions everywhere. Your OS setting is respected separately."
-        >
+        <Field label="Reduce motion" hint="Near-instant transitions everywhere">
           <Toggle settingKey="reduceMotion" />
         </Field>
         <Field label="Smooth scrolling" hint="Animate jumps to a page or chapter">

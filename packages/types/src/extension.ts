@@ -109,6 +109,15 @@ export interface Source {
   ): Promise<SourceCataloguePage>;
   resolveMangaUrl?(url: string): Promise<Mangas | null>;
 
+  /**
+   * Turns a Mihon/Tachiyomi URL for this source (usually site-relative, as Mihon stores it)
+   * into this source's own key: the title's `slug` for `'manga'`, or a chapter's `id` (its
+   * `source_chapter_key`) for `'chapter'`. Used to import Mihon backups. Must be pure — no
+   * network — and return null for a URL it does not recognise. Optional: without it, an
+   * import matches read state by chapter number after the title's first chapter sync.
+   */
+  keyFromUrl?(url: string, kind: 'manga' | 'chapter'): string | null;
+
   fetchManga(
     category?: string,
     pagination?: Pagination,
@@ -155,6 +164,23 @@ export type SourceErrorCode =
   | 'TIMEOUT'
   | 'NOT_FOUND'
   | 'BLOCKED'
+  /** A Cloudflare (or similar) browser challenge that only a real browser can pass. On
+   * the desktop app the user can open the source in a window to pass it; the cookies it
+   * earns are then sent with the source's requests. */
+  | 'CHALLENGE_REQUIRED'
   | 'RATE_LIMITED'
   | 'PARSE_ERROR'
   | 'UPSTREAM_ERROR';
+
+/** What the server holds for a source's browser session — never the cookies themselves. */
+export interface SourceBrowserSessionStatus {
+  sourceId: string;
+  /** Cookie domains with stored cookies; empty when there is no session. */
+  hosts: string[];
+  updatedAt: string | null;
+  /** The User-Agent the cookies were earned with; null when there is no session. */
+  userAgent: string | null;
+  /** What is stored, never the values. `expires` is in Unix seconds; null for a cookie
+   * that lasts the browser session. */
+  cookies: Array<{ name: string; domain: string; expires: number | null }>;
+}

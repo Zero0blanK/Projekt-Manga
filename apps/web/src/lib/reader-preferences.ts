@@ -1,6 +1,12 @@
 'use client';
 
 import type { MangaChapterRecord } from '@projekt-manga/api-client';
+import {
+  COLOR_FILTERS,
+  READER_TINTS,
+  TINT_STRENGTH_MAX,
+  TINT_STRENGTH_MIN,
+} from '@/lib/page-image';
 
 export const TAP_ACTIONS = [
   'Direction',
@@ -20,6 +26,11 @@ export type ReaderPreset = {
   stripGap: number;
   pagePrefetchAhead: number;
   chapterPrefetchCount: number;
+  /** Absent on presets saved before colour filters existed; they leave the filter alone. */
+  colorFilter?: string;
+  /** Absent on presets saved before tints existed, likewise. */
+  tint?: string;
+  tintStrength?: number;
 };
 export function parseReaderPresets(raw: unknown): ReaderPreset[] {
   if (!Array.isArray(raw) || raw.length > 30) return [];
@@ -39,7 +50,14 @@ export function parseReaderPresets(raw: unknown): ReaderPreset[] {
         item.brightness <= 100 &&
         [0, 4, 8, 16, 24].includes(item.stripGap) &&
         [0, 2, 4, 8, 12].includes(item.pagePrefetchAhead) &&
-        [1, 2, 3].includes(item.chapterPrefetchCount),
+        [1, 2, 3].includes(item.chapterPrefetchCount) &&
+        (item.colorFilter === undefined ||
+          (COLOR_FILTERS as readonly string[]).includes(item.colorFilter)) &&
+        (item.tint === undefined || READER_TINTS.some((tint) => tint.label === item.tint)) &&
+        (item.tintStrength === undefined ||
+          (Number.isFinite(item.tintStrength) &&
+            item.tintStrength >= TINT_STRENGTH_MIN &&
+            item.tintStrength <= TINT_STRENGTH_MAX)),
     )
   )
     return [];

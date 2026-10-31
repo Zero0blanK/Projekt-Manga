@@ -8,6 +8,7 @@ type HistoryLocation = Pick<
   | 'source_manga_id'
   | 'source'
   | 'chapter_id'
+  | 'source_chapter_key'
   | 'chapter_number'
   | 'last_page_read'
 >;
@@ -30,8 +31,9 @@ export function historyResumeHref(entry: HistoryLocation): string {
 
   const base = `${historyTitleHref(entry)}/read`;
   // Chapter identity survives even when an older history row's placeholder metadata
-  // says Chapter 0. The source reader resolves it against the current source list.
-  if (entry.chapter_id) return `${base}?chapterId=${encodeURIComponent(entry.chapter_id)}${page}`;
+  // says Chapter 0. The source reader resolves the source's key against its current list.
+  if (entry.source_chapter_key)
+    return `${base}?chapterId=${encodeURIComponent(entry.source_chapter_key)}${page}`;
   if (entry.chapter_number !== undefined) return `${base}?ch=${entry.chapter_number}${page}`;
   return base;
 }

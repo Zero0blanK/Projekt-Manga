@@ -33,7 +33,23 @@ export type SandboxedMethod =
   | 'fetchChapters'
   | 'fetchChapterPages'
   | 'getFilters'
-  | 'fetchMangaUpdates';
+  | 'fetchMangaUpdates'
+  /** Batched `keyFromUrl`: one round-trip for a whole Mihon import instead of one per URL. */
+  | 'keysFromUrls';
+
+/** Input of the batched `keysFromUrls` call. */
+export interface UrlKeysRequest {
+  manga: string[];
+  chapters: string[];
+}
+
+/** One key per requested URL, in order; null where the source did not recognise it.
+ * `supported` is false when the source has no `keyFromUrl` at all. */
+export interface UrlKeysResult {
+  supported: boolean;
+  manga: Array<string | null>;
+  chapters: Array<string | null>;
+}
 
 export interface SourceCallRequest {
   kind: 'source-call';
@@ -75,6 +91,8 @@ export interface FetchProxyRequest {
   headers: Record<string, string>;
   /** UTF-8 string bodies only; binary request bodies are not supported by the proxy. */
   body: string | null;
+  /** The source call this fetch was made for, when the runner could tell. */
+  callId?: number;
 }
 
 /** Cancels the parent-owned network request associated with a shimmed fetch. */

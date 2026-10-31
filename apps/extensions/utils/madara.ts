@@ -304,6 +304,11 @@ export function createMadaraSource(config: MadaraSourceConfig): Source {
     base_url: config.baseUrl,
     isNSFW: config.isNSFW,
 
+    // Mihon's Madara sources store the same site paths these keys are parsed from.
+    keyFromUrl(url: string, kind: 'manga' | 'chapter') {
+      return (kind === 'manga' ? extractMangaSlug(url) : extractChapterKey(url)) || null;
+    },
+
     async fetchManga(
       category,
       pagination: Pagination,

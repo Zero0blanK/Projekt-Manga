@@ -2,6 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import sourceController from '../controllers/source.controller.js';
 import { validateQuery, validateBody } from '../middleware/validate.middleware.js';
+import { requireAdmin } from '../middleware/admin.middleware.js';
 import {
   sourceMangaQuerySchema,
   sourceSearchQuerySchema,
@@ -10,6 +11,8 @@ import {
   fetchMangaUpdatesBodySchema,
   sourceCatalogueQuerySchema,
   sourceSearchPageQuerySchema,
+  sourceBrowserSessionBodySchema,
+  sourceUrlKeysBodySchema,
 } from '@projekt-manga/schemas';
 
 const router = express.Router();
@@ -97,5 +100,35 @@ router.post(
   validateBody(fetchMangaUpdatesBodySchema),
   sourceController.fetchMangaUpdates,
 );
+
+/** Pure parsing inside the sandbox, but each call can carry thousands of URLs. */
+const urlKeysRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many key requests — please try again shortly.' },
+});
+router.post(
+  '/:source_id/keys-from-urls',
+  urlKeysRateLimit,
+  validateBody(sourceUrlKeysBodySchema),
+  sourceController.keysFromUrls,
+);
+
+/**
+ * Browser sessions (cookies a real browser earned for a source) are host-level secrets,
+ * so admin-only like the other host-level routes. The desktop app posts from loopback.
+ * Only useful when the server runs on the same machine as that browser: Cloudflare ties
+ * its clearance to the IP that passed the challenge.
+ */
+router.get('/:source_id/browser-session', requireAdmin, sourceController.getBrowserSession);
+router.put(
+  '/:source_id/browser-session',
+  requireAdmin,
+  validateBody(sourceBrowserSessionBodySchema),
+  sourceController.saveBrowserSession,
+);
+router.delete('/:source_id/browser-session', requireAdmin, sourceController.clearBrowserSession);
 
 export default router;

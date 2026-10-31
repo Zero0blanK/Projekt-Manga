@@ -1,6 +1,6 @@
 import type { ShelfStatus } from '@projekt-manga/types';
 /**
- * The contract every tracker service (AniList, MyAnimeList) implements — keeping this
+ * The contract every tracker service (AniList, MyAnimeList, Kitsu, ...) implements — keeping this
  * tracker-agnostic means adding a tracker is a new file behind this interface, not a
  * redesign of tracker.service.ts or the schema.
  */
@@ -49,12 +49,39 @@ export interface TrackerRefreshResult {
   expires_at: Date | null;
 }
 
+/**
+ * How a reader connects this tracker:
+ * - `oauth`: redirect to the tracker's own consent page (getAuthUrl + exchangeCode).
+ * - `password`: the tracker's username and password, exchanged once for a token and then
+ *   discarded (connectWithCredentials). The password itself is never stored.
+ * - `api_key`: a self-hosted server's base URL plus an API key (connectWithCredentials).
+ */
+export type TrackerAuthKind = 'oauth' | 'password' | 'api_key';
+
+export interface TrackerCredentials {
+  username?: string;
+  password?: string;
+  base_url?: string;
+  api_key?: string;
+}
+
 export interface TrackerAdapter {
+  /** Display name, used in the settings UI and in error messages. */
+  label: string;
+  authKind: TrackerAuthKind;
+  /** False when the server is missing configuration this tracker needs (OAuth client
+   * id/secret/redirect URI) — the UI shows it as unavailable instead of offering a
+   * Connect button that can only fail. Must not throw. */
+  isConfigured(): boolean;
   /** `codeVerifier` is PKCE bookkeeping (MyAnimeList requires it; AniList ignores it) —
    * generated and persisted by tracker.service.ts for every tracker uniformly so this
-   * interface doesn't need a per-adapter "needsPkce" flag. */
-  getAuthUrl(state: string, codeVerifier: string): string;
-  exchangeCode(code: string, codeVerifier: string): Promise<TrackerTokens>;
+   * interface doesn't need a per-adapter "needsPkce" flag. Only on `oauth` trackers. */
+  getAuthUrl?(state: string, codeVerifier: string): string;
+  exchangeCode?(code: string, codeVerifier: string): Promise<TrackerTokens>;
+  /** Only on `password`/`api_key` trackers. The returned `access_token` is whatever the
+   * adapter needs back on later calls (a session token, or for self-hosted servers a
+   * serialized base URL + key) — tracker.service.ts encrypts it like any other token. */
+  connectWithCredentials?(credentials: TrackerCredentials): Promise<TrackerTokens>;
   /** Omitted entirely by a tracker whose tokens can't be refreshed (AniList: long-lived,
    * no refresh grant at all) — tracker.service.ts falls back to asking the user to
    * reconnect once such a token expires, rather than calling a method that doesn't exist. */

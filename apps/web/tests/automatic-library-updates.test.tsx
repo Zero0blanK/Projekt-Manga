@@ -10,6 +10,8 @@ const {
   settings,
   globalIntervalHours,
   currentUser,
+  categoryMembers,
+  toast,
 } = vi.hoisted(() => ({
   runLibraryUpdate: vi.fn(),
   isLibraryUpdateRunning: vi.fn(),
@@ -21,6 +23,8 @@ const {
   settings: {} as Record<string, unknown>,
   globalIntervalHours: { value: 6 },
   currentUser: { user: { id: 'user-1' as string | null }, loading: false },
+  categoryMembers: {} as Record<string, string[]>,
+  toast: vi.fn(),
 }));
 const library = [{ id: 'one', source: 'source-a', slug: 'one', title: 'One' }];
 const shelf = {};
@@ -29,7 +33,12 @@ vi.mock('@/lib/library-store', () => ({
   useMangaLibrary: () => ({ manga: library, loading: false, refresh }),
   useLibraryState: () => ({ shelf }),
 }));
-vi.mock('@/lib/library-update', () => ({ entriesInGlobalUpdate: () => library }));
+vi.mock('@/lib/library-update', () => ({
+  entriesInGlobalUpdate: () => library,
+  useGlobalUpdateRules: () => ({}),
+  dueForSmartUpdate: (entries: unknown[]) => entries,
+  UPDATE_SETTING: { smartUpdate: 'smartLibraryUpdate' },
+}));
 vi.mock('@/lib/run-library-update', () => ({
   runLibraryUpdate,
   isLibraryUpdateRunning,
@@ -38,14 +47,18 @@ vi.mock('@/lib/run-library-update', () => ({
 vi.mock('@/lib/session-resource', () => ({ useCurrentUser: () => currentUser }));
 vi.mock('@/lib/app-store', () => ({
   actions: { setSetting },
-  useAppState: (selector: (state: { settings: Record<string, unknown> }) => unknown) =>
-    selector({ settings }),
+  useAppState: (
+    selector: (state: {
+      settings: Record<string, unknown>;
+      categoryMembers: Record<string, string[]>;
+    }) => unknown,
+  ) => selector({ settings, categoryMembers }),
   useSetting: (key: string, fallback: unknown) =>
-    key === 'automaticLibraryUpdates' ? true : fallback,
+    key === 'automaticLibraryUpdates' ? true : (settings[key] ?? fallback),
   useNumberSetting: (key: string, fallback: number) =>
     key === 'automaticLibraryUpdateIntervalHours' ? globalIntervalHours.value : fallback,
 }));
-vi.mock('@/hooks/use-toast', () => ({ toast: vi.fn() }));
+vi.mock('@/hooks/use-toast', () => ({ toast }));
 
 const { AutomaticLibraryUpdates } = await import('@/components/automatic-library-updates');
 
@@ -54,6 +67,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-01-01T12:00:00Z'));
   vi.clearAllMocks();
   for (const key of Object.keys(settings)) delete settings[key];
+  for (const key of Object.keys(categoryMembers)) delete categoryMembers[key];
   globalIntervalHours.value = 6;
   currentUser.user = { id: 'user-1' };
   currentUser.loading = false;
@@ -66,6 +80,7 @@ beforeEach(() => {
       found: 0,
       failed: ['One'],
       foundBySource: {},
+      foundByManga: {},
       failedBySource: { 'source-a': 1 },
       cancelled: false,
     };
@@ -113,6 +128,7 @@ describe('Automatic library updates', () => {
         found: 1,
         failed: [],
         foundBySource: { 'source-a': 1 },
+        foundByManga: { one: 1 },
         failedBySource: {},
         cancelled: false,
       });
@@ -204,6 +220,7 @@ describe('Automatic library updates', () => {
         found: 0,
         failed: ['One'],
         foundBySource: {},
+        foundByManga: {},
         failedBySource: { 'source-a': 1 },
         cancelled: false,
       };
@@ -267,6 +284,84 @@ describe('Automatic library updates', () => {
     });
 
     expect(runLibraryUpdate).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+
+  it('checks a title on its category interval when that is shorter than the global one', async () => {
+    categoryMembers.Hot = ['one'];
+    settings.updateCategoryIntervalHours = JSON.stringify({ Hot: 2 });
+    const view = render(<AutomaticLibraryUpdates />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(runLibraryUpdate).toHaveBeenCalledTimes(1);
+    expect(setSetting).toHaveBeenCalledWith(
+      'automaticLibraryUpdateLastCheckedAt:user-1:source-a@2h',
+      expect.any(Number),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+    });
+    // The failed check backs off for an hour, which a 2-hour cadence has already covered.
+    expect(runLibraryUpdate).toHaveBeenCalledTimes(2);
+    view.unmount();
+  });
+
+  it('starts a new category bucket from the source last check instead of firing at once', async () => {
+    settings['automaticLibraryUpdateLastCheckedAt:user-1:source-a'] = Date.now() - 60 * 60_000;
+    categoryMembers.Hot = ['one'];
+    settings.updateCategoryIntervalHours = JSON.stringify({ Hot: 2 });
+    const view = render(<AutomaticLibraryUpdates />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60 * 60_000 - 1);
+    });
+    expect(runLibraryUpdate).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(runLibraryUpdate).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+
+  it('keeps new chapters from a muted category out of notifications', async () => {
+    categoryMembers.Quiet = ['one'];
+    settings.updateMutedCategories = JSON.stringify(['Quiet']);
+    runLibraryUpdate.mockResolvedValueOnce({
+      found: 2,
+      failed: [],
+      foundBySource: { 'source-a': 2 },
+      foundByManga: { one: 2 },
+      failedBySource: {},
+      cancelled: false,
+    });
+    const view = render(<AutomaticLibraryUpdates />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(refresh).toHaveBeenCalled();
+    expect(toast).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it('notifies about new chapters from titles outside muted categories', async () => {
+    categoryMembers.Quiet = ['someone-else'];
+    settings.updateMutedCategories = JSON.stringify(['Quiet']);
+    runLibraryUpdate.mockResolvedValueOnce({
+      found: 2,
+      failed: [],
+      foundBySource: { 'source-a': 2 },
+      foundByManga: { one: 2 },
+      failedBySource: {},
+      cancelled: false,
+    });
+    const view = render(<AutomaticLibraryUpdates />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'New chapters available' }),
+    );
     view.unmount();
   });
 });

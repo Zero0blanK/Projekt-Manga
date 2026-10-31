@@ -8,6 +8,7 @@ import { Cover } from '@/components/cover';
 import { useLibraryState, libraryActions, applyLibraryAction } from '@/lib/library-store';
 import { useRecentChapters, groupChaptersByManga } from '@/lib/notifications-store';
 import { useSetting } from '@/lib/app-store';
+import { useUnreadUpdateTitles } from '@/lib/unread-updates';
 import { Bell, BellOff, ChevronDown } from 'lucide-react';
 
 /** Titles listed in the dropdown before it defers to the full page. */
@@ -104,9 +105,7 @@ export function NavNotifications({
   const alertsEnabled = useSetting('notifyNewChapter', true) as boolean;
 
   const updates = groupChaptersByManga(chapters);
-  const unreadMangaIds = alertsEnabled
-    ? updates.filter((u) => !readNotifications.includes(u.mangaId)).map((u) => u.mangaId)
-    : [];
+  const unreadMangaIds = useUnreadUpdateTitles();
 
   return (
     <div className="relative">

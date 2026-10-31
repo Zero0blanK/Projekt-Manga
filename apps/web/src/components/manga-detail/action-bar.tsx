@@ -5,14 +5,18 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from '@/hooks/use-toast';
 import { SHELF_OPTIONS, type ShelfStatus } from '@/lib/app-store';
-import { applyLibraryAction, libraryActions, useLibraryState } from '@/lib/library-store';
+import {
+  applyLibraryAction,
+  libraryActions,
+  setTitleInLibrary,
+  useLibraryState,
+} from '@/lib/library-store';
 import { fromMangaDetails, type Manga } from '@/lib/manga-data';
 import {
   getMangaChapters,
   getMangaDetailsById,
   hasLocalDataBridge,
   getAllDownloads,
-  setMangaInLibrary,
   initiateDownload,
   cancelDownload,
   type MangaChapterRecord,
@@ -86,7 +90,7 @@ function ShelfMenu({ manga, onRemoved }: { manga: Manga; onRemoved?: () => void 
   const removeFromLibrary = () => {
     if (removing) return;
     setRemoving(true);
-    setMangaInLibrary(manga.id, false)
+    setTitleInLibrary(manga.id, false)
       .then(() => {
         toast({ description: `Removed ${manga.title} from your library` });
         if (onRemoved) onRemoved();
@@ -229,10 +233,11 @@ function DownloadMenu({
   const unreadChapters = chapters.filter((c) => !c.is_read);
   // A single downloaded chapter doesn't mean the manga is available offline — the button
   // only reads as "done" once every chapter is, and shows a count while partway there.
-  const completedIds = new Set(
-    downloads.filter((d) => d.status === 'COMPLETED').map((d) => d.chapter_id),
+  // Matched by the source's key: on a source preview these chapters have no row ids.
+  const completedKeys = new Set(
+    downloads.filter((d) => d.status === 'COMPLETED').map((d) => d.source_chapter_key),
   );
-  const completedCount = chapters.filter((c) => completedIds.has(c.id)).length;
+  const completedCount = chapters.filter((c) => completedKeys.has(c.source_chapter_key)).length;
   const fullyDownloaded = chapters.length > 0 && completedCount === chapters.length;
   const partiallyDownloaded = completedCount > 0 && !fullyDownloaded;
 
@@ -258,7 +263,11 @@ function DownloadMenu({
           sourceId: manga.source,
           mangaSlug: manga.slug,
           mangaTitle: manga.title,
-          chapter: { id: c.id, name: c.name ?? undefined, chapter_number: c.chapter_number },
+          chapter: {
+            id: c.source_chapter_key,
+            name: c.name ?? undefined,
+            chapter_number: c.chapter_number,
+          },
         }),
       ),
     )
@@ -350,7 +359,7 @@ function AddToLibraryButton({ manga, onAdded }: { manga: Manga; onAdded?: () => 
   const add = () => {
     if (adding) return;
     setAdding(true);
-    setMangaInLibrary(manga.id, true)
+    setTitleInLibrary(manga.id, true)
       .then(() => {
         toast({ description: `Added ${manga.title} to your library` });
         // Re-renders this page with in_library true, swapping in the shelf picker —

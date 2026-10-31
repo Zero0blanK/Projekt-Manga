@@ -23,15 +23,22 @@ export type BackupMergePreview = {
   addedHistory: number;
 };
 
-function historyIdentity(row: Pick<HistoryEntry, 'source' | 'manga_slug' | 'chapter_id'>): string {
-  return `${row.source}\0${row.manga_slug}\0${row.chapter_id ?? ''}`;
+type HistoryIdentityFields = Pick<
+  HistoryEntry,
+  'source' | 'manga_slug' | 'chapter_id' | 'source_chapter_key'
+>;
+
+/** A history row's chapter, as the source names it. Exports written before history rows
+ * carried `source_chapter_key` held that value in `chapter_id`. */
+function historyIdentity(row: HistoryIdentityFields): string {
+  return `${row.source}\0${row.manga_slug}\0${row.source_chapter_key ?? row.chapter_id ?? ''}`;
 }
 
 /** Estimates merge outcomes from the current library/history snapshots and import payload. */
 export function previewBackupMerge(
   backup: BackupPayload,
   currentTitles: Array<Pick<MangaWithDetails, 'source' | 'slug'>>,
-  currentHistory: Array<Pick<HistoryEntry, 'source' | 'manga_slug' | 'chapter_id'>>,
+  currentHistory: HistoryIdentityFields[],
 ): BackupMergePreview {
   const currentTitleKeys = new Set(currentTitles.map((entry) => `${entry.source}\0${entry.slug}`));
   const matchingEntries = backup.manga.filter((entry) =>
@@ -81,7 +88,6 @@ export function parseBackup(value: unknown): BackupPayload {
   }
   const mangaIds = new Set<string>();
   const mangaKeys = new Set<string>();
-  const chapterIds = new Set<string>();
   for (const [index, entry] of backup.manga.entries()) {
     if (
       !entry ||
@@ -115,15 +121,19 @@ export function parseBackup(value: unknown): BackupPayload {
     }
     mangaIds.add(entry.id);
     mangaKeys.add(mangaKey);
+    // A source's chapter keys only name chapters within one title, so duplicates are
+    // checked per title. Older exports carry only `id`, which held the same value.
+    const chapterKeys = new Set<string>();
     for (const [chapterIndex, chapter] of entry.chapters.entries()) {
-      const chapterId = (chapter as { id?: unknown } | null)?.id;
-      if (typeof chapterId !== 'string') continue;
-      if (chapterIds.has(chapterId)) {
+      const fields = chapter as { id?: unknown; source_chapter_key?: unknown } | null;
+      const chapterKey = fields?.source_chapter_key ?? fields?.id;
+      if (typeof chapterKey !== 'string') continue;
+      if (chapterKeys.has(chapterKey)) {
         throw new Error(
           `This export contains a duplicate chapter in title ${index + 1}, chapter ${chapterIndex + 1}.`,
         );
       }
-      chapterIds.add(chapterId);
+      chapterKeys.add(chapterKey);
     }
   }
   const libraryIds = new Set<string>();
@@ -162,7 +172,7 @@ export function parseBackup(value: unknown): BackupPayload {
         manga_id: entry.manga_id ?? undefined,
         manga_slug: entry.manga_slug,
         source_manga_id: entry.source_manga_id,
-        chapter_id: entry.chapter_id ?? undefined,
+        source_chapter_key: entry.source_chapter_key ?? entry.chapter_id ?? undefined,
         title: entry.title,
         thumbnail_url: entry.thumbnail_url,
         pages_read: entry.pages_read,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { dohUrlSchema, sourceUserAgentSchema } from '@projekt-manga/schemas';
 import { parseTrustedExtensionSigningKeys } from '../utils/extensionSignature.js';
 
 /**
@@ -17,6 +18,10 @@ import { parseTrustedExtensionSigningKeys } from '../utils/extensionSignature.js
  * Declared above the schema so the schema's own default can reference it rather than
  * repeating the literal. */
 export const DEFAULT_CLIENT_URL = 'http://localhost:3000';
+
+/** `.env.example` lists optional settings with empty values; empty means unset. */
+const blankAsUnset = (value: unknown) =>
+  typeof value === 'string' && value.trim() === '' ? undefined : value;
 
 const envSchema = z.object({
   /** SQLite location, e.g. `file:./data/projektmanga.db`. Relative paths resolve against
@@ -49,8 +54,38 @@ const envSchema = z.object({
    * are admitted; see `requireAdmin`. */
   ADMIN_TOKEN: z.string().min(16).optional(),
 
+  /** Folder for automatic backups. Defaults to `<cwd>/data/backups`, beside the database;
+   * keep it somewhere private — every file is a copy of an owner's reading history. */
+  BACKUP_DIR: z.string().min(1).optional(),
+
+  /** Default hours between automatic backups (0 disables). Settings → Privacy can override
+   * it; see utils/backupStore.ts. */
+  BACKUP_INTERVAL_HOURS: z.coerce.number().int().min(0).optional(),
+
+  /** Default number of automatic backups kept per owner. */
+  BACKUP_KEEP: z.coerce.number().int().min(1).optional(),
+
   /** JSON map of exact repository URLs to operator-trusted Ed25519 public keys. */
   EXTENSION_REPOSITORY_TRUST_KEYS: z.string().default('{}'),
+
+  /** User-Agent sandboxed sources send instead of their own. Admins can override it from
+   * the source-network endpoint; see utils/sourceNetworkConfig.ts. */
+  SOURCE_USER_AGENT: z.preprocess(blankAsUnset, sourceUserAgentSchema.optional()),
+
+  /** DNS over HTTPS resolver (JSON API) for sandboxed source requests. It only changes how
+   * hostnames resolve: the allowlist and the public-address check still apply. */
+  SOURCE_DOH_URL: z.preprocess(blankAsUnset, dohUrlSchema.optional()),
+  /** New-chapter alerts may go to private-network addresses (a self-hosted ntfy or Home
+   * Assistant on the LAN). Off by default: alerts, like source requests, only reach public
+   * addresses unless the server's owner opts in. */
+  ALERTS_ALLOW_PRIVATE_HOSTS: z.preprocess(blankAsUnset, z.enum(['true', 'false']).optional()),
+  /** Page translation in the reader: which service turns the recognised Japanese into the
+   * reader's language. Unset turns translation off. */
+  TRANSLATE_PROVIDER: z.preprocess(blankAsUnset, z.enum(['libretranslate', 'deepl']).optional()),
+  /** LibreTranslate's base URL (self-hosted or a hosted instance). */
+  TRANSLATE_URL: z.preprocess(blankAsUnset, z.string().url().optional()),
+  /** The API key: required for DeepL, optional for LibreTranslate. */
+  TRANSLATE_API_KEY: z.preprocess(blankAsUnset, z.string().min(1).optional()),
 });
 
 export interface DatabaseConfig {

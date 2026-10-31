@@ -3,11 +3,8 @@
 import { useEffect, useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
 import { toast } from '@/hooks/use-toast';
 import {
-  getAllDownloads,
+  exportReadingDataFromServer,
   getHistory,
-  getLibraryState,
-  getManga,
-  getMangaDetailsById,
   previewRestore as previewServerRestore,
   startReplaceRestore,
   ApiError,
@@ -15,7 +12,9 @@ import {
 import { replaceBackupBodySchema, RESTORE_UPLOAD_LIMIT_BYTES } from '@projekt-manga/schemas';
 import { savePendingRestore, clearPendingRestore, getPendingRestore } from '@/lib/restore-job';
 import { parseBackup, previewBackupMerge, type BackupPayload } from '@/lib/backup-validation';
-import { Panel, Field, Group, ActionButton } from '@/components/settings/field-controls';
+import { Panel, Field, Group, ActionButton, Toggle } from '@/components/settings/field-controls';
+import { INCOGNITO_MODE } from '@/lib/incognito';
+import { DesktopPrivacyControls } from '@/components/settings/desktop-privacy-controls';
 import { actions, setState } from '@/lib/app-store';
 import { APP_STATE_STORAGE_KEY } from '@/lib/theme';
 import { useCurrentUser, sessionActions } from '@/lib/session-resource';
@@ -24,7 +23,9 @@ import { ContentPrivacyControls } from '@/components/discover/content-privacy';
 import { profileSettingsForExport, profileSettingsForImport } from '@/lib/profile-settings';
 import { queryClient, queryKeys } from '@/lib/query-client';
 import { useMangaLibrary } from '@/lib/library-store';
-import { mapConcurrent } from '@/lib/map-concurrent';
+import { AutomaticBackups } from '@/components/settings/automatic-backups';
+import { MihonImport } from '@/components/settings/mihon-import';
+import type { ReadingDataExport } from '@projekt-manga/types';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,68 +38,14 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 
-/** Everything the app holds about you, in one file: the library, per-title shelf and
- * bookmark state, reading history, and the download queue. Local preferences ride along
- * so a restore can put the app back the way it was. */
-/** Detail fetches in flight at once; a large library would otherwise fire hundreds together. */
-const EXPORT_CONCURRENCY = 6;
-
-async function exportReadingData(
-  owner: string,
-  onProgress?: (done: number, total: number) => void,
-) {
-  const verifyOwner = () => {
-    if (
-      (queryClient.getQueryData<{ id: string } | null>(queryKeys.session)?.id ?? 'anonymous') !==
-      owner
-    )
-      throw new Error('The account changed. Export again from the current profile.');
-  };
-  verifyOwner();
-  const [libraryManga, library, history, downloads] = await Promise.all([
-    getManga(),
-    getLibraryState(),
-    getHistory(),
-    getAllDownloads(),
-  ]);
-  // A list row does not carry description, status, or chapter metadata, so an export of
-  // those rows alone could never be restored through the validated add-manga endpoint.
-  let fetched = 0;
-  const manga = await mapConcurrent(libraryManga, EXPORT_CONCURRENCY, async (entry) => {
-    const details = await getMangaDetailsById(entry.id);
-    onProgress?.(++fetched, libraryManga.length);
-    return details;
-  });
-  verifyOwner();
-  const settings = (() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(APP_STATE_STORAGE_KEY) ?? 'null');
-      return stored
-        ? {
-            ...stored,
-            profileOwner: owner,
-            settings: profileSettingsForExport(stored.settings ?? {}, owner),
-          }
-        : null;
-    } catch {
-      return null;
-    }
-  })();
-
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    version: 2,
-    manga,
-    library,
-    history,
-    downloads,
-    settings,
-  };
+/** Saves a JSON document through a temporary link — browsers have no other way to hand a
+ * generated file to the reader. */
+function saveJson(payload: unknown, fileName: string) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `projekt-manga-export-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = fileName;
   // Must be attached before click(): Firefox ignores clicks on detached anchors.
   a.style.display = 'none';
   document.body.appendChild(a);
@@ -107,6 +54,43 @@ async function exportReadingData(
   // click() only starts the download; revoking in the same tick can cancel it. Deferring one
   // tick lets the browser take over the blob.
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/** This profile's preferences, in the shape a restore reads back. Only the browser has
+ * them, so they are merged into the server's export here. */
+function exportableSettings(owner: string) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(APP_STATE_STORAGE_KEY) ?? 'null');
+    return stored
+      ? {
+          ...stored,
+          profileOwner: owner,
+          settings: profileSettingsForExport(stored.settings ?? {}, owner),
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Everything the app holds about you, in one file: the library, per-title shelf and
+ * bookmark state, reading history, and the download queue, built by the server. Local
+ * preferences ride along so a restore can put the app back the way it was. */
+async function exportReadingData(owner: string) {
+  const verifyOwner = () => {
+    if (
+      (queryClient.getQueryData<{ id: string } | null>(queryKeys.session)?.id ?? 'anonymous') !==
+      owner
+    )
+      throw new Error('The account changed. Export again from the current profile.');
+  };
+  verifyOwner();
+  const payload = await exportReadingDataFromServer(owner);
+  verifyOwner();
+  saveJson(
+    { ...payload, settings: exportableSettings(owner) },
+    `projekt-manga-export-${new Date().toISOString().slice(0, 10)}.json`,
+  );
 }
 
 type RestoreMode = 'merge' | 'replace';
@@ -134,9 +118,6 @@ function importableSettings(
 
 export function PrivacyPanel() {
   const [exporting, setExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(
-    null,
-  );
   const [backup, setBackup] = useState<BackupPayload | null>(null);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [confirmReplace, setConfirmReplace] = useState(false);
@@ -154,6 +135,7 @@ export function PrivacyPanel() {
     source: string;
     manga_slug: string;
     chapter_id?: string;
+    source_chapter_key?: string;
   }> | null>(null);
   const [historyPreviewUnavailable, setHistoryPreviewUnavailable] = useState(false);
   const [serverPreview, setServerPreview] = useState<Awaited<
@@ -175,10 +157,11 @@ export function PrivacyPanel() {
       .then((entries) => {
         if (!controller.signal.aborted)
           setCurrentHistory(
-            entries.map(({ source, manga_slug, chapter_id }) => ({
+            entries.map(({ source, manga_slug, chapter_id, source_chapter_key }) => ({
               source,
               manga_slug,
               chapter_id,
+              source_chapter_key,
             })),
           );
       })
@@ -274,13 +257,10 @@ export function PrivacyPanel() {
   const requestExport = () => {
     if (exporting) return;
     setExporting(true);
-    exportReadingData(user?.id ?? 'anonymous', (done, total) => setExportProgress({ done, total }))
+    exportReadingData(user?.id ?? 'anonymous')
       .then(() => toast({ description: 'Export downloaded.' }))
       .catch(() => toast({ description: "Couldn't export your data — try again." }))
-      .finally(() => {
-        setExporting(false);
-        setExportProgress(null);
-      });
+      .finally(() => setExporting(false));
   };
 
   const resetPreferences = () => {
@@ -293,9 +273,6 @@ export function PrivacyPanel() {
   const mergePreview = backup
     ? previewBackupMerge(backup, currentLibrary, currentHistory ?? [])
     : null;
-  const serverPreviewBlocksRestore =
-    serverPreviewMode === (confirmReplace ? 'replace' : 'merge') &&
-    (serverPreview?.chapterIdentityConflicts ?? 0) > 0;
 
   const chooseBackup = () => importInput.current?.click();
 
@@ -310,7 +287,15 @@ export function PrivacyPanel() {
     }
     void file
       .text()
-      .then((text) => parseBackup(JSON.parse(text)))
+      .then((text) => JSON.parse(text) as unknown)
+      .then(openRestore, () => toast({ description: "Couldn't read that export." }));
+  };
+
+  /** Validates a backup — an imported file or a server backup — and opens the restore
+   * preview for it. Nothing is applied until the dialog is confirmed. */
+  const openRestore = (raw: unknown) =>
+    Promise.resolve()
+      .then(() => parseBackup(raw))
       .then((parsed) => {
         setBackup(parsed);
         setConfirmReplace(false);
@@ -321,17 +306,17 @@ export function PrivacyPanel() {
           description: error instanceof Error ? error.message : "Couldn't read that export.",
         }),
       );
+
+  /** A server backup carries no preferences, so this profile's current ones are added to
+   * the download, as with a manual export. */
+  const downloadServerBackup = (payload: ReadingDataExport, fileName: string) => {
+    const owner = user?.id ?? 'anonymous';
+    saveJson({ ...payload, settings: payload.settings ?? exportableSettings(owner) }, fileName);
   };
 
   const restore = (mode: RestoreMode, event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
-    if (
-      !backup ||
-      restoring ||
-      sessionLoading ||
-      (serverPreviewMode === mode && (serverPreview?.chapterIdentityConflicts ?? 0) > 0)
-    )
-      return;
+    if (!backup || restoring || sessionLoading) return;
     setRestoring(true);
     const jobId = crypto.randomUUID();
     const recoveryExport =
@@ -397,6 +382,15 @@ export function PrivacyPanel() {
 
   return (
     <div className="space-y-6">
+      <Panel title="Private reading" subtitle="What reading leaves behind on this device">
+        <Field
+          label="Incognito mode"
+          hint="No history, saved progress or tracker updates while it's on; also the mask in the header"
+        >
+          <Toggle settingKey={INCOGNITO_MODE} />
+        </Field>
+        <DesktopPrivacyControls />
+      </Panel>
       <Panel title="Content privacy" subtitle="Independent preferences for this profile">
         <ContentPrivacyControls />
       </Panel>
@@ -413,19 +407,17 @@ export function PrivacyPanel() {
 
         <Field
           label="Export your data"
-          hint="A JSON file with your library, shelf state, history, downloads, and preferences. Local CBZ archives and their image files are excluded; keep your original CBZ files separately."
+          hint="Library, history and preferences as JSON, without CBZ files"
         >
           <ActionButton onClick={requestExport} disabled={exporting}>
-            {exporting
-              ? `Exporting…${exportProgress ? ` ${exportProgress.done}/${exportProgress.total}` : ''}`
-              : 'Download export'}
+            {exporting ? 'Exporting…' : 'Download export'}
           </ActionButton>
         </Field>
 
         <Group label="Reset" />
         <Field
           label="Reset preferences"
-          hint="Theme, reader options, categories, and layout — your library and history are kept"
+          hint="Theme, reader and layout options; your library is kept"
         >
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -449,10 +441,7 @@ export function PrivacyPanel() {
             </AlertDialogContent>
           </AlertDialog>
         </Field>
-        <Field
-          label="Wipe selected data"
-          hint="Choose library entries, reading history, or downloaded chapters to remove"
-        >
+        <Field label="Wipe selected data" hint="Remove library entries, history or downloads">
           <WipeDataDialog />
         </Field>
       </Panel>
@@ -467,10 +456,7 @@ export function PrivacyPanel() {
             appear when it finishes.
           </p>
         )}
-        <Field
-          label="Import a backup"
-          hint="Choose merge to preserve current reads, or replace after a second confirmation. Downloaded image files are not in JSON exports."
-        >
+        <Field label="Import a backup" hint="Merge with or replace your current data">
           <>
             <input
               ref={importInput}
@@ -489,6 +475,21 @@ export function PrivacyPanel() {
             </button>
           </>
         </Field>
+        {!sessionLoading && (
+          <MihonImport
+            owner={user?.id ?? 'anonymous'}
+            expectedUserId={user?.id ?? null}
+            disabled={restorePending}
+          />
+        )}
+        {!sessionLoading && (
+          <AutomaticBackups
+            owner={user?.id ?? 'anonymous'}
+            disabled={restorePending}
+            onRestore={(payload) => void openRestore(payload)}
+            onDownload={downloadServerBackup}
+          />
+        )}
         <AlertDialog open={restoreOpen} onOpenChange={(open) => !restoring && setRestoreOpen(open)}>
           <AlertDialogContent
             className="max-h-[90vh] overflow-y-auto"
@@ -586,8 +587,6 @@ export function PrivacyPanel() {
                           <dd className="text-right">{serverPreview.importedTitles}</dd>
                           <dt>Shared catalog rows that differ</dt>
                           <dd className="text-right">{serverPreview.catalogRowsUpdated}</dd>
-                          <dt>Chapter identity conflicts</dt>
-                          <dd className="text-right">{serverPreview.chapterIdentityConflicts}</dd>
                         </dl>
                         {serverPreview.catalogUpdateExamples.length > 0 && (
                           <p className="mt-1 text-xs text-muted-foreground">
@@ -595,23 +594,8 @@ export function PrivacyPanel() {
                             {serverPreview.catalogUpdateExamples.join(', ')}
                           </p>
                         )}
-                        {serverPreview.chapterIdentityConflictExamples.length > 0 && (
-                          <ul className="mt-1 list-disc pl-5 text-xs text-destructive">
-                            {serverPreview.chapterIdentityConflictExamples.map((conflict) => (
-                              <li key={conflict}>{conflict}</li>
-                            ))}
-                          </ul>
-                        )}
-                        {serverPreviewBlocksRestore && (
-                          <p role="alert" className="mt-2 text-xs font-medium text-destructive">
-                            Restore is blocked because chapter IDs in this backup belong to other
-                            titles. Remove or correct the conflicting entries, then preview the
-                            backup again.
-                          </p>
-                        )}
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Read-only estimate from the current server state. The restore transaction
-                          rechecks conflicts when it runs.
+                          Read-only estimate from the current server state.
                         </p>
                       </>
                     ) : serverPreviewError ? (
@@ -624,10 +608,6 @@ export function PrivacyPanel() {
                       </p>
                     )}
                   </section>
-                  <p className="text-xs text-muted-foreground">
-                    If an imported chapter ID belongs to a different title on the server, the
-                    transaction is rejected and your existing data is retained.
-                  </p>
                 </div>
               )}
             </AlertDialogHeader>
@@ -639,7 +619,6 @@ export function PrivacyPanel() {
                   disabled={
                     restoring ||
                     sessionLoading ||
-                    serverPreviewBlocksRestore ||
                     (serverPreviewError === null && serverPreviewMode !== 'merge')
                   }
                   className="rounded-md border border-border/60 px-3 py-2 text-sm font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
@@ -653,7 +632,6 @@ export function PrivacyPanel() {
                   disabled={
                     restoring ||
                     sessionLoading ||
-                    serverPreviewBlocksRestore ||
                     (serverPreviewError === null && serverPreviewMode !== 'replace')
                   }
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -673,10 +651,7 @@ export function PrivacyPanel() {
           </AlertDialogContent>
         </AlertDialog>
         {user ? (
-          <Field
-            label="Delete account"
-            hint="Permanently removes your account, library, progress, and reading history from the server"
-          >
+          <Field label="Delete account" hint="Permanently deletes your account and its data">
             <AlertDialog
               open={deleteDialogOpen}
               onOpenChange={(open) => {
@@ -730,11 +705,7 @@ export function PrivacyPanel() {
             </AlertDialog>
           </Field>
         ) : (
-          <Field
-            label="Delete account"
-            hint="No account signed in — create one in the Profile tab first"
-            disabled
-          >
+          <Field label="Delete account" hint="Sign in from the Profile tab first" disabled>
             <span className="text-xs text-muted-foreground">Not applicable</span>
           </Field>
         )}

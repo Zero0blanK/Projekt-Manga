@@ -38,15 +38,16 @@ describe('restore catalog preview', () => {
         rating: null,
       },
     ]);
-    prismaMock.chapter.findMany.mockResolvedValue([
-      { id: 'collision', manga: { source: 'fixture', slug: 'different' } },
-    ]);
     prismaMock.history.findMany.mockResolvedValue([
-      { source: 'fixture', manga_slug: 'existing', chapter_id: 'history-1' },
+      {
+        source: 'fixture',
+        manga_slug: 'existing',
+        chapter: { source_chapter_key: 'history-1' },
+      },
     ]);
   });
 
-  it('reports current catalog differences and chapter ID collisions without writes', async () => {
+  it('reports current catalog differences and retained history without writes', async () => {
     const backup = {
       expectedUserId: null,
       mode: 'merge',
@@ -64,7 +65,9 @@ describe('restore catalog preview', () => {
           genres: '',
           status: 'UNKNOWN',
           rating: null,
-          chapters: [{ id: 'collision', chapter_number: 2 }],
+          // Another title may use the same source key: keys only name a chapter within
+          // their title, so this is not a conflict.
+          chapters: [{ id: 'shared-key', chapter_number: 2 }],
         },
         {
           id: 'import-new',
@@ -78,11 +81,12 @@ describe('restore catalog preview', () => {
           genres: '',
           status: 'UNKNOWN',
           rating: null,
-          chapters: [],
+          chapters: [{ id: 'shared-key', chapter_number: 2 }],
         },
       ],
       library: [],
       history: [
+        // Written before backups carried `source_chapter_key`: the key was `chapter_id`.
         {
           source: 'fixture',
           manga_slug: 'existing',
@@ -98,13 +102,11 @@ describe('restore catalog preview', () => {
       importedTitles: 2,
       catalogRowsUpdated: 1,
       catalogUpdateExamples: ['fixture · existing: New title'],
-      chapterIdentityConflicts: 1,
-      chapterIdentityConflictExamples: ['New title (chapter 2)'],
       retainedHistory: 1,
       addedHistory: 0,
     });
     expect(prismaMock.manga.findMany).toHaveBeenCalled();
-    expect(prismaMock.chapter.findMany).toHaveBeenCalled();
+    expect(prismaMock.chapter.findMany).not.toHaveBeenCalled();
     expect(prismaMock.history.findMany).toHaveBeenCalled();
     expect(prismaMock.user_library.findMany).not.toHaveBeenCalled();
   });

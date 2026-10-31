@@ -1,6 +1,7 @@
 import { request, buildApiUrl } from './client.js';
 
 export interface InitiateDownloadChapter {
+  /** The source's own id for the chapter (a stored record's `source_chapter_key`). */
   id: string;
   name?: string;
   chapter_number: number;
@@ -34,6 +35,8 @@ export interface DownloadSummary {
   id: string;
   manga_id: string;
   chapter_id: string;
+  /** The source's own id for the chapter, for matching against a source listing. */
+  source_chapter_key: string;
   source_id: string;
   mangaSlug: string;
   status: string;
@@ -135,6 +138,11 @@ export const getDownloadedChapterPages = (chapterId: string, signal?: AbortSigna
  * list, matching `DownloadedPage.index`. */
 export const buildDownloadedPageUrl = (chapterId: string, index: number) =>
   buildApiUrl(`/downloads/chapter/${encodeURIComponent(chapterId)}/page/${index}`);
+
+/** URL of a downloaded chapter as a CBZ file, for a download link (not fetched through
+ * request(): the body is the archive itself). */
+export const downloadedChapterCbzUrl = (chapterId: string) =>
+  buildApiUrl(`/downloads/chapter/${encodeURIComponent(chapterId)}/cbz`);
 
 // ─── Live progress (SSE) ─────────────────────────────────────────────────────
 

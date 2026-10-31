@@ -120,15 +120,41 @@ describe('POST /api/history/add', () => {
     });
 
     expect(res.status).toBe(201);
-    expect(prismaMock.history.create).toHaveBeenCalledOnce();
-    expect(prismaMock.chapter.upsert).toHaveBeenCalledWith({
-      where: { id: 'ch-1' },
-      create: { id: 'ch-1', url: '', chapter_number: 0 },
-      update: {},
+    expect(prismaMock.history.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ chapter_id: 'ch-1' }) }),
+    );
+    expect(prismaMock.chapter.create).not.toHaveBeenCalled();
+  });
+
+  it('resolves a named chapter by source key, standing up a placeholder row', async () => {
+    prismaMock.manga.findUnique.mockResolvedValue(null);
+    prismaMock.chapter.findUnique.mockResolvedValueOnce(null);
+    prismaMock.chapter.create.mockResolvedValueOnce({ id: 'row-9' });
+    prismaMock.history.findFirst.mockResolvedValueOnce(null);
+    prismaMock.history.create.mockResolvedValueOnce({ id: 'hist-9' });
+
+    const res = await request(app).post('/api/history/add').send({
+      source: 'source-a',
+      manga_slug: 'catalog-slug',
+      source_chapter_key: 'chapter-9',
+      pages_read: 1,
     });
+
+    expect(res.status).toBe(201);
+    expect(prismaMock.chapter.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        source: 'source-a',
+        manga_slug: 'catalog-slug',
+        source_chapter_key: 'chapter-9',
+      }),
+    });
+    expect(prismaMock.history.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ chapter_id: 'row-9' }) }),
+    );
   });
 
   it('stores the source-native ID separately from the slug for Resume links', async () => {
+    prismaMock.chapter.create.mockResolvedValueOnce({ id: 'row-42' });
     prismaMock.history.findFirst.mockResolvedValueOnce(null);
     prismaMock.history.create.mockResolvedValueOnce({ id: 'hist-source' });
 
@@ -136,7 +162,7 @@ describe('POST /api/history/add', () => {
       source: 'source-a',
       manga_slug: 'catalog-slug',
       source_manga_id: 'native-id-42',
-      chapter_id: 'chapter-42',
+      source_chapter_key: 'chapter-42',
       pages_read: 4,
     });
 

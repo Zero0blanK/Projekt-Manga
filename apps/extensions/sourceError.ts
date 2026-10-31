@@ -215,6 +215,24 @@ export function classifyRequestError(
         status === 401
           ? 'Unauthorized (401)'
           : describeBlock(bodySnippet(error.response?.data), status);
+      const mitigated = error.response?.headers?.['cf-mitigated'];
+      if (
+        reason === 'Cloudflare challenge' ||
+        (typeof mitigated === 'string' && mitigated.toLowerCase() === 'challenge')
+      ) {
+        return new SourceError(
+          'CHALLENGE_REQUIRED',
+          `${sourceName} is asking for a browser check (Cloudflare). Open the source in a browser to pass it, then try again.`,
+          sourceId,
+          {
+            statusCode: status,
+            cause: error,
+            reason: 'Cloudflare challenge',
+            detail,
+            url,
+          },
+        );
+      }
       return new SourceError(
         'BLOCKED',
         `${sourceName} blocked this request (anti-bot protection). Try again later.`,

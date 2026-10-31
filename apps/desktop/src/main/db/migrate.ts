@@ -175,6 +175,46 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE manga_new RENAME TO manga;
     `,
   },
+  {
+    // Mirrors the server's chapter_source_key migration. A chapter's row id is now this
+    // database's own; the source's id for it is source_chapter_key, unique within its
+    // title (source + manga_slug, kept on manga-less stubs too). Sync and the renderer
+    // name chapters by that key, so a row id never has to match another device's.
+    // Existing ids were the source's ids, so they become the keys and stay the row ids:
+    // nothing that references a chapter changes.
+    version: 5,
+    name: 'chapter_source_key',
+    disableForeignKeys: true,
+    sql: `
+      CREATE TABLE chapter_new (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        manga_slug TEXT NOT NULL,
+        source_chapter_key TEXT NOT NULL,
+        manga_id TEXT REFERENCES manga(id) ON DELETE CASCADE,
+        url TEXT,
+        name TEXT,
+        scanlator TEXT,
+        chapter_number REAL NOT NULL,
+        release_date TEXT,
+        page_count INTEGER,
+        updated_at TEXT NOT NULL,
+        UNIQUE(source, manga_slug, source_chapter_key)
+      );
+      INSERT INTO chapter_new (id, source, manga_slug, source_chapter_key, manga_id, url, name, scanlator, chapter_number, release_date, page_count, updated_at)
+        SELECT
+          c.id,
+          COALESCE(m.source, (SELECT h.source FROM history h WHERE h.chapter_id = c.id ORDER BY h.last_read DESC, h.id DESC LIMIT 1), ''),
+          COALESCE(m.slug, (SELECT h.manga_slug FROM history h WHERE h.chapter_id = c.id ORDER BY h.last_read DESC, h.id DESC LIMIT 1), ''),
+          c.id,
+          c.manga_id, c.url, c.name, c.scanlator, c.chapter_number, c.release_date, c.page_count, c.updated_at
+        FROM chapter c
+        LEFT JOIN manga m ON m.id = c.manga_id;
+      DROP TABLE chapter;
+      ALTER TABLE chapter_new RENAME TO chapter;
+      CREATE INDEX idx_chapter_manga_id ON chapter(manga_id);
+    `,
+  },
 ];
 
 function ensureMigrationsTable(db: DatabaseSync): void {

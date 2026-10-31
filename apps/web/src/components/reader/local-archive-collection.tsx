@@ -1,8 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { localArchiveBridge, type LocalArchive } from '@/lib/local-archives';
+import { FolderOpen, FolderPlus, RefreshCw } from 'lucide-react';
+import {
+  localArchiveBridge,
+  localArchiveError,
+  type LibraryScan,
+  type LocalArchive,
+} from '@/lib/local-archives';
 import { useCurrentUser } from '@/lib/session-resource';
 import {
   AlertDialog,
@@ -14,11 +20,27 @@ import {
   AlertDialogFooter,
 } from '@/components/ui/alert-dialog';
 
+const BUTTON =
+  'inline-flex items-center gap-1.5 rounded border px-3 py-2 text-sm disabled:opacity-50';
+
+function scanMessage({ added, removed, failed }: LibraryScan): string {
+  const parts = [
+    added ? `${added} added` : null,
+    removed ? `${removed} gone` : null,
+    failed ? `${failed} couldn't be read` : null,
+  ].filter(Boolean);
+  return parts.length
+    ? `Library folders scanned: ${parts.join(', ')}.`
+    : 'Library folders are up to date.';
+}
+
 export function LocalArchiveCollection() {
   const { user, loading: sessionLoading } = useCurrentUser();
   const [items, setItems] = useState<LocalArchive[]>([]);
+  const [folders, setFolders] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [remove, setRemove] = useState<LocalArchive | null>(null);
   const [desktop, setDesktop] = useState(false);
   const owner = user?.id ?? 'anonymous';
@@ -34,9 +56,13 @@ export function LocalArchiveCollection() {
     setBusy(true);
     setError('');
     try {
-      const found = await bridge.list();
+      const [found, libraryFolders] = await Promise.all([
+        bridge.list(),
+        bridge.libraryFolders?.() ?? Promise.resolve([]),
+      ]);
       if (generation.current === version && ownerRef.current === owner) {
         setItems(found);
+        setFolders(libraryFolders);
         setItemsOwner(owner);
       }
     } catch {
@@ -48,6 +74,7 @@ export function LocalArchiveCollection() {
   useEffect(() => {
     generation.current += 1;
     setItems([]);
+    setFolders([]);
     setRemove(null);
     setBusy(false);
     void load();
@@ -55,52 +82,149 @@ export function LocalArchiveCollection() {
       generation.current += 1;
     };
   }, [user?.id, load]);
-  const importArchive = async () => {
-    const bridge = localArchiveBridge();
-    if (!bridge || busy || sessionLoading) return;
+
+  /** Runs one bridge call, then reloads the list. */
+  const run = async <T,>(work: () => Promise<T>, onDone?: (result: T) => void) => {
+    if (busy || sessionLoading) return;
     const version = ++generation.current;
     setBusy(true);
     setError('');
+    setNotice('');
     try {
-      const imported = await bridge.import();
+      const result = await work();
       if (generation.current !== version) return;
-      if (imported) {
-        const found = await bridge.list();
-        if (generation.current === version && ownerRef.current === owner) {
-          setItems(found);
-          setItemsOwner(owner);
-        }
+      onDone?.(result);
+      const bridge = localArchiveBridge();
+      const [found, libraryFolders] = await Promise.all([
+        bridge!.list(),
+        bridge!.libraryFolders?.() ?? Promise.resolve([]),
+      ]);
+      if (generation.current === version && ownerRef.current === owner) {
+        setItems(found);
+        setFolders(libraryFolders);
+        setItemsOwner(owner);
       }
     } catch (cause) {
       if (generation.current === version)
-        setError(
-          cause instanceof Error
-            ? cause.message.replace(/^Error invoking remote method '[^']+': Error: /, '')
-            : 'The CBZ could not be imported.',
-        );
+        setError(localArchiveError(cause, 'The local collection could not be updated.'));
     } finally {
       if (generation.current === version) setBusy(false);
     }
   };
+  const bridge = localArchiveBridge();
+  const canUseFolders = Boolean(bridge?.addLibraryFolder);
+
+  // By series (ComicInfo, or the sub-folder a library folder holds them in), the rest last.
+  const groups = useMemo(() => {
+    const bySeries = new Map<string, LocalArchive[]>();
+    for (const item of items) {
+      const key = item.series ?? '';
+      bySeries.set(key, [...(bySeries.get(key) ?? []), item]);
+    }
+    return [...bySeries.entries()].sort(([a], [b]) => (a ? (b ? a.localeCompare(b) : -1) : 1));
+  }, [items]);
+
   return (
     <section className="space-y-4 rounded-xl border p-4">
-      <h2 className="font-semibold">Local CBZ collection</h2>
+      <h2 className="font-semibold">Local comics</h2>
       <p className="text-sm text-muted-foreground">
-        Desktop only. Import JPEG, PNG or WebP comic pages from a CBZ up to 100 MiB, 500 MiB
-        expanded and 2,000 pages. Each page may be up to 32 MiB, 16 megapixels and 16,384 pixels per
-        dimension. Files remain on this device and are excluded from backups and account sync.
+        Desktop only. Import a CBZ, ZIP or EPUB comic (up to 100 MiB, 500 MiB expanded and 2,000
+        pages), or a folder of JPEG, PNG or WebP pages; you can also drop one on the window.
+        ComicInfo.xml fills in the series and number. Files stay on this device and are left out of
+        backups and account sync.
       </p>
       {desktop ? (
-        <button
-          type="button"
-          disabled={busy || sessionLoading}
-          onClick={importArchive}
-          className="rounded border px-3 py-2 text-sm disabled:opacity-50"
-        >
-          {busy ? 'Working…' : 'Import CBZ'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={busy || sessionLoading}
+            onClick={() => void run(() => bridge!.import('file'))}
+            className={BUTTON}
+          >
+            {busy ? 'Working…' : 'Import comic'}
+          </button>
+          <button
+            type="button"
+            disabled={busy || sessionLoading}
+            onClick={() => void run(() => bridge!.import('folder'))}
+            className={BUTTON}
+          >
+            <FolderOpen className="h-4 w-4" /> Import folder
+          </button>
+        </div>
       ) : (
-        <p className="text-sm">Open the desktop app to import and read local CBZ files.</p>
+        <p className="text-sm">Open the desktop app to import and read local comics.</p>
+      )}
+
+      {desktop && canUseFolders && (
+        <div className="space-y-2 rounded-lg border border-dashed p-3">
+          <h3 className="text-sm font-medium">Library folders</h3>
+          <p className="text-xs text-muted-foreground">
+            Read in place, not copied: comics in a folder, and in its sub-folders as series. Rescan
+            after adding files. Removing a folder or a comic never deletes your files.
+          </p>
+          {folders.length > 0 && (
+            <ul className="space-y-1">
+              {folders.map((folder) => (
+                <li key={folder} className="flex items-center gap-2 text-xs">
+                  <span className="min-w-0 flex-1 truncate font-mono" title={folder}>
+                    {folder}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-label={`Stop reading ${folder}`}
+                    onClick={() =>
+                      void run(
+                        () => bridge!.removeLibraryFolder!(folder),
+                        (result) => setNotice(scanMessage(result)),
+                      )
+                    }
+                    className="rounded border px-2 py-1"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy || sessionLoading}
+              onClick={() =>
+                void run(
+                  () => bridge!.addLibraryFolder!(),
+                  (result) => result && setNotice(scanMessage(result)),
+                )
+              }
+              className={BUTTON}
+            >
+              <FolderPlus className="h-4 w-4" /> Add library folder
+            </button>
+            {folders.length > 0 && (
+              <button
+                type="button"
+                disabled={busy || sessionLoading}
+                onClick={() =>
+                  void run(
+                    () => bridge!.rescan!(),
+                    (result) => setNotice(scanMessage(result)),
+                  )
+                }
+                className={BUTTON}
+              >
+                <RefreshCw className="h-4 w-4" /> Rescan
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {notice && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {notice}
+        </p>
       )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
@@ -111,30 +235,44 @@ export function LocalArchiveCollection() {
         </p>
       )}
       {itemsOwner === owner && !sessionLoading && items.length > 0 && (
-        <ul className="space-y-2">
-          {items.map((item) => (
-            <li key={item.id} className="flex items-center gap-3 rounded border p-3">
-              <Link
-                href={`/local-reader/${item.id}`}
-                className="min-w-0 flex-1 truncate text-sm underline"
-              >
-                {item.title} · {item.pageCount} pages
-              </Link>
-              <button
-                type="button"
-                disabled={busy}
-                aria-label={`Remove ${item.title}`}
-                className="rounded border px-3 py-2 text-sm"
-                onClick={() => setRemove(item)}
-              >
-                Remove
-              </button>
-            </li>
+        <div className="space-y-4">
+          {groups.map(([series, group]) => (
+            <div key={series || '—'} className="space-y-2">
+              {(series || groups.length > 1) && (
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {series || 'Other comics'}
+                </h3>
+              )}
+              <ul className="space-y-2">
+                {group.map((item) => (
+                  <li key={item.id} className="flex items-center gap-3 rounded border p-3">
+                    <Link
+                      href={`/local-reader/${item.id}`}
+                      className="min-w-0 flex-1 truncate text-sm underline"
+                    >
+                      {item.title} · {item.pageCount} pages
+                    </Link>
+                    {item.linked && (
+                      <span className="shrink-0 text-[11px] text-muted-foreground">In place</span>
+                    )}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      aria-label={`Remove ${item.title}`}
+                      className="rounded border px-3 py-2 text-sm"
+                      onClick={() => setRemove(item)}
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
       {desktop && !busy && !error && items.length === 0 && (
-        <p className="text-sm text-muted-foreground">No local comics imported yet.</p>
+        <p className="text-sm text-muted-foreground">No local comics yet.</p>
       )}
       <AlertDialog
         open={Boolean(remove) && itemsOwner === owner && !sessionLoading}
@@ -145,7 +283,9 @@ export function LocalArchiveCollection() {
         <AlertDialogContent>
           <AlertDialogTitle>Remove local comic?</AlertDialogTitle>
           <AlertDialogDescription>
-            This deletes the managed copy of {remove?.title}. Your original CBZ is kept.
+            {remove?.linked
+              ? `This takes ${remove.title} out of the collection. The file stays where it is; a rescan of its library folder adds it back.`
+              : `This deletes the managed copy of ${remove?.title}. Your original file is kept.`}
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
@@ -169,7 +309,7 @@ export function LocalArchiveCollection() {
                 }
               }}
             >
-              Remove managed copy
+              {remove?.linked ? 'Remove from collection' : 'Remove managed copy'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

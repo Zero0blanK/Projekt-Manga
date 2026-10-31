@@ -11,6 +11,7 @@
  * bundle throws — or a bug in this file itself throws — becomes a plain error message
  * back to the parent rather than crashing the *parent* process.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   Source,
   SourceCapabilities,
@@ -25,6 +26,8 @@ import type {
   ParentMessage,
   FetchProxyResponse,
   SerializedSourceError,
+  UrlKeysRequest,
+  UrlKeysResult,
 } from './types.js';
 
 // Keep runtime helpers here: the child cannot import host files outside its bundle allowlist.
@@ -107,11 +110,16 @@ const pendingFetches = new Map<
 /** Replaces the global `fetch` with a proxy to the parent, before anything the bundle
  * does gets a chance to run. The bundle sees an ordinary-looking `fetch()` — it has no
  * way to tell its requests aren't going out directly. */
+/** Set while a source's `keyFromUrl` runs: it is a pure string transform, so any fetch it
+ * starts is refused before a request ever reaches the parent. */
+let fetchBlocked = false;
+
 function installFetchShim(): void {
   const proxiedFetch = async (
     input: string | URL | Request,
     init?: RequestInit,
   ): Promise<Response> => {
+    if (fetchBlocked) throw new TypeError('fetch is not available while converting URLs');
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
     const headers: Record<string, string> = {};
@@ -139,7 +147,7 @@ function installFetchShim(): void {
       rejectResponse(new DOMException('The operation was aborted', 'AbortError'));
     };
     signal?.addEventListener('abort', onAbort, { once: true });
-    send({ kind: 'fetch', id, url, method, headers, body });
+    send({ kind: 'fetch', id, url, method, headers, body, callId: currentCall.getStore() });
 
     let response: FetchProxyResponse;
     try {
@@ -192,6 +200,7 @@ const SOURCE_ERROR_CODES: ReadonlySet<string> = new Set<SourceErrorCode>([
   'TIMEOUT',
   'NOT_FOUND',
   'BLOCKED',
+  'CHALLENGE_REQUIRED',
   'RATE_LIMITED',
   'PARSE_ERROR',
   'UPSTREAM_ERROR',
@@ -251,6 +260,43 @@ function serializeError(error: unknown): SerializedSourceError {
   return payload;
 }
 
+/** Most URLs one batched `keysFromUrls` call may carry. */
+export const URL_KEYS_LIMIT = 5_000;
+
+/** Runs the source's own `keyFromUrl` over a batch of URLs. A throw, or anything other
+ * than a short non-empty string, counts as "not recognised" for that URL alone. */
+export function sourceUrlKeys(source: Source, request: unknown): UrlKeysResult {
+  const value = request as Partial<UrlKeysRequest> | null;
+  const manga: unknown[] = Array.isArray(value?.manga) ? value.manga : [];
+  const chapters: unknown[] = Array.isArray(value?.chapters) ? value.chapters : [];
+  if (manga.length + chapters.length > URL_KEYS_LIMIT) {
+    throw new Error(`At most ${URL_KEYS_LIMIT} URLs can be converted at once`);
+  }
+  const keyFromUrl = source.keyFromUrl;
+  if (typeof keyFromUrl !== 'function') {
+    return { supported: false, manga: manga.map(() => null), chapters: chapters.map(() => null) };
+  }
+  const convert = (url: unknown, kind: 'manga' | 'chapter') => {
+    if (typeof url !== 'string' || !url || url.length > 2048) return null;
+    try {
+      const key: unknown = keyFromUrl.call(source, url, kind);
+      return typeof key === 'string' && key.length > 0 && key.length <= 512 ? key : null;
+    } catch {
+      return null;
+    }
+  };
+  fetchBlocked = true;
+  try {
+    return {
+      supported: true,
+      manga: manga.map((url) => convert(url, 'manga')),
+      chapters: chapters.map((url) => convert(url, 'chapter')),
+    };
+  } finally {
+    fetchBlocked = false;
+  }
+}
+
 const ALLOWED_METHODS: ReadonlySet<SourceCallRequest['method']> = new Set([
   'getCapabilities',
   'fetchMangaPage',
@@ -264,7 +310,11 @@ const ALLOWED_METHODS: ReadonlySet<SourceCallRequest['method']> = new Set([
   'fetchChapterPages',
   'getFilters',
   'fetchMangaUpdates',
+  'keysFromUrls',
 ]);
+
+/** The source call the running code belongs to, so each proxied fetch names its call. */
+const currentCall = new AsyncLocalStorage<number>();
 
 async function handleSourceCall(request: SourceCallRequest): Promise<void> {
   try {
@@ -295,6 +345,15 @@ async function handleSourceCall(request: SourceCallRequest): Promise<void> {
       send({ kind: 'source-call', id: request.id, ok: true, result });
       return;
     }
+    if (request.method === 'keysFromUrls') {
+      send({
+        kind: 'source-call',
+        id: request.id,
+        ok: true,
+        result: sourceUrlKeys(source, request.args[0]),
+      });
+      return;
+    }
     if (request.method === 'resolveMangaUrl' && !(await sourceCapabilities(source)).urlSearch) {
       throw new Error('This source does not support URL search');
     }
@@ -319,7 +378,7 @@ if (process.argv[1] && pathToFileUrl(process.argv[1]) === import.meta.url) {
 
   process.on('message', (message: ParentMessage) => {
     if (message.kind === 'source-call') {
-      void handleSourceCall(message);
+      void currentCall.run(message.id, () => handleSourceCall(message));
       return;
     }
     // Otherwise a fetch response: settle the shim call awaiting it.

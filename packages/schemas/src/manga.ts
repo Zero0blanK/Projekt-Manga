@@ -70,3 +70,66 @@ export const migrateMangaBodySchema = z.object({
   move_history: z.boolean().optional().default(true),
 });
 export type MigrateMangaBody = z.infer<typeof migrateMangaBodySchema>;
+
+// Duplicated from MANGA_STATUS_VALUES in @projekt-manga/types's enums.ts — this package
+// does not depend on types, so keep the two lists in step.
+export const mangaStatusSchema = z.enum(['ONGOING', 'COMPLETED', 'HIATUS', 'CANCELLED', 'UNKNOWN']);
+
+/**
+ * A reader's own edit to a title, laid over the shared catalog (see manga_override in the
+ * server schema). An omitted field is left as it is; `null` clears it so the source's value
+ * shows through again. Title and author cannot be blank — clearing one means "use the
+ * source's", which is `null`.
+ */
+export const updateMangaOverrideBodySchema = z
+  .object({
+    title: z.string().trim().min(1).max(255).nullable().optional(),
+    author: z.string().trim().min(1).max(255).nullable().optional(),
+    description: z.string().max(20_000).nullable().optional(),
+    status: mangaStatusSchema.nullable().optional(),
+  })
+  .strict()
+  .refine((body) => Object.values(body).some((value) => value !== undefined), {
+    message: 'Nothing to change',
+  });
+export type UpdateMangaOverrideBody = z.infer<typeof updateMangaOverrideBodySchema>;
+
+/** Links another source's copy of a title under this library entry. */
+export const createMangaLinkBodySchema = z
+  .object({ linked_manga_id: z.string().trim().min(1).max(512) })
+  .strict();
+export type CreateMangaLinkBody = z.infer<typeof createMangaLinkBodySchema>;
+
+/** The order linked sources are tried in: every link of the title, once each. */
+export const reorderMangaLinksBodySchema = z
+  .object({ link_ids: z.array(z.string().min(1).max(64)).min(1).max(20) })
+  .strict();
+export type ReorderMangaLinksBody = z.infer<typeof reorderMangaLinksBodySchema>;
+
+/** Largest custom cover accepted, before base64 encoding. */
+export const MANGA_COVER_MAX_BYTES = 5 * 1024 * 1024;
+
+export const MANGA_COVER_MIME_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/avif',
+] as const;
+
+/**
+ * A custom cover, sent as base64 inside JSON rather than as a raw or multipart body: the
+ * server refuses non-JSON writes so a cross-site form can never reach it. The server checks
+ * the decoded bytes' magic number against `mime` and the size limit again.
+ */
+export const uploadMangaCoverBodySchema = z
+  .object({
+    mime: z.enum(MANGA_COVER_MIME_TYPES),
+    data: z
+      .string()
+      .min(1)
+      .max(Math.ceil(MANGA_COVER_MAX_BYTES / 3) * 4)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+  })
+  .strict();
+export type UploadMangaCoverBody = z.infer<typeof uploadMangaCoverBodySchema>;

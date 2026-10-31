@@ -136,7 +136,7 @@ export function SourceChapterList({
                   download.status === 'COMPLETED' &&
                   download.downloaded_path,
               )
-              .map((download) => download.chapter_id),
+              .map((download) => download.source_chapter_key),
           ),
         );
         setDownloadsError(false);
@@ -149,7 +149,12 @@ export function SourceChapterList({
   }, [sourceId, mangaSlug, owner, sessionLoading]);
   const chapterHref = (chapter: Chapters) => {
     const href = new URL(readerHref(chapter.chapter_number), 'https://reader.invalid');
-    href.searchParams.set('chapterId', chapter.id);
+    // The library reader is addressed by its own row ids, which this list does not have,
+    // so it takes the source's key instead; the preview reader's ids are the source's.
+    href.searchParams.set(
+      href.pathname.startsWith('/reader/') ? 'chapterKey' : 'chapterId',
+      chapter.id,
+    );
     return `${href.pathname}${href.search}${href.hash}`;
   };
   // Mirrors the prop so marks apply instantly; re-seeded whenever the parent's fetch lands.
@@ -187,7 +192,7 @@ export function SourceChapterList({
   /** The chapter fields the server needs to create the row if it doesn't exist yet, plus
    * `source` — the bulk endpoint only writes history when it knows which source to
    * attribute the read to. */
-  const payloadFor = (c: Chapters): ChapterBulkPayload => ({
+  const payloadFor = (c: Chapters): ChapterBulkPayload & { source: string } => ({
     id: c.id,
     name: c.name ?? undefined,
     url: c.url,
@@ -225,7 +230,7 @@ export function SourceChapterList({
             source_manga_id: sourceMangaId,
             title: mangaTitle,
             thumbnail_url: thumbnailUrl || undefined,
-            chapter_id: c.id,
+            source_chapter_key: c.id,
             pages_read: c.page_count || 0,
           }).catch(() => {
             if (requestCurrent(requestGeneration))
@@ -344,7 +349,7 @@ export function SourceChapterList({
     try {
       const existing = await getAllDownloads();
       const excluded = new Set(
-        existing.filter((d) => d.status !== 'FAILED').map((d) => d.chapter_id),
+        existing.filter((d) => d.status !== 'FAILED').map((d) => d.source_chapter_key),
       );
       for (const c of targets) {
         if (!requestCurrent(requestGeneration)) return;

@@ -536,7 +536,12 @@ describe('bulk mark-read pushes to linked trackers', () => {
     prismaMock.user_chapter_state.upsert.mockResolvedValue({});
   }
 
-  const chapters = [{ id: 'ch-1' }, { id: 'ch-2' }, { id: 'ch-3' }];
+  // Clients always say which source a chapter key belongs to.
+  const chapters = [
+    { id: 'ch-1', source: 'mangadex' },
+    { id: 'ch-2', source: 'mangadex' },
+    { id: 'ch-3', source: 'mangadex' },
+  ];
 
   it('pushes exactly once for the whole batch, not once per chapter', async () => {
     const push = vi.spyOn(trackerService, 'pushProgressIfLinked').mockResolvedValue(undefined);

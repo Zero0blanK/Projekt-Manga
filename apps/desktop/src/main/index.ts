@@ -10,6 +10,7 @@ import { getDb } from './db/connection';
 import { localStore } from './db/local-store';
 import { buildLocalWebUrl, LOCAL_API_BASE_URL, resolveApiUrl } from '../shared/config';
 import { resolveServerPaths, shouldManageServers, startServers, stopServers } from './servers';
+import { resolveServerTokenKey } from './server-secrets';
 import { appendLog } from './log-buffer';
 import { checkForUpdates, initUpdater } from './updater';
 import {
@@ -18,7 +19,12 @@ import {
   markSeedFinished,
   markSeedStarted,
 } from './init-state';
+import { buildAppMenu } from './app-menu';
+import { initializeAppLock } from './app-lock';
+import { sendRendererCommand, setMainWindow } from './renderer-commands';
+import { comicPathsFromArgs, onComicOpenQueued, queueComicOpen } from './local-archives';
 import {
+  initializeCloseToTray,
   initializeStartupBackground,
   markQuitting,
   shouldHideWindowOnClose,
@@ -50,7 +56,21 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
+  // "Open with Projekt Manga": on Windows and Linux the file arrives on the command line
+  // (this launch's, or a second launch's handed over below); macOS sends open-file, which
+  // can come before the app is ready. Either way it is queued and the window is told.
+  for (const file of comicPathsFromArgs(process.argv)) queueComicOpen(file);
+  app.on('open-file', (event, file) => {
+    event.preventDefault();
+    queueComicOpen(file);
+  });
+  onComicOpenQueued(() => {
+    showBackgroundWindow();
+    sendRendererCommand({ type: 'open-pending' });
+  });
+
   app.on('second-instance', (_event, commandLine) => {
+    for (const file of comicPathsFromArgs(commandLine)) queueComicOpen(file);
     if (commandLine.includes('--pm-background-start')) return;
     if (BrowserWindow.getAllWindows().length === 0) revealWhenReady = true;
     else showBackgroundWindow();
@@ -87,10 +107,21 @@ if (!gotLock) {
     // Same directory, same reasoning: writable without elevation, and preserved across
     // updates so installed sources survive one.
     const extensionBundlesDir = path.join(app.getPath('userData'), 'installed-extensions');
+    let tokenEncryptionKey: string | undefined;
+    try {
+      tokenEncryptionKey = resolveServerTokenKey();
+    } catch (error) {
+      // Not fatal: only stored credentials need it, and the server says so when asked.
+      console.warn(
+        '[main] Could not prepare the server encryption key:',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
     const { apiPort, webPort, ready } = await startServers(
       paths,
       databaseFile,
       extensionBundlesDir,
+      { tokenEncryptionKey },
     );
     process.env.PROJEKT_MANGA_WEB_URL = buildLocalWebUrl(webPort);
     process.env.PROJEKT_MANGA_API_URL = `http://127.0.0.1:${apiPort}/api`;
@@ -115,11 +146,10 @@ if (!gotLock) {
     // Match electron-builder's appId so Windows attributes renderer notifications to
     // Projekt Manga instead of the generic Electron process where supported.
     if (process.platform === 'win32') app.setAppUserModelId('com.projektmanga.desktop');
-    // The app already has its own top nav (FloatingNav) rendered in the page itself —
-    // Electron's native File/Edit/View menu bar would just be a second, redundant row of
-    // chrome above it. The window keeps its normal OS frame (title bar, minimize/
-    // maximize/close); only the menu bar underneath that is removed.
-    Menu.setApplicationMenu(null);
+    // The app already has its own top nav (FloatingNav) rendered in the page itself, so
+    // the menu bar is hidden (window.ts sets autoHideMenuBar; Alt shows it). The menu is
+    // still set for its keyboard accelerators: Ctrl+Shift+P, Ctrl+1–5, F11. See app-menu.ts.
+    Menu.setApplicationMenu(buildAppMenu());
 
     // Opens the local DB and runs any pending migrations synchronously, so a broken
     // migration fails loudly at startup instead of on whatever IPC call happens to be
@@ -140,10 +170,14 @@ if (!gotLock) {
 
     // After the servers, so the diagnostics handler reports the real supervision state.
     registerIpcHandlers({ managedServers: apiBaseUrl !== undefined });
+    // Before the window, so a configured lock is in force before anything shows.
+    initializeAppLock();
 
     const startHidden = await initializeStartupBackground();
+    await initializeCloseToTray();
     const openWindow = (hidden = false) => {
       const win = createMainWindow({ apiBaseUrl, startHidden: hidden });
+      setMainWindow(win);
       win.on('close', (event) => {
         if (shouldHideWindowOnClose()) {
           event.preventDefault();

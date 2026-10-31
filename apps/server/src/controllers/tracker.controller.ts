@@ -4,6 +4,7 @@ import trackerService from '../services/tracker.service.js';
 import { isTrackerService, type TrackerService } from '@projekt-manga/types';
 import { AppError, ValidationError } from '../utils/customErrors.js';
 import type {
+  ConnectTrackerBody,
   TrackerCallbackQuery,
   TrackerSearchQuery,
   LinkTrackerBody,
@@ -32,6 +33,32 @@ const listConnected = async (req: Request, res: Response, next: NextFunction) =>
   try {
     const trackers = await trackerService.getConnectedTrackers(req.user!.id);
     return HTTPSuccessResponse(res, 200, 'Connected trackers retrieved successfully', trackers);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const listAvailable = (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const trackers = trackerService.getAvailableTrackers();
+    return HTTPSuccessResponse(res, 200, 'Available trackers retrieved successfully', trackers);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** Username/password or server URL/API-key connect. The body is never logged or echoed:
+ * adapters turn every upstream failure into a fixed, credential-free message. */
+const connectWithCredentials = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { tracker } = req.params as { tracker: string };
+    const body = req.validated as ConnectTrackerBody;
+    const account = await trackerService.connectWithCredentials(
+      req.user!.id,
+      parseTracker(tracker),
+      body,
+    );
+    return HTTPSuccessResponse(res, 201, 'Tracker connected successfully', account);
   } catch (error) {
     return next(error);
   }
@@ -139,6 +166,8 @@ const unlinkManga = async (req: Request, res: Response, next: NextFunction) => {
 
 const trackerController = {
   listConnected,
+  listAvailable,
+  connectWithCredentials,
   getAuthorizeUrl,
   handleCallback,
   syncNow,

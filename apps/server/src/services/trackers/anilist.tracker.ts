@@ -259,7 +259,15 @@ const mapToShelfStatus = (nativeStatus: string): ShelfStatus | null =>
   TO_SHELF[nativeStatus] ?? null;
 const mapFromShelfStatus = (shelf: ShelfStatus): string => FROM_SHELF[shelf];
 
+const isConfigured = (): boolean =>
+  !!process.env.ANILIST_CLIENT_ID &&
+  !!process.env.ANILIST_CLIENT_SECRET &&
+  !!process.env.ANILIST_REDIRECT_URI;
+
 const anilistTracker: TrackerAdapter = {
+  label: 'AniList',
+  authKind: 'oauth',
+  isConfigured,
   getAuthUrl,
   exchangeCode,
   searchMedia,

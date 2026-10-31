@@ -2,7 +2,9 @@ import prisma from '../configs/prisma.config.js';
 import { Prisma } from '@prisma/client';
 import { isMangaStatus, type MangaStatus } from '@projekt-manga/types';
 import type { GetMangaOptions, AddMangaPayload } from '@projekt-manga/types';
+import type { manga_override } from '@prisma/client';
 import { DuplicateResourceError } from '../utils/customErrors.js';
+import mangaOverrideRepository from './mangaOverride.repository.js';
 
 /** Extensions report status as a plain string; this is the one place that maps it onto
  * the stored vocabulary, falling back to UNKNOWN for anything unrecognized instead of
@@ -59,6 +61,73 @@ const withListingCounts = async <T extends MangaWithChapterCount>(mangaList: T[]
   }));
 };
 
+/** What a reader changed about a title, sent alongside the merged values so an edit form
+ * can tell an edited field from the source's own value. `original` is the catalog value
+ * underneath, which a backup export keeps in place of the edited one. */
+export type MangaOverrideView = {
+  title: string | null;
+  author: string | null;
+  description: string | null;
+  status: string | null;
+  has_cover: boolean;
+  updated_at: Date;
+  original: { title: string; author: string; description: string | null; status: string | null };
+};
+
+type OverlayTarget = {
+  id: string;
+  title: string;
+  author: string;
+  manga_detail?: { description?: string; status?: string } | null;
+};
+
+/** Lays one identity's override over a catalog row: set fields win, null ones fall through.
+ * Library updates and details refreshes write the catalog only, so this is the one place an
+ * edit becomes visible. */
+const applyOverride = <T extends OverlayTarget>(row: T, override: manga_override | undefined) => {
+  if (!override) return { ...row, override: null as MangaOverrideView | null };
+  const detail = row.manga_detail;
+  return {
+    ...row,
+    title: override.title ?? row.title,
+    author: override.author ?? row.author,
+    manga_detail: detail
+      ? {
+          ...detail,
+          ...(override.description != null ? { description: override.description } : {}),
+          ...(override.status != null ? { status: override.status } : {}),
+        }
+      : detail,
+    override: {
+      title: override.title,
+      author: override.author,
+      description: override.description,
+      status: override.status,
+      has_cover: override.cover_path != null,
+      updated_at: override.updated_at,
+      original: {
+        title: row.title,
+        author: row.author,
+        description: detail?.description ?? null,
+        status: detail?.status ?? null,
+      },
+    } as MangaOverrideView | null,
+  };
+};
+
+const withOverrides = async <T extends OverlayTarget>(rows: T[], user_id: string | null) => {
+  const overrides = await mangaOverrideRepository.mapForManga(
+    rows.map((row) => row.id),
+    user_id,
+  );
+  return rows.map((row) => applyOverride(row, overrides.get(row.id)));
+};
+
+const withOverride = async <T extends OverlayTarget>(row: T | null, user_id: string | null) => {
+  if (!row) return null;
+  return applyOverride(row, (await mangaOverrideRepository.find(row.id, user_id)) ?? undefined);
+};
+
 const getManga = async (options: GetMangaOptions) => {
   const manga = await prisma.manga.findMany({
     // Rows created purely to back a preview read or download aren't library entries.
@@ -82,7 +151,7 @@ const getManga = async (options: GetMangaOptions) => {
     },
   });
 
-  return withListingCounts(manga);
+  return withOverrides(await withListingCounts(manga), null);
 };
 
 /** Per-account equivalent of getManga: membership comes from user_library instead of
@@ -140,13 +209,19 @@ const getMangaForUser = async (user_id: string, options: GetMangaOptions) => {
 
   const readCountByManga = new Map(readCounts.map((row) => [row.manga_id, Number(row.read_count)]));
 
-  return mangaPages.map((mangaItem) => ({
-    ...mangaItem,
-    in_library: true,
-    chapter_count: mangaItem._count.chapter,
-    latest_chapter_date: mangaItem.chapter.length > 0 ? mangaItem.chapter[0].release_date : null,
-    unread_count: Math.max(0, mangaItem._count.chapter - (readCountByManga.get(mangaItem.id) ?? 0)),
-  }));
+  return withOverrides(
+    mangaPages.map((mangaItem) => ({
+      ...mangaItem,
+      in_library: true,
+      chapter_count: mangaItem._count.chapter,
+      latest_chapter_date: mangaItem.chapter.length > 0 ? mangaItem.chapter[0].release_date : null,
+      unread_count: Math.max(
+        0,
+        mangaItem._count.chapter - (readCountByManga.get(mangaItem.id) ?? 0),
+      ),
+    })),
+    user_id,
+  );
 };
 
 /** Per-account equivalent of getMangaByCategoryId: resolves manga ids via the private
@@ -179,7 +254,7 @@ const getMangaByCategoryIdForUser = async (
     },
   });
 
-  return withListingCounts(manga);
+  return withOverrides(await withListingCounts(manga), user_id);
 };
 
 /** Per-account equivalent of getMangaDetailsById: overlays is_read/is_bookmark/
@@ -208,23 +283,26 @@ const getMangaDetailsByIdForUser = async (user_id: string, manga_id: string) => 
       : [];
   const stateByChapter = new Map(states.map((s) => [s.chapter_id, s]));
 
-  return {
-    ...manga,
-    in_library: membership !== null && membership.deleted_at === null,
-    chapter: manga.chapter.map((c) => {
-      const state = stateByChapter.get(c.id);
-      return {
-        ...c,
-        is_read: state?.is_read ?? false,
-        is_bookmark: state?.is_bookmark ?? false,
-        last_page_read: state?.last_page_read ?? 0,
-      };
-    }),
-  };
+  return withOverride(
+    {
+      ...manga,
+      in_library: membership !== null && membership.deleted_at === null,
+      chapter: manga.chapter.map((c) => {
+        const state = stateByChapter.get(c.id);
+        return {
+          ...c,
+          is_read: state?.is_read ?? false,
+          is_bookmark: state?.is_bookmark ?? false,
+          last_page_read: state?.last_page_read ?? 0,
+        };
+      }),
+    },
+    user_id,
+  );
 };
 
 const getMangaDetailsById = async (manga_id: string) => {
-  return await prisma.manga.findUnique({
+  const manga = await prisma.manga.findUnique({
     where: {
       id: manga_id,
     },
@@ -234,6 +312,7 @@ const getMangaDetailsById = async (manga_id: string) => {
       cache: { select: { sha256_url: true } },
     },
   });
+  return withOverride(manga, null);
 };
 
 /** When this title's stored details were last written, or null without a details row. */
@@ -377,10 +456,20 @@ const addManga = async (manga_data: AddMangaPayload, user_id?: string) => {
     const attachChapters = async (mangaId: string) => {
       if (!manga_data.chapters?.length) return;
 
-      const chapters = manga_data.chapters.map((chapter) => {
+      // Chapters are keyed by the source's id within this title — the stored row's
+      // source and slug, which an existing row matched by title may not share with the
+      // payload.
+      const owner = await prisma.manga.findUniqueOrThrow({
+        where: { id: mangaId },
+        select: { source: true, slug: true },
+      });
+      const unique = new Map(manga_data.chapters.map((chapter) => [chapter.id, chapter]));
+      const chapters = [...unique.values()].map((chapter) => {
         const parsedReleaseDate = chapter.release_date ? new Date(chapter.release_date) : null;
         return {
-          id: chapter.id,
+          source: owner.source,
+          manga_slug: owner.slug,
+          source_chapter_key: chapter.id,
           manga_id: mangaId,
           url: chapter.url || '',
           name: chapter.name || '',
@@ -394,10 +483,17 @@ const addManga = async (manga_data: AddMangaPayload, user_id?: string) => {
           page_count: chapter.page_count || 0,
         };
       });
+      // Placeholders a preview read, history or a download stood up before the title was
+      // stored hold the same keys; they become this title's rows.
       const existingChapters = await prisma.chapter.findMany({
-        where: { id: { in: chapters.map((chapter) => chapter.id) } },
+        where: {
+          source: owner.source,
+          manga_slug: owner.slug,
+          source_chapter_key: { in: chapters.map((chapter) => chapter.source_chapter_key) },
+        },
         select: {
           id: true,
+          source_chapter_key: true,
           url: true,
           name: true,
           scanlator: true,
@@ -413,9 +509,11 @@ const addManga = async (manga_data: AddMangaPayload, user_id?: string) => {
           where: { id: { in: existingChapterIds } },
           data: { manga_id: mangaId },
         });
-        const existingById = new Map(existingChapters.map((chapter) => [chapter.id, chapter]));
+        const existingByKey = new Map(
+          existingChapters.map((chapter) => [chapter.source_chapter_key, chapter]),
+        );
         for (const chapter of chapters) {
-          const existing = existingById.get(chapter.id);
+          const existing = existingByKey.get(chapter.source_chapter_key);
           if (!existing) continue;
           const data = {
             ...(existing.chapter_number === 0 && chapter.chapter_number > 0
@@ -433,22 +531,20 @@ const addManga = async (manga_data: AddMangaPayload, user_id?: string) => {
           };
           if (Object.keys(data).length === 0) continue;
           await prisma.chapter.update({
-            where: { id: chapter.id },
+            where: { id: existing.id },
             data,
           });
         }
         await prisma.history.updateMany({
-          where: {
-            source: manga_data.source,
-            manga_slug: manga_data.slug,
-            chapter_id: { in: existingChapterIds },
-          },
+          where: { chapter_id: { in: existingChapterIds } },
           data: { manga_id: mangaId, sync_updated_at: new Date() },
         });
       }
 
-      const existingIds = new Set(existingChapterIds);
-      const newChapters = chapters.filter((chapter) => !existingIds.has(chapter.id));
+      const existingKeys = new Set(existingChapters.map((chapter) => chapter.source_chapter_key));
+      const newChapters = chapters.filter(
+        (chapter) => !existingKeys.has(chapter.source_chapter_key),
+      );
       if (newChapters.length > 0) {
         await prisma.chapter.createMany({ data: newChapters });
       }
@@ -633,7 +729,7 @@ const getMangaByCategoryId = async (category_id: string, options: GetMangaOption
     },
   });
 
-  return withListingCounts(manga);
+  return withOverrides(await withListingCounts(manga), null);
 };
 
 /** Used only by auth.service's "first account claims existing anonymous data" — every
@@ -663,7 +759,31 @@ const listLibraryBasic = async () => {
   });
 };
 
+/**
+ * Each library title's chapter dates, for release estimates. Membership follows the same
+ * rule as getManga / getMangaForUser: the shared `in_library` flag without an account,
+ * the account's own user_library rows with one.
+ */
+const listLibraryChapterDates = async (user_id: string | null) => {
+  return await prisma.manga.findMany({
+    where: user_id
+      ? { user_library: { some: { user_id, deleted_at: null } } }
+      : { in_library: true },
+    select: {
+      id: true,
+      // The estimate reads only the last few releases. The newest chapter numbers are
+      // enough, with room for several groups releasing each one.
+      chapter: {
+        select: { chapter_number: true, release_date: true, created_at: true },
+        orderBy: { chapter_number: 'desc' },
+        take: 100,
+      },
+    },
+  });
+};
+
 const mangaRepository = {
+  listLibraryChapterDates,
   getDetailsUpdatedAt,
   refreshDetails,
   getManga,

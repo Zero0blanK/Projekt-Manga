@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import {
+  getAvailableTrackers,
   getConnectedTrackers,
   getMangaTrackerLinks,
   searchTrackerMedia,
@@ -10,6 +11,7 @@ import {
   syncTrackersNow,
   ApiError,
   type TrackerLink,
+  type TrackerName,
   type TrackerSearchResult,
 } from '@projekt-manga/api-client';
 import { useCurrentUser } from '@/lib/session-resource';
@@ -31,8 +33,10 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
 }
 
-const TRACKER = 'ANILIST' as const;
-const TRACKER_LABEL = 'AniList';
+interface ConnectedOption {
+  tracker: TrackerName;
+  label: string;
+}
 
 /** A plain 0-10 rating, converted to this app's fixed 0-100 scale on save. */
 function ScoreControl({ manga }: { manga: Manga }) {
@@ -137,11 +141,13 @@ function SyncStatus({ link }: { link: TrackerLink }) {
 
 function LinkDialogBody({
   manga,
+  tracker: { tracker: TRACKER, label: TRACKER_LABEL },
   existingLink,
   onLinked,
   onUnlinked,
 }: {
   manga: Manga;
+  tracker: ConnectedOption;
   existingLink: TrackerLink | null;
   onLinked: (link: TrackerLink) => void;
   onUnlinked: () => void;
@@ -248,26 +254,38 @@ function LinkDialogBody({
   );
 }
 
-/** Only rendered once the reader is signed in with AniList connected; anyone else has
- * nothing to link to, so a button would be a dead end. */
+/** Only rendered once the reader is signed in with at least one tracker connected; anyone
+ * else has nothing to link to, so a button would be a dead end. With several connected,
+ * the dialog switches between them. */
 export function TrackerLinkButton({ manga }: { manga: Manga }) {
   const { user } = useCurrentUser();
   const userId = user?.id ?? null;
-  const [connection, setConnection] = useState<{ userId: string; connected: boolean } | null>(null);
+  const [connection, setConnection] = useState<{
+    userId: string;
+    trackers: ConnectedOption[];
+  } | null>(null);
   const [linkLookup, setLinkLookup] = useState<{
     userId: string;
     mangaId: string;
-    link: TrackerLink | null;
+    links: TrackerLink[];
   } | null>(null);
   const [openFor, setOpenFor] = useState<string | null>(null);
+  const [selected, setSelected] = useState<TrackerName | null>(null);
 
   useEffect(() => {
     if (!userId) return;
     const controller = new AbortController();
-    getConnectedTrackers(controller.signal)
-      .then((trackers) => {
-        if (!controller.signal.aborted)
-          setConnection({ userId, connected: trackers.some((t) => t.tracker === TRACKER) });
+    Promise.all([getConnectedTrackers(controller.signal), getAvailableTrackers(controller.signal)])
+      .then(([accounts, available]) => {
+        if (controller.signal.aborted) return;
+        const labels = new Map(available.map((t) => [t.tracker, t.label]));
+        setConnection({
+          userId,
+          trackers: accounts.map((a) => ({
+            tracker: a.tracker,
+            label: labels.get(a.tracker) ?? a.tracker,
+          })),
+        });
       })
       .catch((error) => {
         if (!controller.signal.aborted)
@@ -277,16 +295,11 @@ export function TrackerLinkButton({ manga }: { manga: Manga }) {
   }, [userId]);
 
   useEffect(() => {
-    if (!userId || connection?.userId !== userId || !connection.connected) return;
+    if (!userId || connection?.userId !== userId || connection.trackers.length === 0) return;
     const controller = new AbortController();
     getMangaTrackerLinks(manga.id, controller.signal)
       .then((links) => {
-        if (!controller.signal.aborted)
-          setLinkLookup({
-            userId,
-            mangaId: manga.id,
-            link: links.find((l) => l.tracker === TRACKER) ?? null,
-          });
+        if (!controller.signal.aborted) setLinkLookup({ userId, mangaId: manga.id, links });
       })
       .catch((error) => {
         if (!controller.signal.aborted)
@@ -298,14 +311,35 @@ export function TrackerLinkButton({ manga }: { manga: Manga }) {
   if (
     !userId ||
     connection?.userId !== userId ||
-    !connection.connected ||
+    connection.trackers.length === 0 ||
     linkLookup?.userId !== userId ||
     linkLookup.mangaId !== manga.id
   ) {
     return null;
   }
-  const existingLink = linkLookup.link;
+  const options = connection.trackers;
+  const linkFor = (tracker: TrackerName) =>
+    linkLookup.links.find((l) => l.tracker === tracker) ?? null;
+  // Default to the first linked tracker, else the first connected one.
+  const current =
+    options.find((o) => o.tracker === selected) ??
+    options.find((o) => linkFor(o.tracker)) ??
+    options[0];
+  const existingLink = linkFor(current.tracker);
+  const anyLinked = options.some((o) => linkFor(o.tracker));
+  const linkedLabels = options.filter((o) => linkFor(o.tracker)).map((o) => o.label);
+  const buttonLabel = anyLinked
+    ? `Linked to ${linkedLabels.join(', ')}`
+    : options.length === 1
+      ? `Link to ${options[0].label}`
+      : 'Link to a tracker';
   const dialogKey = `${userId}\0${manga.id}`;
+  const replaceLink = (tracker: TrackerName, link: TrackerLink | null) =>
+    setLinkLookup({
+      userId,
+      mangaId: manga.id,
+      links: [...linkLookup.links.filter((l) => l.tracker !== tracker), ...(link ? [link] : [])],
+    });
 
   return (
     <Dialog
@@ -314,11 +348,11 @@ export function TrackerLinkButton({ manga }: { manga: Manga }) {
     >
       <DialogTrigger asChild>
         <button
-          aria-pressed={!!existingLink}
-          aria-label={existingLink ? `Linked to ${TRACKER_LABEL}` : `Link to ${TRACKER_LABEL}`}
-          title={existingLink ? `Linked to ${TRACKER_LABEL}` : `Link to ${TRACKER_LABEL}`}
+          aria-pressed={anyLinked}
+          aria-label={buttonLabel}
+          title={buttonLabel}
           className={`grid h-10 w-10 place-items-center rounded-full border transition ${
-            existingLink
+            anyLinked
               ? 'border-primary/50 bg-primary/10 text-primary'
               : 'border-border/60 bg-surface/60 text-foreground hover:bg-surface'
           }`}
@@ -328,18 +362,41 @@ export function TrackerLinkButton({ manga }: { manga: Manga }) {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{TRACKER_LABEL}</DialogTitle>
+          <DialogTitle>{current.label}</DialogTitle>
           <DialogDescription>Link {manga.title} to sync reading progress.</DialogDescription>
         </DialogHeader>
+        {options.length > 1 && (
+          <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Tracker">
+            {options.map((o) => (
+              <button
+                key={o.tracker}
+                role="tab"
+                aria-selected={o.tracker === current.tracker}
+                onClick={() => setSelected(o.tracker)}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                  o.tracker === current.tracker
+                    ? 'border-primary/50 bg-primary/10 text-primary'
+                    : 'border-border/60 text-foreground hover:bg-accent'
+                }`}
+              >
+                {o.label}
+                {linkFor(o.tracker) ? ' ✓' : ''}
+              </button>
+            ))}
+          </div>
+        )}
         <LinkDialogBody
+          // Remount per tracker so search text/results don't leak between them.
+          key={current.tracker}
           manga={manga}
+          tracker={current}
           existingLink={existingLink}
           onLinked={(link) => {
-            setLinkLookup({ userId, mangaId: manga.id, link });
+            replaceLink(current.tracker, link);
             setOpenFor(null);
           }}
           onUnlinked={() => {
-            setLinkLookup({ userId, mangaId: manga.id, link: null });
+            replaceLink(current.tracker, null);
             setOpenFor(null);
           }}
         />

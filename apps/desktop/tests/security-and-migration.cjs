@@ -77,7 +77,15 @@ test('upgrading the legacy slug constraint preserves child records', () => {
         source TEXT, thumbnail_url TEXT, artist TEXT, description TEXT, genres TEXT,
         status TEXT, updated_at TEXT NOT NULL
       );
-      CREATE TABLE chapter (id TEXT PRIMARY KEY, manga_id TEXT REFERENCES manga(id) ON DELETE CASCADE);
+      CREATE TABLE chapter (
+        id TEXT PRIMARY KEY, manga_id TEXT REFERENCES manga(id) ON DELETE CASCADE, url TEXT,
+        name TEXT, scanlator TEXT, chapter_number REAL NOT NULL DEFAULT 0, release_date TEXT,
+        page_count INTEGER, updated_at TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE history (
+        id TEXT PRIMARY KEY, source TEXT NOT NULL, manga_slug TEXT NOT NULL, chapter_id TEXT,
+        last_read TEXT NOT NULL DEFAULT ''
+      );
       INSERT INTO manga (id, slug, title, source, updated_at) VALUES ('a', '42', 'Title A', 'source-a', '2026-01-01');
       INSERT INTO chapter (id, manga_id) VALUES ('chapter-a', 'a');
     `);
@@ -88,6 +96,12 @@ test('upgrading the legacy slug constraint preserves child records', () => {
         .all()
         .map((row) => ({ ...row })),
       [{ id: 'chapter-a', manga_id: 'a' }],
+    );
+    // Version 5: the old id is kept as the row id and becomes the source key, scoped to
+    // the owning title.
+    assert.deepEqual(
+      { ...db.prepare('SELECT source, manga_slug, source_chapter_key FROM chapter').get() },
+      { source: 'source-a', manga_slug: '42', source_chapter_key: 'chapter-a' },
     );
     db.prepare(
       'INSERT INTO manga (id, slug, title, source, updated_at) VALUES (?, ?, ?, ?, ?)',

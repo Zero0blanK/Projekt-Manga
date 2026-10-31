@@ -5,6 +5,7 @@ import type { FilterValue, Mangas } from '@projekt-manga/types';
 import { searchSourceMangaPage } from '@projekt-manga/api-client';
 import type { DisplaySource } from '@/lib/manga-data';
 import { SourceResultCard } from '@/components/discover/popular-section';
+import { useVisibleSourceResults } from '@/lib/library-titles';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useScrollBehavior } from '@/lib/scroll';
 import { reportError } from '@/lib/report-error';
@@ -43,6 +44,7 @@ export function SourceSearchCarousel({ source, query }: { source: DisplaySource;
     return filters;
   }, [language]);
   const [items, setItems] = useState<Mangas[]>([]);
+  const { visible: visibleItems, hidden: hiddenCount } = useVisibleSourceResults(items, source.id);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -174,14 +176,16 @@ export function SourceSearchCarousel({ source, query }: { source: DisplaySource;
   // they approach the end, so paging forward never stalls on a fetch.
   const onScroll = () => {
     const el = scrollRef.current;
-    if (!el || items.length === 0) return;
-    const cardWidth = el.scrollWidth / items.length;
+    if (!el || visibleItems.length === 0) return;
+    // Measured over the cards actually rendered; the prefetch threshold below still counts
+    // against everything fetched, hidden library titles included.
+    const cardWidth = el.scrollWidth / visibleItems.length;
     // A collapsed or not-yet-laid-out row measures 0 wide, which makes cardWidth 0 and
     // the index below Infinity — enough to trip the prefetch and pull a page nobody can
     // see yet. Wait until it has real geometry.
     if (!Number.isFinite(cardWidth) || cardWidth <= 0) return;
     const lastVisibleIndex = Math.ceil((el.scrollLeft + el.clientWidth) / cardWidth);
-    if (lastVisibleIndex >= items.length - PREFETCH_MARGIN) loadMore();
+    if (lastVisibleIndex >= visibleItems.length - PREFETCH_MARGIN) loadMore();
   };
 
   const nudge = (direction: 1 | -1) => {
@@ -255,6 +259,12 @@ export function SourceSearchCarousel({ source, query }: { source: DisplaySource;
               No matches from {source.name}.
             </p>
           )}
+          {!loading && hiddenCount > 0 && (
+            <p role="status" className="mt-3 text-sm text-muted-foreground">
+              {hiddenCount === 1 ? '1 title' : `${hiddenCount} titles`} already in your library{' '}
+              {hiddenCount === 1 ? 'is' : 'are'} hidden.
+            </p>
+          )}
           <div
             ref={scrollRef}
             onScroll={onScroll}
@@ -267,7 +277,7 @@ export function SourceSearchCarousel({ source, query }: { source: DisplaySource;
                     <div className="mt-2 h-3 w-3/4 rounded bg-muted" />
                   </div>
                 ))
-              : items.map((m) => (
+              : visibleItems.map((m) => (
                   <div key={`${m.source}-${m.id}`} className="w-36 shrink-0">
                     <SourceResultCard sourceId={source.id} item={m} />
                   </div>

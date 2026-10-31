@@ -7,11 +7,19 @@ import {
   type HistoryEntry,
   type DownloadStats,
 } from '@projekt-manga/api-client';
-import { Panel } from '@/components/settings/field-controls';
-import { SHELF_OPTIONS, useSetting } from '@/lib/app-store';
+import { Field, NumberSelect, Panel, Select } from '@/components/settings/field-controls';
+import Link from 'next/link';
+import { ReadingGoalProgress } from '@/components/library/reading-goal';
+import {
+  GOAL_COUNTS,
+  GOAL_PERIODS,
+  READING_GOAL_COUNT,
+  READING_GOAL_PERIOD,
+} from '@/lib/reading-stats';
+import { SHELF_OPTIONS } from '@/lib/app-store';
 import { formatDuration } from '@/lib/manga-data';
 import { useMangaLibrary, useLibraryState } from '@/lib/library-store';
-import { entriesInGlobalUpdate, isStarted } from '@/lib/library-update';
+import { entriesInGlobalUpdate, isStarted, useGlobalUpdateRules } from '@/lib/library-update';
 import { shelfOf as resolveShelf } from '@/components/library/constants';
 import { StatCardsSkeleton } from '@/components/skeletons';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -110,7 +118,7 @@ function currentStreak(history: HistoryEntry[]): number {
 export function StatisticsPanel() {
   const { manga: mangaLibrary, loading: libraryLoading } = useMangaLibrary();
   const { shelf, bookmarks } = useLibraryState();
-  const skipCompleted = useSetting('skipCompletedOnUpdate', false) as boolean;
+  const updateRules = useGlobalUpdateRules();
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [downloads, setDownloads] = useState<DownloadStats | null>(null);
   const [statsLoaded, setStatsLoaded] = useState(false);
@@ -196,7 +204,7 @@ export function StatisticsPanel() {
     count: mangaLibrary.filter((m) => shelfOf(m) === o.value).length,
   }));
   const completedCount = shelfCounts.find((o) => o.value === 'completed')?.count ?? 0;
-  const inGlobalUpdate = entriesInGlobalUpdate(mangaLibrary, shelf, skipCompleted).length;
+  const inGlobalUpdate = entriesInGlobalUpdate(mangaLibrary, shelf, updateRules).length;
   const startedCount = mangaLibrary.filter(isStarted).length;
   // Local CBZ files live in their own device collection, outside this source library.
   const localCount = 0;
@@ -272,9 +280,9 @@ export function StatisticsPanel() {
             label="In global update"
             value={inGlobalUpdate}
             note={
-              skipCompleted
-                ? 'Finished titles are skipped — see Sync & Storage'
-                : 'Every library entry; enable skipping in Sync & Storage'
+              inGlobalUpdate < mangaLibrary.length
+                ? 'Some titles are skipped by the rules in Sync & Storage'
+                : 'Every library entry; set skip rules in Sync & Storage'
             }
           />
           <StatRow label="Started" value={startedCount} note="Opened but not finished" />
@@ -302,6 +310,28 @@ export function StatisticsPanel() {
             }
           />
         </Section>
+      </Panel>
+
+      <Panel title="Reading goal" subtitle="Chapters to read each week or month">
+        <Field label="Goal" hint="Shown on the library page while it's set">
+          <NumberSelect
+            settingKey={READING_GOAL_COUNT}
+            options={[...GOAL_COUNTS]}
+            defaultValue={0}
+            format={(n) => (n === 0 ? 'Off' : `${n} chapters`)}
+          />
+        </Field>
+        <Field label="Per" nested>
+          <Select
+            settingKey={READING_GOAL_PERIOD}
+            options={[...GOAL_PERIODS]}
+            defaultValue="Week"
+          />
+        </Field>
+        <ReadingGoalProgress history={history} />
+        <Link href="/year" className="inline-block text-xs text-primary hover:underline">
+          Your year in manga →
+        </Link>
       </Panel>
 
       <Panel

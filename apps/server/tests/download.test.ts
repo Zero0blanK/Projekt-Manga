@@ -79,9 +79,14 @@ describe('POST /api/downloads/chapter', () => {
     // Regression check: a chapter created via the "ghost chapter" history flow has
     // manga_id: null. download.manga_id is a required column, so initiateDownload must
     // link it to the resolved manga rather than falling back to an empty string.
-    prismaMock.manga.findFirst.mockResolvedValueOnce({ id: 'manga-1', source: 'mangadex' });
-    prismaMock.chapter.findUnique.mockResolvedValueOnce({ id: 'ch-1', manga_id: null });
-    prismaMock.chapter.update.mockResolvedValueOnce({ id: 'ch-1', manga_id: 'manga-1' });
+    prismaMock.manga.findFirst.mockResolvedValueOnce({
+      id: 'manga-1',
+      source: 'mangadex',
+      slug: 'one-piece',
+    });
+    prismaMock.manga.findUnique.mockResolvedValueOnce({ id: 'manga-1' });
+    prismaMock.chapter.findUnique.mockResolvedValueOnce({ id: 'row-1', manga_id: null });
+    prismaMock.chapter.update.mockResolvedValueOnce({ id: 'row-1', manga_id: 'manga-1' });
     prismaMock.download.create.mockResolvedValueOnce({ id: 'dl-1' });
 
     const res = await request(app)
@@ -98,7 +103,9 @@ describe('POST /api/downloads/chapter', () => {
       expect.objectContaining({ data: { manga_id: 'manga-1' } }),
     );
     expect(prismaMock.download.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ manga_id: 'manga-1' }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ manga_id: 'manga-1', chapter_id: 'row-1' }),
+      }),
     );
   });
 

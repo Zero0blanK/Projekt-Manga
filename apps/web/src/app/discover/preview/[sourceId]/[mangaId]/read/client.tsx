@@ -14,13 +14,14 @@ import {
 } from '@projekt-manga/api-client';
 import { invalidateSavedReadingProgress } from '@/lib/query-client';
 import { fromSourceDetails } from '@/lib/manga-data';
-import { useReaderSettings } from '@/lib/reader-settings';
+import { ReaderColorFilterContext, useReaderSettings } from '@/lib/reader-settings';
 import { useWakeLock } from '@/lib/use-wake-lock';
 import { useReadingClock } from '@/lib/use-reading-clock';
 import { PagedViewer } from '@/components/reader/paged-viewer';
 import { LongStripViewer } from '@/components/reader/long-strip-viewer';
 import { ReaderProgressBar } from '@/components/reader/reader-progress-bar';
 import { ReaderSettingsMenu } from '@/components/reader/reader-settings-menu';
+import { PageImageActions } from '@/components/reader/page-image-actions';
 import { usePagePrefetch } from '@/components/reader/use-page-prefetch';
 import { ExitReaderButton } from '@/components/reader/exit-reader-button';
 import { reportError } from '@/lib/report-error';
@@ -29,12 +30,13 @@ import { X, ZoomIn, ZoomOut, List } from 'lucide-react';
 import { useProfilePreference } from '@/lib/profile-preferences';
 import { parseChapterParam, parsePreferredGroup } from '@/lib/reader-preferences';
 import { ReaderPersonalTools } from '@/components/reader/reader-personal-tools';
+import { ReaderTintOverlay } from '@/components/reader/reader-tint';
 import { isSourceIncognito, useSourceIncognito } from '@/lib/incognito';
 import { useAutoAdvanceCountdown } from '@/lib/auto-advance';
-
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 2.5;
-const ZOOM_STEP = 0.25;
+import { useReaderZoom, ZOOM_MAX, ZOOM_MIN } from '@/lib/reader-zoom';
+import { useReaderInput } from '@/components/reader/use-reader-input';
+import { ReaderShortcuts } from '@/components/reader/reader-shortcuts';
+import { ReaderContextMenu } from '@/components/reader/reader-context-menu';
 
 function positiveNumberParam(params: URLSearchParams, key: string): number | undefined {
   const raw = Number(params.get(key));
@@ -79,6 +81,9 @@ export function SourceReaderClient({
     autoAdvance,
     tapActions,
     zoomBehavior,
+    colorFilter,
+    tint,
+    tintStrength,
   } = useReaderSettings(sourceId, details.id);
 
   useWakeLock(keepScreenAwake);
@@ -108,7 +113,7 @@ export function SourceReaderClient({
 
   const [chapter, setChapter] = useState(requestedChapter);
   const [page, setPage] = useState(requestedPage ?? 1);
-  const [zoom, setZoom] = useState(1);
+  const { zoom, setZoom, zoomIn, zoomOut, zoomReset } = useReaderZoom();
   const [chapterListOpen, setChapterListOpen] = useState(false);
   const [pagesData, setPagesData] = useState<{
     chapter: number;
@@ -236,7 +241,7 @@ export function SourceReaderClient({
         source_manga_id: details.id,
         title: details.title,
         thumbnail_url: details.thumbnail_url || undefined,
-        chapter_id: p.chapterId,
+        source_chapter_key: p.chapterId,
         pages_read: p.page,
         // Increment since the last flush — the server adds it to the stored total.
         time_read: takeElapsed(),
@@ -382,29 +387,21 @@ export function SourceReaderClient({
     );
   };
 
-  const zoomIn = () => setZoom((z) => Math.min(ZOOM_MAX, Math.round((z + ZOOM_STEP) * 100) / 100));
-  const zoomOut = () => setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - ZOOM_STEP) * 100) / 100));
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable))
-        return;
-      if (e.key === '+' || e.key === '=') {
-        e.preventDefault();
-        zoomIn();
-      } else if (e.key === '-' || e.key === '_') {
-        e.preventDefault();
-        zoomOut();
-      } else if (e.key === '0') {
-        e.preventDefault();
-        setZoom(1);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  // Settings › Reader › Keyboard. Page turning belongs to the viewers.
+  useReaderInput({
+    zoomIn,
+    zoomOut,
+    zoomReset,
+    chapterList: () => setChapterListOpen((v) => !v),
+    nextChapter: () => {
+      if (nextChapter === null) return false;
+      goToChapter(nextChapter, 1);
+    },
+    prevChapter: () => {
+      if (prevChapter === null) return false;
+      goToChapter(prevChapter, chapterByNumber.get(prevChapter)?.page_count || 1);
+    },
+  });
 
   const title = currentRecord?.name || `Chapter ${chapter}`;
   const autoAdvanceCountdown = useAutoAdvanceCountdown(
@@ -457,209 +454,231 @@ export function SourceReaderClient({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background }}>
-      {/* Settings > Reader > Brightness — see the library reader for the rationale. */}
-      {brightness < 100 && (
-        <div
-          aria-hidden
-          className="pointer-events-none fixed inset-0 z-20 bg-black"
-          style={{ opacity: (100 - brightness) / 100 }}
-        />
-      )}
-
-      {pagesError && effectiveLayout !== 'Long strip' && (
-        <div
-          role="alert"
-          className="fixed inset-x-4 top-20 z-40 mx-auto max-w-md rounded-xl border border-destructive/40 bg-black/90 p-4 text-center text-sm text-white"
-        >
-          Couldn&apos;t load this chapter&apos;s pages.
-          <button
-            type="button"
-            onClick={() => setPagesRetry((value) => value + 1)}
-            className="ml-2 text-primary hover:underline"
-          >
-            Try again
-          </button>
-        </div>
-      )}
-      <div
-        className={
-          chromeShown
-            ? 'relative z-30 flex h-14 shrink-0 items-center gap-4 border-b border-white/10 bg-black/80 px-4 backdrop-blur-xl'
-            : 'hidden'
-        }
-      >
-        <ExitReaderButton
-          escapeKey
-          fallbackHref={basePath}
-          label="Back to details"
-          className="grid h-9 w-9 place-items-center rounded-lg text-white/70 hover:bg-white/5 hover:text-white"
-        >
-          <X className="h-4 w-4" />
-        </ExitReaderButton>
-        <div className="min-w-0">
-          <h1 className="truncate text-sm font-semibold text-white">
-            {incognito ? `Incognito · ${details.title}` : details.title}
-          </h1>
-          <div className="truncate text-[11px] text-white/50">
-            Chapter {chapter} · {title}
-          </div>
-        </div>
-
-        <div className="relative ml-auto flex items-center gap-1">
-          <button
-            onClick={() => setChapterListOpen((v) => !v)}
-            aria-expanded={chapterListOpen}
-            aria-label="Chapter list"
-            className={`grid h-9 w-9 place-items-center rounded-lg transition ${
-              chapterListOpen ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5'
-            }`}
-          >
-            <List className="h-4 w-4" />
-          </button>
-          <div className="flex items-center gap-0.5 rounded-lg border border-white/10 px-0.5">
-            <button
-              onClick={zoomOut}
-              disabled={zoom <= ZOOM_MIN}
-              aria-label="Zoom out"
-              className="grid h-8 w-8 place-items-center rounded-md text-white/70 transition hover:bg-white/5 disabled:opacity-30"
-            >
-              <ZoomOut className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => setZoom(1)}
-              className="w-11 text-center text-xs tabular-nums text-white/60 hover:text-white"
-            >
-              {Math.round(zoom * 100)}%
-            </button>
-            <button
-              onClick={zoomIn}
-              disabled={zoom >= ZOOM_MAX}
-              aria-label="Zoom in"
-              className="grid h-8 w-8 place-items-center rounded-md text-white/70 transition hover:bg-white/5 disabled:opacity-30"
-            >
-              <ZoomIn className="h-4 w-4" />
-            </button>
-          </div>
-          <ReaderSettingsMenu />
-          <ReaderPersonalTools
-            source={sourceId}
-            mangaId={details.id}
-            chapterId={currentRecord?.id}
-            page={page}
+    <ReaderColorFilterContext.Provider value={colorFilter}>
+      <div className="fixed inset-0 z-50 flex flex-col" style={{ background }}>
+        {/* Settings > Reader > Brightness — see the library reader for the rationale. */}
+        {brightness < 100 && (
+          <div
+            aria-hidden
+            className="pointer-events-none fixed inset-0 z-20 bg-black"
+            style={{ opacity: (100 - brightness) / 100 }}
           />
-          {preferredGroup && currentRecord?.scanlator !== preferredGroup && (
-            <span role="status" className="text-xs text-white">
-              {preferredGroup} unavailable; using{' '}
-              {currentRecord?.scanlator || 'an available release'}.
-            </span>
-          )}
+        )}
+        <ReaderTintOverlay tint={tint} strength={tintStrength} />
+        <ReaderShortcuts />
 
-          {chapterListOpen && (
-            <>
-              <button
-                type="button"
-                tabIndex={-1}
-                aria-label="Close chapter list"
-                className="fixed inset-0 z-10"
-                onClick={() => setChapterListOpen(false)}
-              />
-              <div className="absolute right-0 top-11 z-20 max-h-80 w-64 overflow-auto rounded-xl border border-white/10 bg-black/95 py-1.5 shadow-lg backdrop-blur-xl">
-                {[...chapters].reverse().map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => {
-                      setPreferredGroup(c.scanlator ?? '');
-                      goToChapter(c.chapter_number, 1, c.id);
-                      setChapterListOpen(false);
-                    }}
-                    className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition hover:bg-white/5 ${
-                      c.chapter_number === chapter ? 'text-primary' : 'text-white/70'
-                    }`}
-                  >
-                    <span className="truncate">
-                      Ch. {c.chapter_number}
-                      {c.name ? ` · ${c.name}` : ''}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {effectiveLayout === 'Long strip' ? (
-        <LongStripViewer
-          key={`${sourceId}:${details.id}:${preferredGroup}`}
-          manga={manga}
-          ready={chapters.length > 0}
-          startChapter={chapter}
-          startPage={page}
-          getNextChapter={nextChapterAfter}
-          getChapterTitle={(n) => chapterByNumber.get(n)?.name || `Chapter ${n}`}
-          getChapterPageCount={(n) => chapterByNumber.get(n)?.page_count ?? 0}
-          fetchPages={fetchPages}
-          onPositionChange={(streamChapter, streamPage, streamTotal) => {
-            if (streamChapter !== chapter) {
-              setChapter(streamChapter);
-              router.replace(`${basePath}/read?ch=${streamChapter}&page=${streamPage}`);
-            }
-            setPage(streamPage);
-            if (streamTotal > 0) setObservedTotal({ chapter: streamChapter, total: streamTotal });
-          }}
-          zoom={zoom}
-          pageGap={stripGap}
-          autoAdvance={autoAdvance}
-          onPageReady={onPageReady}
-          getChapterIdentity={(number) => chapterByNumber.get(number)?.id ?? ''}
-          releaseVersion={requestedChapterId}
-          completionActions={completionActions}
-        />
-      ) : (
-        <PagedViewer
-          key={currentRecord?.id ?? chapter}
-          manga={manga}
-          page={page}
-          totalPages={totalPages}
-          pageUrls={pageUrls}
-          pagesPerView={effectiveLayout === 'Single page' ? 1 : 2}
-          readingDirection={readingDirection}
-          onPositionChange={setPage}
-          hasNextChapter={nextChapter !== null}
-          nextChapterNumber={nextChapter ?? 0}
-          onRequestNextChapter={() => nextChapter !== null && goToChapter(nextChapter, 1)}
-          hasPrevChapter={prevChapter !== null}
-          prevChapterNumber={prevChapter ?? 0}
-          onRequestPrevChapter={() =>
-            prevChapter !== null &&
-            goToChapter(prevChapter, chapterByNumber.get(prevChapter)?.page_count || 1)
+        {pagesError && effectiveLayout !== 'Long strip' && (
+          <div
+            role="alert"
+            className="fixed inset-x-4 top-20 z-40 mx-auto max-w-md rounded-xl border border-destructive/40 bg-black/90 p-4 text-center text-sm text-white"
+          >
+            Couldn&apos;t load this chapter&apos;s pages.
+            <button
+              type="button"
+              onClick={() => setPagesRetry((value) => value + 1)}
+              className="ml-2 text-primary hover:underline"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+        <div
+          className={
+            chromeShown
+              ? 'relative z-30 flex h-14 shrink-0 items-center gap-4 border-b border-white/10 bg-black/80 px-4 backdrop-blur-xl'
+              : 'hidden'
           }
-          zoom={zoom}
-          offsetFirstPage={offsetFirstPage}
-          onPageReady={(p) => onPageReady(chapter, p)}
-          tapActions={tapActions}
-          onToggleControls={() => setChromeShown((value) => !value)}
-          completionActions={completionActions}
-          fitOverride={zoomBehavior}
-          autoAdvanceSecondsLeft={autoAdvanceCountdown.secondsLeft}
-          onCancelAutoAdvance={autoAdvanceCountdown.cancel}
-        />
-      )}
+        >
+          <ExitReaderButton
+            escapeKey
+            fallbackHref={basePath}
+            label="Back to details"
+            className="grid h-9 w-9 place-items-center rounded-lg text-white/70 hover:bg-white/5 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </ExitReaderButton>
+          <div className="min-w-0">
+            <h1 className="truncate text-sm font-semibold text-white">
+              {incognito ? `Incognito · ${details.title}` : details.title}
+            </h1>
+            <div className="truncate text-[11px] text-white/50">
+              Chapter {chapter} · {title}
+            </div>
+          </div>
 
-      {showPageNumber && (
-        <div className="pointer-events-none fixed bottom-16 right-5 z-30 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium tabular-nums text-white/80 backdrop-blur">
-          {page} / {totalPages}
+          <div className="relative ml-auto flex items-center gap-1">
+            <button
+              onClick={() => setChapterListOpen((v) => !v)}
+              aria-expanded={chapterListOpen}
+              aria-label="Chapter list"
+              className={`grid h-9 w-9 place-items-center rounded-lg transition ${
+                chapterListOpen ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/5'
+              }`}
+            >
+              <List className="h-4 w-4" />
+            </button>
+            <div className="flex items-center gap-0.5 rounded-lg border border-white/10 px-0.5">
+              <button
+                onClick={zoomOut}
+                disabled={zoom <= ZOOM_MIN}
+                aria-label="Zoom out"
+                className="grid h-8 w-8 place-items-center rounded-md text-white/70 transition hover:bg-white/5 disabled:opacity-30"
+              >
+                <ZoomOut className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setZoom(1)}
+                className="w-11 text-center text-xs tabular-nums text-white/60 hover:text-white"
+              >
+                {Math.round(zoom * 100)}%
+              </button>
+              <button
+                onClick={zoomIn}
+                disabled={zoom >= ZOOM_MAX}
+                aria-label="Zoom in"
+                className="grid h-8 w-8 place-items-center rounded-md text-white/70 transition hover:bg-white/5 disabled:opacity-30"
+              >
+                <ZoomIn className="h-4 w-4" />
+              </button>
+            </div>
+            <PageImageActions
+              imageUrl={pageUrls[page - 1]}
+              mangaTitle={manga.title}
+              chapter={chapter}
+              page={page}
+            />
+            <ReaderSettingsMenu />
+            <ReaderPersonalTools
+              source={sourceId}
+              mangaId={details.id}
+              chapterId={currentRecord?.id}
+              page={page}
+            />
+            {preferredGroup && currentRecord?.scanlator !== preferredGroup && (
+              <span role="status" className="text-xs text-white">
+                {preferredGroup} unavailable; using{' '}
+                {currentRecord?.scanlator || 'an available release'}.
+              </span>
+            )}
+
+            {chapterListOpen && (
+              <>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  aria-label="Close chapter list"
+                  className="fixed inset-0 z-10"
+                  onClick={() => setChapterListOpen(false)}
+                />
+                <div
+                  data-reader-keys-ignore
+                  className="absolute right-0 top-11 z-20 max-h-80 w-64 overflow-auto rounded-xl border border-white/10 bg-black/95 py-1.5 shadow-lg backdrop-blur-xl"
+                >
+                  {[...chapters].reverse().map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => {
+                        setPreferredGroup(c.scanlator ?? '');
+                        goToChapter(c.chapter_number, 1, c.id);
+                        setChapterListOpen(false);
+                      }}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition hover:bg-white/5 ${
+                        c.chapter_number === chapter ? 'text-primary' : 'text-white/70'
+                      }`}
+                    >
+                      <span className="truncate">
+                        Ch. {c.chapter_number}
+                        {c.name ? ` · ${c.name}` : ''}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      )}
 
-      <div className="relative z-30 shrink-0">
-        <ReaderProgressBar
+        <ReaderContextMenu
+          pageUrls={pageUrls}
           page={page}
-          totalPages={totalPages}
-          onSeek={(p) => setPage(Math.max(1, Math.min(totalPages, p)))}
-        />
+          mangaTitle={manga.title}
+          chapter={chapter}
+        >
+          {effectiveLayout === 'Long strip' ? (
+            <LongStripViewer
+              key={`${sourceId}:${details.id}:${preferredGroup}`}
+              manga={manga}
+              ready={chapters.length > 0}
+              startChapter={chapter}
+              startPage={page}
+              getNextChapter={nextChapterAfter}
+              getChapterTitle={(n) => chapterByNumber.get(n)?.name || `Chapter ${n}`}
+              getChapterPageCount={(n) => chapterByNumber.get(n)?.page_count ?? 0}
+              fetchPages={fetchPages}
+              onPositionChange={(streamChapter, streamPage, streamTotal) => {
+                if (streamChapter !== chapter) {
+                  setChapter(streamChapter);
+                  router.replace(`${basePath}/read?ch=${streamChapter}&page=${streamPage}`);
+                }
+                setPage(streamPage);
+                if (streamTotal > 0)
+                  setObservedTotal({ chapter: streamChapter, total: streamTotal });
+              }}
+              zoom={zoom}
+              pageGap={stripGap}
+              autoAdvance={autoAdvance}
+              onPageReady={onPageReady}
+              getChapterIdentity={(number) => chapterByNumber.get(number)?.id ?? ''}
+              releaseVersion={requestedChapterId}
+              completionActions={completionActions}
+            />
+          ) : (
+            <PagedViewer
+              key={currentRecord?.id ?? chapter}
+              manga={manga}
+              page={page}
+              totalPages={totalPages}
+              pageUrls={pageUrls}
+              pagesPerView={effectiveLayout === 'Single page' ? 1 : 2}
+              readingDirection={readingDirection}
+              onPositionChange={setPage}
+              hasNextChapter={nextChapter !== null}
+              nextChapterNumber={nextChapter ?? 0}
+              onRequestNextChapter={() => nextChapter !== null && goToChapter(nextChapter, 1)}
+              hasPrevChapter={prevChapter !== null}
+              prevChapterNumber={prevChapter ?? 0}
+              onRequestPrevChapter={() =>
+                prevChapter !== null &&
+                goToChapter(prevChapter, chapterByNumber.get(prevChapter)?.page_count || 1)
+              }
+              zoom={zoom}
+              onZoomChange={setZoom}
+              offsetFirstPage={offsetFirstPage}
+              onPageReady={(p) => onPageReady(chapter, p)}
+              tapActions={tapActions}
+              onToggleControls={() => setChromeShown((value) => !value)}
+              completionActions={completionActions}
+              fitOverride={zoomBehavior}
+              autoAdvanceSecondsLeft={autoAdvanceCountdown.secondsLeft}
+              onCancelAutoAdvance={autoAdvanceCountdown.cancel}
+            />
+          )}
+        </ReaderContextMenu>
+
+        {showPageNumber && (
+          <div className="pointer-events-none fixed bottom-16 right-5 z-30 rounded-full bg-black/60 px-3 py-1 text-[11px] font-medium tabular-nums text-white/80 backdrop-blur">
+            {page} / {totalPages}
+          </div>
+        )}
+
+        <div className="relative z-30 shrink-0">
+          <ReaderProgressBar
+            page={page}
+            totalPages={totalPages}
+            onSeek={(p) => setPage(Math.max(1, Math.min(totalPages, p)))}
+          />
+        </div>
       </div>
-    </div>
+    </ReaderColorFilterContext.Provider>
   );
 }

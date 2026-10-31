@@ -125,6 +125,7 @@ export function ChapterListPanel({
         ref={listRef}
         role="list"
         aria-label="Chapters"
+        data-reader-keys-ignore
         onScroll={handleScroll}
         className="absolute right-0 top-11 z-20 h-80 w-64 overflow-auto rounded-xl border border-white/10 bg-black/95 py-1.5 shadow-lg backdrop-blur-xl"
       >

@@ -9,7 +9,10 @@ export const addHistoryBodySchema = z.object({
   // truncated or rejected an over-long title; SQLite's TEXT has no length limit at
   // all, so this schema is now the only thing keeping it bounded.
   title: z.string().max(255).optional(),
-  chapter_id: z.string().optional(),
+  /** The source's own id for the chapter, within `source` + `manga_slug`. */
+  source_chapter_key: z.string().min(1).max(512).optional(),
+  /** What clients from before keys send: the chapter's row id on this server. */
+  chapter_id: z.string().min(1).max(512).optional(),
   thumbnail_url: z.string().optional(),
   pages_read: z.number().int().nonnegative().default(1),
   time_read: z.number().int().nonnegative().optional(),

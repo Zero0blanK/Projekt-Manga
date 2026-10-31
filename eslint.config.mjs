@@ -28,6 +28,9 @@ export default tseslint.config(
       // code fetched at runtime, not part of this repo. Same .gitignore-doesn't-reach-
       // ESLint gap as above.
       '**/data/installed-extensions/**',
+      // The OCR engine and its model, copied out of node_modules by
+      // apps/web/scripts/copy-ocr-assets.mjs: minified third-party code, gitignored.
+      'apps/web/public/ocr/**',
     ],
   },
   {

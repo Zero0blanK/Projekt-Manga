@@ -21,6 +21,15 @@ const empty = replaceBackupBodySchema.parse({
   history: [],
 });
 
+/** Where a restored chapter lands: its title plus the source's key. */
+const keyed = (slug: string, source_chapter_key: string) => ({
+  source_manga_slug_source_chapter_key: {
+    source: 'test-source',
+    manga_slug: slug,
+    source_chapter_key,
+  },
+});
+
 const manga = (id: string, slug: string, chapterId: string) => ({
   id,
   source: 'test-source',
@@ -213,7 +222,9 @@ describe('transactional replace backup (real SQLite)', () => {
         where: { source_slug: { source: 'test-source', slug: 'recovered-title' } },
       }),
     ).toMatchObject({ in_library: true });
-    expect(await prisma.chapter.findUnique({ where: { id: 'recovered-chapter' } })).not.toBeNull();
+    expect(
+      await prisma.chapter.findUnique({ where: keyed('recovered-title', 'recovered-chapter') }),
+    ).not.toBeNull();
     const persisted = await prisma.restore_job.findUniqueOrThrow({ where: { id: backup.jobId } });
     expect(JSON.parse(persisted.result ?? 'null')).toMatchObject({ restoredManga: 1 });
     expect(persisted.payload).toBe('');
@@ -231,7 +242,16 @@ describe('transactional replace backup (real SQLite)', () => {
       },
     });
     await prisma.chapter.create({
-      data: { id: 'kept-chapter', manga_id: old.id, url: '', chapter_number: 1, last_page_read: 9 },
+      data: {
+        id: 'kept-chapter',
+        source: 'test-source',
+        manga_slug: 'kept',
+        source_chapter_key: 'kept-chapter',
+        manga_id: old.id,
+        url: '',
+        chapter_number: 1,
+        last_page_read: 9,
+      },
     });
     const backup = replaceBackupBodySchema.parse({
       ...empty,
@@ -312,7 +332,10 @@ describe('transactional replace backup (real SQLite)', () => {
       include: { chapter: true },
     });
     expect(mangaRow.in_library).toBe(false);
-    expect(mangaRow.chapter[0]).toMatchObject({ id: 'overlay-chapter', last_page_read: 0 });
+    expect(mangaRow.chapter[0]).toMatchObject({
+      source_chapter_key: 'overlay-chapter',
+      last_page_read: 0,
+    });
     expect(
       await prisma.user_library.findUnique({
         where: { user_id_manga_id: { user_id: user.id, manga_id: mangaRow.id } },
@@ -325,7 +348,7 @@ describe('transactional replace backup (real SQLite)', () => {
     ).toMatchObject({ is_bookmarked: true, score: 80 });
     expect(
       await prisma.user_chapter_state.findUnique({
-        where: { user_id_chapter_id: { user_id: user.id, chapter_id: 'overlay-chapter' } },
+        where: { user_id_chapter_id: { user_id: user.id, chapter_id: mangaRow.chapter[0].id } },
       }),
     ).toMatchObject({ is_read: true, last_page_read: 4 });
     expect(await prisma.history.count({ where: { user_id: user.id } })).toBe(1);
@@ -380,7 +403,8 @@ describe('transactional replace backup (real SQLite)', () => {
     });
     await replaceBackup(backup);
     expect(
-      (await prisma.chapter.findUnique({ where: { id: 'read-chapter' } }))?.last_page_read,
+      (await prisma.chapter.findUnique({ where: keyed('read-title', 'read-chapter') }))
+        ?.last_page_read,
     ).toBe(4);
   });
 
@@ -404,12 +428,13 @@ describe('transactional replace backup (real SQLite)', () => {
     const result = await replaceBackup(backup);
     expect(result.restoredProgress).toBe(1);
     expect(
-      (await prisma.chapter.findUnique({ where: { id: 'preview-chapter' } }))?.last_page_read,
+      (await prisma.chapter.findUnique({ where: keyed('preview-only', 'preview-chapter') }))
+        ?.last_page_read,
     ).toBe(3);
     expect(await prisma.manga.count({ where: { in_library: true } })).toBe(0);
   });
 
-  it('rolls back removed membership and history if a chapter belongs to another title', async () => {
+  it('restores a title whose source keys another title also uses, leaving that title alone', async () => {
     const old = await prisma.manga.create({
       data: {
         source: 'test-source',
@@ -420,20 +445,32 @@ describe('transactional replace backup (real SQLite)', () => {
         in_library: true,
       },
     });
-    await prisma.chapter.create({
-      data: { id: 'occupied', manga_id: old.id, url: '', chapter_number: 1 },
-    });
-    await prisma.history.create({
-      data: { source: 'test-source', manga_slug: 'old', manga_id: old.id },
+    const occupied = await prisma.chapter.create({
+      data: {
+        source: 'test-source',
+        manga_slug: 'old',
+        source_chapter_key: 'chapter-1',
+        manga_id: old.id,
+        url: '',
+        chapter_number: 1,
+        last_page_read: 6,
+      },
     });
     const backup = replaceBackupBodySchema.parse({
       ...empty,
-      manga: [manga('imported', 'new', 'occupied')],
+      mode: 'merge',
+      manga: [manga('imported', 'new', 'chapter-1')],
     });
-    await expect(replaceBackup(backup)).rejects.toThrow(/Chapter identity conflicts/);
-    expect((await prisma.manga.findUnique({ where: { id: old.id } }))?.in_library).toBe(true);
-    expect(await prisma.history.count({ where: { manga_id: old.id, deleted_at: null } })).toBe(1);
-    expect(await prisma.manga.count({ where: { slug: 'new' } })).toBe(0);
+
+    await replaceBackup(backup);
+
+    const restored = await prisma.chapter.findUniqueOrThrow({ where: keyed('new', 'chapter-1') });
+    expect(restored.id).not.toBe(occupied.id);
+    expect(restored.last_page_read).toBe(4);
+    expect(await prisma.chapter.findUniqueOrThrow({ where: { id: occupied.id } })).toMatchObject({
+      manga_id: old.id,
+      last_page_read: 6,
+    });
   });
 
   it('replaces anonymous state without deleting account-owned history', async () => {

@@ -5,8 +5,10 @@
  * assumed compromisable even though in practice it's just our own Next.js app.
  */
 import {
+  app,
   BrowserWindow,
   ipcMain,
+  nativeImage,
   shell,
   clipboard,
   session as electronSession,
@@ -33,10 +35,20 @@ import {
   updateNow,
   dismissUpdatePrompt,
 } from './updater';
-import { getStartupBackgroundState, setStartupBackground } from './startup-background';
+import {
+  getCloseToTrayState,
+  getStartupBackgroundState,
+  setCloseToTray,
+  setStartupBackground,
+} from './startup-background';
 import { registerLocalArchiveHandlers } from './local-archives';
 import { resolveOpenableFolder } from './openable-folder';
 import { sessionCookieOrigins } from './session-cookie-origins';
+import { openSourceBrowser } from './source-browser';
+import { clearAppLock, getAppLockState, isAppLocked, lockApp, setAppLock } from './app-lock';
+import { getDesktopPreferences } from './desktop-preferences';
+import { setHideFromCapture } from './window';
+import { parseOpenBrowserArgs } from './source-browser-policy';
 
 function requireMainAppFrame(event: IpcMainInvokeEvent): void {
   if (
@@ -47,6 +59,8 @@ function requireMainAppFrame(event: IpcMainInvokeEvent): void {
   ) {
     throw new Error('This setting is available only from the app window');
   }
+  // While the app lock is on, a page left running in a hidden window gets nothing.
+  if (isAppLocked()) throw new Error('The app is locked');
 }
 
 /** `ipcMain.handle` that refuses any caller outside the app's own main frame. Every
@@ -118,6 +132,40 @@ function optionalCount(value: unknown, field: string): number | undefined {
   return value;
 }
 
+/** A bounded, non-empty string naming part of a chapter's key. */
+function keyPart(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 512) {
+    throw new Error(`${field} must be a non-empty string of at most 512 characters`);
+  }
+  return value;
+}
+
+function optionalFinite(value: unknown, field: string): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`${field} must be a finite number`);
+  }
+  return value;
+}
+
+/** The chapter a mark names — the source's key within its title — plus the catalog
+ * fields used if this device has to stand a row up for it. Every field is bound into
+ * SQL, so each is checked rather than the object being cast across. */
+function chapterStub(value: unknown): LocalChapterStub {
+  if (!value || typeof value !== 'object') throw new Error('chapter is required');
+  const c = value as Record<string, unknown>;
+  return {
+    source: keyPart(c.source, 'chapter.source'),
+    manga_slug: keyPart(c.manga_slug, 'chapter.manga_slug'),
+    source_chapter_key: keyPart(c.source_chapter_key, 'chapter.source_chapter_key'),
+    chapter_number: optionalFinite(c.chapter_number, 'chapter.chapter_number'),
+    name: nullableString(c.name, 'chapter.name'),
+    url: nullableString(c.url, 'chapter.url'),
+    page_count: optionalCount(c.page_count, 'chapter.page_count') ?? null,
+    manga_id: nullableString(c.manga_id, 'chapter.manga_id'),
+  };
+}
+
 /** Dispatches one {domain, op, args} local-DB call. Every arm treats `args` as untrusted
  * renderer input — this is the sandboxed IPC boundary, same posture as openPath below. */
 async function dispatchDataInvoke(
@@ -159,30 +207,20 @@ async function dispatchDataInvoke(
     return ok(null);
   }
   if (domain === 'chapter' && op === 'markRead') {
-    if (typeof a.isRead !== 'boolean') throw new Error('chapterId and isRead are required');
-    // `chapter` is optional: it's only needed the first time this device sees the
-    // chapter, to stand a catalog row up for the read state to reference.
-    localStore.markChapterRead(
-      requiredId(a.chapterId, 'chapterId and isRead are required'),
-      a.isRead,
-      a.chapter as LocalChapterStub | undefined,
-    );
+    if (typeof a.isRead !== 'boolean') throw new Error('chapter and isRead are required');
+    localStore.markChapterRead(chapterStub(a.chapter), a.isRead);
     return ok(null);
   }
   if (domain === 'chapter' && op === 'updateProgress') {
-    const chapterId = requiredId(a.chapterId, 'chapterId and lastPageRead are required');
+    const stub = chapterStub(a.chapter);
     if (
       typeof a.lastPageRead !== 'number' ||
       !Number.isFinite(a.lastPageRead) ||
       a.lastPageRead < 0
     ) {
-      throw new Error('chapterId and lastPageRead are required');
+      throw new Error('chapter and lastPageRead are required');
     }
-    localStore.updateChapterProgress(
-      chapterId,
-      a.lastPageRead,
-      a.chapter as LocalChapterStub | undefined,
-    );
+    localStore.updateChapterProgress(stub, a.lastPageRead);
     return ok(null);
   }
   if (domain === 'history' && op === 'list') {
@@ -213,7 +251,10 @@ async function dispatchDataInvoke(
         manga_id: nullableString(a.manga_id, 'manga_id'),
         title: nullableString(a.title, 'title'),
         thumbnail_url: nullableString(a.thumbnail_url, 'thumbnail_url'),
-        chapter_id: nullableString(a.chapter_id, 'chapter_id'),
+        source_chapter_key:
+          a.source_chapter_key === undefined || a.source_chapter_key === null
+            ? null
+            : keyPart(a.source_chapter_key, 'source_chapter_key'),
         pages_read: optionalCount(a.pages_read, 'pages_read'),
         time_read: optionalCount(a.time_read, 'time_read'),
       }),
@@ -242,6 +283,9 @@ async function dispatchDataInvoke(
   throw new Error(`Unknown IPC call: ${domain}.${op}`);
 }
 
+/** A 32-pixel badge PNG as a data URL is a few kilobytes; nothing near this is a badge. */
+const BADGE_IMAGE_MAX_LENGTH = 32_768;
+
 export function registerIpcHandlers(
   options: { managedServers: boolean } = { managedServers: false },
 ): void {
@@ -264,6 +308,98 @@ export function registerIpcHandlers(
     };
   });
   handleFromApp(DESKTOP_CHANNELS.startupBackgroundGet, async () => ok(getStartupBackgroundState()));
+  // `{ sourceId }` only: the site to load and the hosts whose cookies are kept come from
+  // the server's install record, never from the renderer. Malformed input throws before
+  // anything opens; a failure after that (not installed, remote server) is a failed
+  // envelope the page can show.
+  handleFromApp(DESKTOP_CHANNELS.sourceOpenBrowser, async (_event, args: unknown) => {
+    const { sourceId } = parseOpenBrowserArgs(args);
+    try {
+      return ok(await openSourceBrowser(sourceId));
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Could not open the source browser',
+      };
+    }
+  });
+  // Acts on the window that asked, never on another: the renderer names no window.
+  handleFromApp(DESKTOP_CHANNELS.windowGetAlwaysOnTop, (event) =>
+    ok(BrowserWindow.fromWebContents(event.sender)?.isAlwaysOnTop() ?? false),
+  );
+  handleFromApp(DESKTOP_CHANNELS.windowSetAlwaysOnTop, (event, value: unknown) => {
+    if (typeof value !== 'boolean') throw new Error('alwaysOnTop must be a boolean');
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) throw new Error('No window to keep on top');
+    win.setAlwaysOnTop(value);
+    return ok(win.isAlwaysOnTop());
+  });
+  handleFromApp(DESKTOP_CHANNELS.windowSetProgress, (event, value: unknown) => {
+    if (value !== null && (typeof value !== 'number' || !Number.isFinite(value)))
+      throw new Error('progress must be a number from 0 to 1, or null');
+    const win = BrowserWindow.fromWebContents(event.sender);
+    // -1 removes the bar; Electron reads anything above 1 as "indeterminate".
+    win?.setProgressBar(value === null ? -1 : Math.min(1, Math.max(0, value)));
+    return ok(null);
+  });
+  handleFromApp(DESKTOP_CHANNELS.windowSetBadge, (event, input: unknown) => {
+    const { count, image } = (input ?? {}) as { count?: unknown; image?: unknown };
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0 || count > 9999)
+      throw new Error('badge count must be a whole number from 0 to 9999');
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (process.platform === 'win32') {
+      if (count === 0) {
+        win?.setOverlayIcon(null, '');
+        return ok(null);
+      }
+      // Windows has no numeric badge: the page draws one. Only a small PNG is taken, and
+      // only as an image; anything else leaves the button as it is.
+      if (
+        typeof image !== 'string' ||
+        image.length > BADGE_IMAGE_MAX_LENGTH ||
+        !image.startsWith('data:image/png;base64,')
+      )
+        throw new Error('badge image must be a small PNG');
+      const icon = nativeImage.createFromDataURL(image);
+      const size = icon.getSize();
+      if (icon.isEmpty() || size.width > 64 || size.height > 64)
+        throw new Error('badge image must be a small PNG');
+      win?.setOverlayIcon(icon, `${count} ${count === 1 ? 'title' : 'titles'} with new chapters`);
+      return ok(null);
+    }
+    // macOS dock and Linux launchers show the number themselves.
+    app.setBadgeCount(count);
+    return ok(null);
+  });
+  handleFromApp(DESKTOP_CHANNELS.lockGetState, () => ok(getAppLockState()));
+  handleFromApp(DESKTOP_CHANNELS.lockSet, async (_event, input: unknown) => {
+    try {
+      return ok(await setAppLock(input));
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : 'Not saved' };
+    }
+  });
+  handleFromApp(DESKTOP_CHANNELS.lockClear, async (_event, input: unknown) => {
+    try {
+      return ok(await clearAppLock(input));
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : 'Not saved' };
+    }
+  });
+  handleFromApp(DESKTOP_CHANNELS.lockNow, () => {
+    lockApp();
+    return ok(getAppLockState());
+  });
+  handleFromApp(DESKTOP_CHANNELS.captureGet, () => ok(getDesktopPreferences().hideFromCapture));
+  handleFromApp(DESKTOP_CHANNELS.captureSet, (_event, value: unknown) => {
+    if (typeof value !== 'boolean') throw new Error('enabled must be a boolean');
+    return ok(setHideFromCapture(value));
+  });
+  handleFromApp(DESKTOP_CHANNELS.closeToTrayGet, () => ok(getCloseToTrayState()));
+  handleFromApp(DESKTOP_CHANNELS.closeToTraySet, async (_event, value: unknown) => {
+    if (typeof value !== 'boolean') throw new Error('enabled must be a boolean');
+    return ok(await setCloseToTray(value));
+  });
   handleFromApp(DESKTOP_CHANNELS.startupBackgroundSet, async (_event, value: unknown) => {
     if (typeof value !== 'boolean') throw new Error('enabled must be a boolean');
     return ok(await setStartupBackground(value));

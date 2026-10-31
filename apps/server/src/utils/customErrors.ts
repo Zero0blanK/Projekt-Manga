@@ -1,6 +1,9 @@
 export class AppError extends Error {
   statusCode: number;
   isOperational: boolean;
+  /** Machine-readable reason, sent beside `message` when set, for a client that has to
+   * act on it (e.g. offer "Open in browser") rather than just show it. */
+  code?: string;
 
   constructor(message: string, statusCode = 500, name = 'AppError') {
     super(message);
@@ -88,6 +91,15 @@ export class ForbiddenError extends AppError {
 export class UnsupportedMediaTypeError extends AppError {
   constructor(message = 'Request bodies must be JSON') {
     super(message, 415, 'UnsupportedMediaTypeError');
+  }
+}
+
+/** The source answered with a browser challenge (Cloudflare) that only a real browser can
+ * pass. The desktop app offers to open the source in a window for that. */
+export class ChallengeRequiredError extends AppError {
+  constructor(message = 'The source is asking for a browser check') {
+    super(message, 503, 'ChallengeRequiredError');
+    this.code = 'CHALLENGE_REQUIRED';
   }
 }
 

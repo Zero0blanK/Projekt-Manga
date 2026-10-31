@@ -234,7 +234,12 @@ const mapToShelfStatus = (nativeStatus: string): ShelfStatus | null =>
   TO_SHELF[nativeStatus] ?? null;
 const mapFromShelfStatus = (shelf: ShelfStatus): string => FROM_SHELF[shelf];
 
+const isConfigured = (): boolean => !!process.env.MAL_CLIENT_ID && !!process.env.MAL_REDIRECT_URI;
+
 const malTracker: TrackerAdapter = {
+  label: 'MyAnimeList',
+  authKind: 'oauth',
+  isConfigured,
   getAuthUrl,
   exchangeCode,
   refreshTokens,

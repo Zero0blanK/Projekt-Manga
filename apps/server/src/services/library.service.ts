@@ -4,6 +4,7 @@ import userLibraryRepository from '../repositories/userLibrary.repository.js';
 import userMangaStateRepository from '../repositories/userMangaState.repository.js';
 import trackerService from './tracker.service.js';
 import { MangaNotFoundError } from '../utils/customErrors.js';
+import { estimateRelease } from '../utils/releaseEstimate.js';
 import type { UpdateLibraryStateBody } from '@projekt-manga/schemas';
 
 const getLibraryState = async (user_id?: string) => {
@@ -11,6 +12,24 @@ const getLibraryState = async (user_id?: string) => {
     return await userMangaStateRepository.getForUser(user_id);
   }
   return await libraryRepository.getAll();
+};
+
+/**
+ * When each library title's next chapter is expected. Titles without enough dated
+ * history are left out rather than guessed at. A chapter's own release date is used when
+ * the source gives one; otherwise when this server first saw it.
+ */
+const getReleaseEstimates = async (user_id?: string) => {
+  const titles = await mangaRepository.listLibraryChapterDates(user_id ?? null);
+  return titles.flatMap(({ id, chapter }) => {
+    const estimate = estimateRelease(
+      chapter.map((row) => ({
+        chapter_number: row.chapter_number,
+        date: row.release_date ?? row.created_at,
+      })),
+    );
+    return estimate ? [{ manga_id: id, ...estimate }] : [];
+  });
 };
 
 const updateLibraryState = async (
@@ -63,6 +82,7 @@ const resetNotification = async (manga_id: string) => {
 
 const libraryService = {
   getLibraryState,
+  getReleaseEstimates,
   updateLibraryState,
   resetNotification,
 };

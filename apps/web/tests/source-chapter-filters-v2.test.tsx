@@ -9,11 +9,18 @@ vi.mock('@projekt-manga/api-client', async (importOriginal) => ({
   getAllDownloads: vi.fn().mockResolvedValue([
     {
       source_id: 'source',
-      chapter_id: 'chapter-1',
+      chapter_id: 'row-1',
+      source_chapter_key: 'chapter-1',
       status: 'COMPLETED',
       downloaded_path: 'managed/chapter-1',
     },
-    { source_id: 'source', chapter_id: 'chapter-2', status: 'FAILED', downloaded_path: '' },
+    {
+      source_id: 'source',
+      chapter_id: 'row-2',
+      source_chapter_key: 'chapter-2',
+      status: 'FAILED',
+      downloaded_path: '',
+    },
   ]),
 }));
 vi.mock('@/lib/chapter-bookmarks', () => ({

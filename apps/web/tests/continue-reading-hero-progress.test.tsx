@@ -5,7 +5,10 @@ import type { Manga } from '@/lib/manga-data';
 
 const { bookmarks } = vi.hoisted(() => ({ bookmarks: [] as string[] }));
 
-vi.mock('@/lib/library-store', () => ({ useLibraryState: () => ({ bookmarks }) }));
+vi.mock('@/lib/library-store', () => ({
+  useLibraryState: () => ({ bookmarks }),
+  useSources: () => ({ sources: [{ id: 'source-a', name: 'Source A', lang: 'en' }] }),
+}));
 vi.mock('@/components/manga-card', () => ({ MangaCover: () => null }));
 
 const { ContinueReadingHero } = await import('@/components/library/continue-reading-hero');
@@ -75,6 +78,24 @@ describe('library featured reading progress', () => {
       'href',
       '/reader/manga-1?ch=3&chapterId=chapter-3&page=7',
     );
+  });
+
+  it('shows where the title comes from and how far along the reader is, without a gradient', () => {
+    const { container } = render(
+      <ContinueReadingHero
+        manga={{ ...manga, authors: ['Author'], tags: ['Action', 'Drama'] }}
+        recentRead={recentRead}
+      />,
+    );
+    expect(screen.getByText('Author')).toBeInTheDocument();
+    expect(screen.getByText('Source A')).toBeInTheDocument();
+    expect(screen.getByText('Page 7 of 10 · 2 chapters after this')).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Genres' })).toHaveTextContent('ActionDrama');
+    expect(screen.getByRole('progressbar', { name: 'Chapter progress' })).toHaveAttribute(
+      'aria-valuenow',
+      '70',
+    );
+    expect(container.innerHTML).not.toMatch(/gradient/);
   });
 
   it('keeps the library-level fallback when no recent chapter is available', () => {

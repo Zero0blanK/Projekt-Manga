@@ -1,9 +1,15 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { createContext, useContext, useSyncExternalStore } from 'react';
 import { useSetting, useNumberSetting } from '@/lib/app-store';
 import { useProfilePreference } from '@/lib/profile-preferences';
 import { parseReaderOverride, type ReaderPreset } from '@/lib/reader-preferences';
+import {
+  DEFAULT_TINT_STRENGTH,
+  READER_COLOR_FILTER,
+  READER_TINT,
+  READER_TINT_STRENGTH,
+} from '@/lib/page-image';
 
 /** Options and defaults for Settings > Reader, shared by the panel and the reader itself
  * so neither side hard-codes a value the other doesn't know about. */
@@ -103,13 +109,35 @@ export function useNarrowViewport(): boolean {
   );
 }
 
-/** Everything the reader needs from settings, resolved in one place. */
-export function useReaderSettings(sourceId?: string, mangaId?: string) {
-  const [override] = useProfilePreference<ReaderPreset | null>(
+function useReaderOverride(sourceId?: string, mangaId?: string) {
+  return useProfilePreference<ReaderPreset | null>(
     `reader-override:${sourceId ?? ''}:${mangaId ?? ''}`,
     parseReaderOverride,
     null,
-  );
+  )[0];
+}
+
+/**
+ * The colour filter a reader resolved for its title (preset override, else the global
+ * setting), handed to every page. Resolved once per reader rather than per page: the
+ * override lives in a per-account preference, and a long strip renders hundreds of pages.
+ */
+export const ReaderColorFilterContext = createContext<string | undefined>(undefined);
+
+/** The page's colour filter: the reader's resolved one, or the global setting outside a
+ * reader that provides it. */
+export function usePageColorFilter(): string {
+  const resolved = useContext(ReaderColorFilterContext);
+  const global = useSetting(READER_COLOR_FILTER, 'None') as string;
+  return resolved ?? global;
+}
+
+/** Everything the reader needs from settings, resolved in one place. */
+export function useReaderSettings(sourceId?: string, mangaId?: string) {
+  const override = useReaderOverride(sourceId, mangaId);
+  const globalColorFilter = useSetting(READER_COLOR_FILTER, 'None') as string;
+  const globalTint = useSetting(READER_TINT, 'None') as string;
+  const globalTintStrength = useNumberSetting(READER_TINT_STRENGTH, DEFAULT_TINT_STRENGTH);
   const pageLayout = useSetting('pageLayout', 'Two-page spread') as string;
   const defaultDirection = useSetting('readingDirection', 'Right to left') as string;
   const sourceDirection = useSetting(
@@ -132,7 +160,7 @@ export function useReaderSettings(sourceId?: string, mangaId?: string) {
   const tapLeft = useSetting('readerTapLeft', 'Direction') as string;
   const tapCenter = useSetting('readerTapCenter', 'Controls') as string;
   const tapRight = useSetting('readerTapRight', 'Opposite') as string;
-  const autoAdvance = useSetting('readerAutoAdvance', false) as boolean;
+  const autoAdvance = useSetting('readerAutoAdvance', true) as boolean;
   const hideChromeOnScroll = useSetting('readerHideChromeOnScroll', true) as boolean;
   const scrollSpeedSetting = useSetting('readerScrollSpeed', DEFAULT_SCROLL_SPEED);
   const autoScroll = useSetting('readerAutoScroll', false) as boolean;
@@ -167,6 +195,11 @@ export function useReaderSettings(sourceId?: string, mangaId?: string) {
     zoomBehavior: override?.zoomBehavior ?? globalFit,
     tapActions: { left: tapLeft, center: tapCenter, right: tapRight },
     autoAdvance,
+    /** Provide through ReaderColorFilterContext so every page uses it. */
+    colorFilter: override?.colorFilter ?? globalColorFilter,
+    /** Render with ReaderTintOverlay. */
+    tint: override?.tint ?? globalTint,
+    tintStrength: override?.tintStrength ?? globalTintStrength,
     /** Settings > Reader > Hide controls while scrolling down. On by default: the reader
      * chrome covers the top and bottom of the page, and scrolling down is the one gesture
      * that unambiguously means "I am reading, not navigating". */

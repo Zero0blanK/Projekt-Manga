@@ -11,6 +11,8 @@ import extensionRepositoryRepository from '../repositories/extensionRepository.r
 import extensionRepositoryService from './extensionRepository.service.js';
 import { assertPublicHttpUrl } from '../utils/ssrfGuard.js';
 import { guardedFetch } from '../utils/guardedFetch.js';
+import { readSourceNetworkConfig } from '../utils/sourceNetworkConfig.js';
+import { browserSessionFor, forgetBrowserSessions } from './sourceBrowserSession.service.js';
 
 /**
  * Keeps one live sandboxed child process per enabled installed_extension row, reused
@@ -78,6 +80,8 @@ function buildSource(row: {
   is_nsfw: boolean;
   allowed_hosts: unknown;
 }): Source & { dispose(): void } {
+  // A respawn may follow an update that changed the allowlist the session is filtered by.
+  forgetBrowserSessions(row.source_key);
   return spawnSandboxedSource(
     {
       id: row.source_key,
@@ -91,6 +95,8 @@ function buildSource(row: {
       allowedNetHosts: Array.isArray(row.allowed_hosts) ? (row.allowed_hosts as string[]) : [],
       validateOutboundUrl,
       fetchImpl: guardedFetch,
+      browserSession: browserSessionFor(row.source_key),
+      networkSettings: readSourceNetworkConfig,
     },
   );
 }

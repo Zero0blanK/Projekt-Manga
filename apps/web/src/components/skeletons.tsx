@@ -107,10 +107,10 @@ export function BrowsePageSkeleton() {
 /** Placeholder for the source cards grid on Discover's landing page. */
 export function SourceCardsSkeleton({ count = 6 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3">
       {Array.from({ length: count }, (_, i) => (
         <div key={i} className="overflow-hidden rounded-2xl border border-border/60 bg-surface/40">
-          <div className="flex items-center gap-3 p-5">
+          <div className="flex items-center gap-3 p-3">
             <Skeleton className="h-12 w-12 shrink-0 rounded-2xl" />
             <div className="min-w-0 flex-1 space-y-2">
               <Skeleton className="h-4 w-2/3" />

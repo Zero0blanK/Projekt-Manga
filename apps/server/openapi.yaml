@@ -181,6 +181,296 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
 
+  /notification-channels:
+    get:
+      tags: [Notifications]
+      summary: The caller's new-chapter alert channels (ntfy, Discord, Telegram, webhook)
+      description: Destinations are never returned, only their host.
+      responses:
+        '200':
+          description: The channels
+    post:
+      tags: [Notifications]
+      summary: Add an alert channel
+      description: >-
+        The destination is stored encrypted. Changing the anonymous library's channels needs
+        the host admin check; an account's own need only the account.
+      responses:
+        '201':
+          description: The channel, without its destination
+        '400':
+          description: The destination doesn't fit the kind, or there are already 10 channels
+
+  /notification-channels/alert:
+    post:
+      tags: [Notifications]
+      summary: Send what one library update found to every enabled channel
+      description: >-
+        At most once every 30 seconds per caller. Destinations must be public addresses
+        unless the server sets ALERTS_ALLOW_PRIVATE_HOSTS=true.
+      responses:
+        '200':
+          description: How many channels took the alert
+
+  /notification-channels/{channel_id}:
+    patch:
+      tags: [Notifications]
+      summary: Rename a channel or switch it on or off
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The updated channel
+    delete:
+      tags: [Notifications]
+      summary: Remove a channel
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Removed
+
+  /notification-channels/{channel_id}/test:
+    post:
+      tags: [Notifications]
+      summary: Send a test message, saving the outcome on the channel
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The channel, with last_sent_at or last_error updated
+
+  /translate/status:
+    get:
+      tags: [Reader]
+      summary: Whether page translation is set up, and with which service
+      responses:
+        '200':
+          description: '{ enabled, provider: libretranslate | deepl | null, source: ja }'
+
+  /translate:
+    post:
+      tags: [Reader]
+      summary: Translate Japanese text read off a page on the device
+      description: >-
+        Body `{ texts: string[] (1–60, each ≤2000 chars), target }`. The source is always
+        Japanese. The service is set by TRANSLATE_PROVIDER, TRANSLATE_URL and
+        TRANSLATE_API_KEY; only the text is sent to it. At most 30 uncached calls a minute
+        per caller.
+      responses:
+        '200':
+          description: '{ translations: string[] } in the order of texts'
+        '429':
+          description: Too many translations in the last minute
+        '502':
+          description: The translation service failed (its status only, never the key)
+        '503':
+          description: Translation is not set up on this server
+
+  /manga/links/all:
+    get:
+      tags: [Manga]
+      summary: Every linked-source group of the caller (signed-in account or anonymous library)
+      description: Used by library updates, which also check each title's linked sources.
+      responses:
+        '200':
+          description: Groups of a primary title and its linked titles, in priority order
+
+  /manga/{manga_id}/links:
+    get:
+      tags: [Manga]
+      summary: A title's linked sources (other sources' copies of it)
+      description: >-
+        Asking with a linked title returns its primary's group. Per identity: an account's
+        links, or the anonymous library's.
+      parameters:
+        - $ref: '#/components/parameters/MangaId'
+      responses:
+        '200':
+          description: The primary's id and its links in the order they are tried
+    post:
+      tags: [Manga]
+      summary: Link another source's copy under this title
+      description: >-
+        Refused (400) for a title linked to itself, a chain (the primary is itself linked,
+        or the linked title has links of its own), a title already linked elsewhere, or
+        more than 20 links.
+      parameters:
+        - $ref: '#/components/parameters/MangaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [linked_manga_id]
+              properties:
+                linked_manga_id: { type: string }
+      responses:
+        '201':
+          description: The updated group
+        '400':
+          description: The link breaks a rule above
+        '404':
+          description: Either title does not exist
+
+  /manga/{manga_id}/links/order:
+    put:
+      tags: [Manga]
+      summary: Set the order linked sources are tried in
+      parameters:
+        - $ref: '#/components/parameters/MangaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [link_ids]
+              properties:
+                link_ids:
+                  type: array
+                  description: Every link of the title, once each
+                  items: { type: string }
+      responses:
+        '200':
+          description: The updated group
+        '400':
+          description: The list is not exactly the title's links
+
+  /manga/{manga_id}/links/{link_id}:
+    delete:
+      tags: [Manga]
+      summary: Unlink one source
+      parameters:
+        - $ref: '#/components/parameters/MangaId'
+        - name: link_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The updated group
+        '404':
+          description: No such link for this title and caller
+
+  /manga/{manga_id}/override:
+    patch:
+      tags: [Manga]
+      summary: Edit how a title looks for this reader
+      description: >-
+        Lays the reader's own title, author, description or status over the shared
+        catalog. Library updates and details refreshes keep writing the catalog; reads of
+        the library and details merge these edits and add an `override` object with the
+        catalog values under `original`. Per identity: an account edits its own row,
+        anonymous use the shared one. An omitted field is unchanged; null clears it.
+      parameters:
+        - name: manga_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title: { type: string, nullable: true, minLength: 1, maxLength: 255 }
+                author: { type: string, nullable: true, minLength: 1, maxLength: 255 }
+                description: { type: string, nullable: true, maxLength: 20000 }
+                status:
+                  type: string
+                  nullable: true
+                  enum: [ONGOING, COMPLETED, HIATUS, CANCELLED, UNKNOWN]
+      responses:
+        '200':
+          description: The stored edit, or null once every field is cleared
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    delete:
+      tags: [Manga]
+      summary: Reset a title to the source's details
+      description: Drops every edit for this identity, the custom cover included.
+      parameters:
+        - name: manga_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Reset
+        '404':
+          $ref: '#/components/responses/Error'
+
+  /manga/{manga_id}/override/cover:
+    post:
+      tags: [Manga]
+      summary: Upload a custom cover
+      description: >-
+        Base64 image data in JSON (writes accept JSON only). The decoded bytes must match
+        the declared type's signature and be at most 5 MB. Served from
+        /cache/thumbnail/{manga_id} in place of the cached source cover.
+      parameters:
+        - name: manga_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mime, data]
+              additionalProperties: false
+              properties:
+                mime:
+                  type: string
+                  enum: [image/jpeg, image/png, image/gif, image/webp, image/avif]
+                data:
+                  type: string
+                  format: byte
+      responses:
+        '200':
+          description: Cover saved
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+    delete:
+      tags: [Manga]
+      summary: Go back to the source's cover
+      description: Removes the custom cover and keeps any other edits.
+      parameters:
+        - name: manga_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cover reset
+        '404':
+          $ref: '#/components/responses/Error'
+
   /manga/{category_id}/{manga_slug}/add:
     post:
       tags: [Manga]
@@ -230,6 +520,35 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/MangaListItemArray'
+
+  /library/release-estimates:
+    get:
+      tags: [Manga]
+      summary: When each library title's next chapter is expected
+      description: >
+        The median gap between the title's last few distinct chapter releases (the
+        source's release date, or when the server first saw the chapter). Titles with
+        fewer than three dated releases, or a gap longer than 60 days, are omitted.
+        Membership follows the session: the account's library, or the shared library
+        without one.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [manga_id, interval_days, next_expected_at, last_chapter_at]
+                      properties:
+                        manga_id: { type: string }
+                        interval_days: { type: number }
+                        next_expected_at: { type: string, format: date-time }
+                        last_chapter_at: { type: string, format: date-time }
 
   # ── Category ───────────────────────────────────────────────────────────
   /category:
@@ -357,17 +676,18 @@ paths:
           description: OK
 
   # ── Chapter ────────────────────────────────────────────────────────────
-  /chapter/{manga_slug}/{chapter_id}/mark-read:
+  /chapter/{manga_slug}/{source_chapter_key}/mark-read:
     post:
       tags: [Chapter]
       summary: Mark a chapter as read
       description: >
-        If the chapter isn't in the database yet (e.g. read directly from a source before
-        the manga was added to the library), it's created first from the optional body
-        metadata.
+        The chapter is named by the source's own id for it within the title (`manga_slug`
+        plus the body's `source`, which may be omitted only when one stored title has this
+        slug). If no stored row has that key yet (e.g. read directly from a source before
+        the manga was added to the library), one is created first from the body metadata.
       parameters:
         - $ref: '#/components/parameters/MangaSlug'
-        - $ref: '#/components/parameters/ChapterId'
+        - $ref: '#/components/parameters/SourceChapterKey'
       requestBody:
         content:
           application/json:
@@ -377,13 +697,13 @@ paths:
         '200':
           description: OK
 
-  /chapter/{manga_slug}/{chapter_id}/mark-unread:
+  /chapter/{manga_slug}/{source_chapter_key}/mark-unread:
     post:
       tags: [Chapter]
       summary: Mark a chapter as unread
       parameters:
         - $ref: '#/components/parameters/MangaSlug'
-        - $ref: '#/components/parameters/ChapterId'
+        - $ref: '#/components/parameters/SourceChapterKey'
       requestBody:
         content:
           application/json:
@@ -393,13 +713,13 @@ paths:
         '200':
           description: OK
 
-  /chapter/{manga_slug}/{chapter_id}/{last_page_read}/mark-by-page:
+  /chapter/{manga_slug}/{source_chapter_key}/{last_page_read}/mark-by-page:
     post:
       tags: [Chapter]
       summary: Record reading progress by page number
       parameters:
         - $ref: '#/components/parameters/MangaSlug'
-        - $ref: '#/components/parameters/ChapterId'
+        - $ref: '#/components/parameters/SourceChapterKey'
         - name: last_page_read
           in: path
           required: true
@@ -472,12 +792,21 @@ paths:
   /chapter/add-history:
     post:
       tags: [Chapter]
-      summary: Create a chapter row as a read-history placeholder (not yet linked to a manga)
+      summary: Store a chapter read before any list had it (linked to a manga when one exists)
+      description: >
+        `id` is the source's own id for the chapter; `source` and `manga_slug` scope it.
+        Returns the existing row when one already holds that key.
       requestBody:
+        required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChapterMeta'
+              allOf:
+                - $ref: '#/components/schemas/ChapterMeta'
+                - type: object
+                  required: [id, source, manga_slug]
+                  properties:
+                    manga_slug: { type: string }
       responses:
         '201':
           description: Created
@@ -556,7 +885,7 @@ paths:
       tags: [History]
       summary: Record/update reading progress
       description: >
-        Upserts by (manga_slug, chapter_id): if a matching row exists, pages_read/
+        Upserts by (source, manga_slug, source_chapter_key): if a matching row exists, pages_read/
         time_read are updated (time_read accumulates) instead of creating a duplicate row.
       requestBody:
         required: true
@@ -670,6 +999,24 @@ paths:
       responses:
         '200':
           description: OK
+        '404':
+          description: Not downloaded, or the files are missing on disk
+
+  /downloads/chapter/{chapterId}/cbz:
+    get:
+      tags: [Downloads]
+      summary: Export a downloaded chapter as a CBZ file
+      description: >-
+        Streams the chapter's downloaded pages as an uncompressed ZIP (CBZ), in reading
+        order, named page_001 and so on. Not a JSON envelope: the body is the file.
+      parameters:
+        - $ref: '#/components/parameters/ChapterIdCamel'
+      responses:
+        '200':
+          description: The CBZ file
+          content:
+            application/vnd.comicbook+zip:
+              schema: { type: string, format: binary }
         '404':
           description: Not downloaded, or the files are missing on disk
 
@@ -869,13 +1216,13 @@ paths:
         '200':
           description: OK
 
-  /source/{source_id}/chapter/{chapter_id}/pages:
+  /source/{source_id}/chapter/{source_chapter_key}/pages:
     get:
       tags: [Sources]
       summary: Get a chapter's page image URLs from the source
       parameters:
         - $ref: '#/components/parameters/SourceId'
-        - $ref: '#/components/parameters/ChapterId'
+        - $ref: '#/components/parameters/SourceChapterKey'
         - name: manga_slug
           in: query
           schema: { type: string }
@@ -894,6 +1241,137 @@ paths:
       responses:
         '200':
           description: OK
+
+  /source/{source_id}/keys-from-urls:
+    post:
+      tags: [Sources]
+      summary: Turn Mihon/Tachiyomi URLs into this source's title slugs and chapter keys
+      description: >
+        Used by the Mihon/Tachiyomi backup import. Runs the source's optional keyFromUrl in
+        its sandbox; no network request is made. At most 5,000 URLs per request. A source
+        without keyFromUrl answers supported=false with every key null.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                manga: { type: array, items: { type: string, maxLength: 2048 } }
+                chapters: { type: array, items: { type: string, maxLength: 2048 } }
+      responses:
+        '200':
+          description: One key per URL, in request order; null where unrecognised.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          supported: { type: boolean }
+                          manga: { type: array, items: { type: string, nullable: true } }
+                          chapters: { type: array, items: { type: string, nullable: true } }
+        '400':
+          description: Invalid body
+        '429':
+          description: Rate limited
+
+  /source/{source_id}/browser-session:
+    description: >
+      Cookies a real browser earned for a source (a passed Cloudflare challenge, a login),
+      captured by the desktop app's source window or pasted from the reader's own browser.
+      Admin-only. Cookies are stored encrypted with TOKEN_ENCRYPTION_KEY and their values are
+      never returned; responses describe the session only.
+      Only useful when the server runs on the same machine as that browser, because
+      Cloudflare ties its clearance to the IP and User-Agent that passed the challenge.
+    get:
+      tags: [Sources]
+      summary: Describe the stored browser session for a source
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SourceBrowserSessionStatus'
+        '403':
+          $ref: '#/components/responses/Error'
+    put:
+      tags: [Sources]
+      summary: Replace a source's browser session with captured cookies
+      description: >
+        Cookies for hosts outside the source's allowed_hosts are dropped. Without `cookies`,
+        only the User-Agent changes and the stored cookies are kept (400 when there are none).
+        Responds 503 when the server has no TOKEN_ENCRYPTION_KEY.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userAgent]
+              properties:
+                userAgent: { type: string, maxLength: 512 }
+                cookies:
+                  type: array
+                  maxItems: 300
+                  items:
+                    type: object
+                    required: [name, value, domain]
+                    properties:
+                      name: { type: string, maxLength: 256 }
+                      value: { type: string, maxLength: 4096 }
+                      domain: { type: string, maxLength: 253 }
+                      hostOnly: { type: boolean }
+                      path: { type: string }
+                      secure: { type: boolean }
+                      httpOnly: { type: boolean }
+                      expires: { type: number, description: Unix seconds }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SourceBrowserSessionStatus'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+    delete:
+      tags: [Sources]
+      summary: Forget a source's browser session
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: OK
+        '403':
+          $ref: '#/components/responses/Error'
 
   /source/{source_id}/manga/{manga_slug}/updates:
     post:
@@ -925,6 +1403,68 @@ paths:
                           newChapters: { type: integer }
                           thumbnail_url: { type: string }
 
+  /source-network:
+    description: >
+      User-Agent and DNS over HTTPS resolver for requests installed (sandboxed) sources
+      make. Admin-only. SOURCE_USER_AGENT and SOURCE_DOH_URL supply the defaults. Neither
+      setting changes which hosts a source may reach: the allowlist and the public-address
+      check still run on every address the resolver returns.
+    get:
+      tags: [Sources]
+      summary: Get the source network settings
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SourceNetworkConfig'
+        '403':
+          $ref: '#/components/responses/Error'
+    patch:
+      tags: [Sources]
+      summary: Change the source network settings
+      description: Omitted fields are left alone; null turns a setting off, overriding the environment.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                userAgent:
+                  type: string
+                  nullable: true
+                  maxLength: 512
+                  description: Printable ASCII only.
+                dohUrl:
+                  type: string
+                  nullable: true
+                  maxLength: 2048
+                  description: https resolver URL (JSON API), without credentials.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/SourceNetworkConfig'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+
   /source/image-proxy:
     get:
       tags: [Sources]
@@ -946,6 +1486,10 @@ paths:
           description: Proxied image bytes
         '400':
           description: Missing/invalid/disallowed url
+        '404':
+          description: The source answered 404/410 for the image; remembered for an hour
+        '502':
+          description: The source failed or did not return a valid raster image
 
   # ── Cache (thumbnail caching) ──────────────────────────────────────────
   /cache/sync/{manga_id}:
@@ -1135,6 +1679,13 @@ components:
       name: chapter_id
       in: path
       required: true
+      description: A stored chapter's own id (`ChapterRecord.id`).
+      schema: { type: string }
+    SourceChapterKey:
+      name: source_chapter_key
+      in: path
+      required: true
+      description: The source's own id for the chapter, unique only within its title.
       schema: { type: string }
     ChapterIdCamel:
       name: chapterId
@@ -1207,6 +1758,36 @@ components:
       properties:
         success: { type: boolean, example: false }
         message: { type: string }
+        code:
+          type: string
+          description: >
+            Present when the client is expected to act on the reason. CHALLENGE_REQUIRED
+            (with 503) means the source wants a browser check that the desktop app can open.
+          example: CHALLENGE_REQUIRED
+
+    SourceNetworkConfig:
+      type: object
+      properties:
+        userAgent: { type: string, nullable: true }
+        dohUrl: { type: string, nullable: true }
+    SourceBrowserSessionStatus:
+      type: object
+      properties:
+        sourceId: { type: string }
+        hosts:
+          type: array
+          items: { type: string }
+        updatedAt: { type: string, format: date-time, nullable: true }
+        userAgent: { type: string, nullable: true }
+        cookies:
+          type: array
+          description: The stored cookies' names and expiry, never their values.
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              domain: { type: string }
+              expires: { type: number, nullable: true, description: Unix seconds }
 
     Manga:
       type: object
@@ -1303,7 +1884,14 @@ components:
     ChapterRecord:
       type: object
       properties:
-        id: { type: string }
+        id:
+          type: string
+          description: The app's own id for the chapter; never changes, even on a relink.
+        source: { type: string }
+        manga_slug: { type: string }
+        source_chapter_key:
+          type: string
+          description: The source's own id for the chapter, unique within source + manga_slug.
         manga_id: { type: string, nullable: true }
         url: { type: string }
         name: { type: string, nullable: true }
@@ -1322,7 +1910,7 @@ components:
       type: object
       properties:
         count: { type: integer }
-        failed_chapter_ids:
+        failed_source_chapter_keys:
           type: array
           items: { type: string }
 
@@ -1333,7 +1921,9 @@ components:
         source: { type: string }
         manga_id: { type: string }
         manga_slug: { type: string }
-        chapter_id: { type: string }
+        source_chapter_key:
+          type: string
+          description: The source's own id for the chapter, within source + manga_slug.
         thumbnail_url: { type: string }
         pages_read: { type: integer }
         time_read:
@@ -1356,6 +1946,7 @@ components:
         id: { type: string }
         manga_id: { type: string }
         chapter_id: { type: string }
+        source_chapter_key: { type: string }
         source_id: { type: string }
         mangaSlug: { type: string }
         status: { type: string }

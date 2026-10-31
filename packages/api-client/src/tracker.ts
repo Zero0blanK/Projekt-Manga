@@ -1,7 +1,19 @@
 import { request } from './client.js';
-import type { LinkTrackerBody } from '@projekt-manga/schemas';
+import type { ConnectTrackerBody, LinkTrackerBody, TRACKER_SERVICES } from '@projekt-manga/schemas';
 
-export type TrackerName = 'ANILIST' | 'MYANIMELIST';
+export type TrackerName = (typeof TRACKER_SERVICES)[number];
+
+/** How a tracker is connected: an OAuth redirect, a username/password, or a self-hosted
+ * server URL plus API key. */
+export type TrackerAuthKind = 'oauth' | 'password' | 'api_key';
+
+export interface TrackerAvailability {
+  tracker: TrackerName;
+  label: string;
+  auth_kind: TrackerAuthKind;
+  /** False when the server is missing configuration this tracker needs. */
+  available: boolean;
+}
 
 export interface ConnectedTracker {
   tracker: TrackerName;
@@ -33,6 +45,16 @@ export const getConnectedTrackers = (signal?: AbortSignal) =>
 /** Returns the URL to send the user's browser to — the caller does
  * `window.location.href = url` rather than this function redirecting itself, since a
  * fetch response can't navigate the page. */
+export const getAvailableTrackers = (signal?: AbortSignal) =>
+  request<TrackerAvailability[]>('/trackers/available', { signal });
+
+/** For `password` and `api_key` trackers; OAuth trackers use getTrackerAuthorizeUrl. */
+export const connectTrackerWithCredentials = (tracker: TrackerName, body: ConnectTrackerBody) =>
+  request<ConnectedTracker>(`/trackers/${trackerPath(tracker)}/connect`, {
+    method: 'POST',
+    body,
+  });
+
 export const getTrackerAuthorizeUrl = (tracker: TrackerName) =>
   request<{ url: string }>(`/trackers/${trackerPath(tracker)}/authorize`);
 

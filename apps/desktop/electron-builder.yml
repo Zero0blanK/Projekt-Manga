@@ -85,6 +85,14 @@ extraResources:
 # are generated from the brand mark in apps/web/public/brand/ProjektManga.icon.png, set on a
 # white rounded tile so it stays visible on dark taskbars. electron-builder auto-detects
 # build/icon.ico / icon.png without needing an explicit `icon:` key here.
+# "Open with Projekt Manga" for comic archives. Only .cbz: claiming .zip or .epub would
+# take those over from the apps people already use for them.
+fileAssociations:
+  - ext: cbz
+    name: Comic book archive
+    description: Comic book archive (CBZ)
+    role: Viewer
+
 win:
   target: nsis
   # Signing switches on by itself when a certificate is supplied: CSC_LINK (a .pfx file or its

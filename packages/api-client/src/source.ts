@@ -9,7 +9,9 @@ import type {
   SourceCataloguePage,
   SourcePageRequest,
   SourceCapabilities,
+  SourceBrowserSessionStatus,
 } from '@projekt-manga/types';
+import type { SourceBrowserSessionBody } from '@projekt-manga/schemas';
 import { request, buildApiUrl } from './client.js';
 
 export interface SourceSummary {
@@ -35,6 +37,15 @@ export interface SourceHealth {
 
 export interface FetchMangaUpdatesResult {
   newChapters: number;
+  /** The new chapters, for auto-download. Absent from older servers. */
+  newChapterList?: Array<{
+    source_chapter_key: string;
+    chapter_number: number;
+    name: string | null;
+  }>;
+  /** Stored chapters relinked to a new source id, updated or removed — changes to the
+   * list that are not new chapters. Older servers omit it. */
+  changedChapters?: number;
   thumbnail_url: string;
   /** Older servers omit this field; only true identifies a failed source check. */
   failed?: boolean;
@@ -180,3 +191,42 @@ export const checkLibraryUpdates = () =>
  * itself, not a JSON envelope. */
 export const buildImageProxyUrl = (targetUrl: string, sourceId?: string) =>
   buildApiUrl('/source/image-proxy', { url: targetUrl, source_id: sourceId });
+
+/** What the server holds for a source's browser session (never the cookies). Admin-only. */
+export const getSourceBrowserSession = (sourceId: string, signal?: AbortSignal) =>
+  request<SourceBrowserSessionStatus>(`/source/${encode(sourceId)}/browser-session`, { signal });
+
+/** Replaces the source's browser session with cookies the reader copied from their own
+ * browser. Admin-only. The desktop window saves from its main process instead, so its
+ * cookies never pass through a page. */
+export const saveSourceBrowserSession = (sourceId: string, body: SourceBrowserSessionBody) =>
+  request<SourceBrowserSessionStatus>(`/source/${encode(sourceId)}/browser-session`, {
+    method: 'PUT',
+    body,
+  });
+
+/** Forgets the cookies saved for this source. Admin-only. */
+export const clearSourceBrowserSession = (sourceId: string) =>
+  request<null>(`/source/${encode(sourceId)}/browser-session`, { method: 'DELETE' });
+
+export interface SourceUrlKeys {
+  /** False when the source cannot convert Mihon URLs at all. */
+  supported: boolean;
+  /** One title slug per requested manga URL, in order; null where unrecognised. */
+  manga: Array<string | null>;
+  /** One chapter key per requested chapter URL, in order; null where unrecognised. */
+  chapters: Array<string | null>;
+}
+
+/** Converts Mihon/Tachiyomi URLs into this source's slugs and chapter keys. At most
+ * `SOURCE_URL_KEYS_LIMIT` URLs per call. */
+export const getSourceKeysFromUrls = (
+  sourceId: string,
+  urls: { manga: string[]; chapters: string[] },
+  signal?: AbortSignal,
+) =>
+  request<SourceUrlKeys>(`/source/${encode(sourceId)}/keys-from-urls`, {
+    method: 'POST',
+    body: urls,
+    signal,
+  });

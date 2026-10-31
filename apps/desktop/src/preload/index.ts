@@ -18,7 +18,7 @@
  * must stay in sync with `DESKTOP_CHANNELS` in shared/config.ts, which main/ipc.ts
  * imports normally (the main process isn't sandboxed).
  */
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const OPEN_PATH_CHANNEL = 'desktop:open-path';
 const DATA_INVOKE_CHANNEL = 'desktop:data:invoke';
@@ -36,6 +36,21 @@ const UPDATE_NOW_CHANNEL = 'desktop:update:now';
 const UPDATE_DISMISS_CHANNEL = 'desktop:update:dismiss';
 const STARTUP_BACKGROUND_GET_CHANNEL = 'desktop:startup-background:get';
 const STARTUP_BACKGROUND_SET_CHANNEL = 'desktop:startup-background:set';
+const SOURCE_OPEN_BROWSER_CHANNEL = 'desktop:source:open-browser';
+const WINDOW_GET_ALWAYS_ON_TOP_CHANNEL = 'desktop:window:get-always-on-top';
+const WINDOW_SET_ALWAYS_ON_TOP_CHANNEL = 'desktop:window:set-always-on-top';
+const WINDOW_SET_PROGRESS_CHANNEL = 'desktop:window:set-progress';
+const WINDOW_SET_BADGE_CHANNEL = 'desktop:window:set-badge';
+const CLOSE_TO_TRAY_GET_CHANNEL = 'desktop:close-to-tray:get';
+const CLOSE_TO_TRAY_SET_CHANNEL = 'desktop:close-to-tray:set';
+const LOCK_GET_STATE_CHANNEL = 'desktop:lock:get-state';
+const LOCK_SET_CHANNEL = 'desktop:lock:set';
+const LOCK_CLEAR_CHANNEL = 'desktop:lock:clear';
+const LOCK_NOW_CHANNEL = 'desktop:lock:now';
+const CAPTURE_GET_CHANNEL = 'desktop:capture:get';
+const CAPTURE_SET_CHANNEL = 'desktop:capture:set';
+/** Main → renderer only (main/renderer-commands.ts): tray and app-menu commands. */
+const RENDERER_COMMAND_CHANNEL = 'desktop:command';
 
 /** Prefix of the `additionalArguments` entry main/window.ts appends for us. */
 const API_BASE_URL_ARG = '--pm-api-base-url=';
@@ -61,7 +76,17 @@ function resolveApiBaseUrlArg(): string | undefined {
 contextBridge.exposeInMainWorld('desktop', {
   archives: {
     list: () => ipcRenderer.invoke('desktop:archives:list'),
-    import: () => ipcRenderer.invoke('desktop:archives:import'),
+    import: (kind: 'file' | 'folder' = 'file') =>
+      ipcRenderer.invoke('desktop:archives:import', kind),
+    openPending: () => ipcRenderer.invoke('desktop:archives:open-pending'),
+    // For a File from a drop: its path on disk, then the checked import of it.
+    importDropped: (file: File) =>
+      ipcRenderer.invoke('desktop:archives:import-dropped', webUtils.getPathForFile(file)),
+    libraryFolders: () => ipcRenderer.invoke('desktop:archives:library-folders'),
+    addLibraryFolder: () => ipcRenderer.invoke('desktop:archives:add-library-folder'),
+    removeLibraryFolder: (folder: string) =>
+      ipcRenderer.invoke('desktop:archives:remove-library-folder', folder),
+    rescan: () => ipcRenderer.invoke('desktop:archives:rescan'),
     page: (id: string, index: number) => ipcRenderer.invoke('desktop:archives:page', id, index),
     remove: (id: string) => ipcRenderer.invoke('desktop:archives:remove', id),
   },
@@ -107,6 +132,50 @@ contextBridge.exposeInMainWorld('desktop', {
   startupBackground: {
     getState: () => ipcRenderer.invoke(STARTUP_BACKGROUND_GET_CHANNEL),
     setEnabled: (enabled: boolean) => ipcRenderer.invoke(STARTUP_BACKGROUND_SET_CHANNEL, enabled),
+  },
+  // A source's website in an isolated window (main/source-browser.ts), for Cloudflare checks
+  // and logins. Resolves once the window is closed and its cookies are saved by the server.
+  source: {
+    openBrowser: (sourceId: string) =>
+      ipcRenderer.invoke(SOURCE_OPEN_BROWSER_CHANNEL, { sourceId }),
+  },
+  // The calling window only (main/ipc.ts): the reader's "keep window on top".
+  window: {
+    getAlwaysOnTop: () => ipcRenderer.invoke(WINDOW_GET_ALWAYS_ON_TOP_CHANNEL),
+    setAlwaysOnTop: (enabled: boolean) =>
+      ipcRenderer.invoke(WINDOW_SET_ALWAYS_ON_TOP_CHANNEL, enabled),
+    setProgress: (fraction: number | null) =>
+      ipcRenderer.invoke(WINDOW_SET_PROGRESS_CHANNEL, fraction),
+    // `image`: the badge drawn by the page, a small PNG data URL (Windows' overlay icon).
+    setBadge: (count: number, image?: string) =>
+      ipcRenderer.invoke(WINDOW_SET_BADGE_CHANNEL, { count, image }),
+  },
+  // App lock settings (main/app-lock.ts). Unlocking happens in the lock window only.
+  lock: {
+    getState: () => ipcRenderer.invoke(LOCK_GET_STATE_CHANNEL),
+    set: (input: { currentPin?: string; newPin: string; idleMinutes: number }) =>
+      ipcRenderer.invoke(LOCK_SET_CHANNEL, input),
+    clear: (input: { currentPin: string }) => ipcRenderer.invoke(LOCK_CLEAR_CHANNEL, input),
+    lockNow: () => ipcRenderer.invoke(LOCK_NOW_CHANNEL),
+  },
+  capture: {
+    getHidden: () => ipcRenderer.invoke(CAPTURE_GET_CHANNEL),
+    setHidden: (hidden: boolean) => ipcRenderer.invoke(CAPTURE_SET_CHANNEL, hidden),
+  },
+  closeToTray: {
+    getState: () => ipcRenderer.invoke(CLOSE_TO_TRAY_GET_CHANNEL),
+    setEnabled: (enabled: boolean) => ipcRenderer.invoke(CLOSE_TO_TRAY_SET_CHANNEL, enabled),
+  },
+  // Tray and app-menu commands. Only the command object reaches the page, never the
+  // Electron event; returns the unsubscribe function.
+  commands: {
+    subscribe: (listener: (command: unknown) => void) => {
+      const forward = (_event: unknown, command: unknown) => listener(command);
+      ipcRenderer.on(RENDERER_COMMAND_CHANNEL, forward);
+      return () => {
+        ipcRenderer.removeListener(RENDERER_COMMAND_CHANNEL, forward);
+      };
+    },
   },
   auth: {
     clearCachedSession: () => ipcRenderer.invoke(AUTH_CLEAR_CACHED_SESSION_CHANNEL),

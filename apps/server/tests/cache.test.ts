@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import crypto from 'node:crypto';
 import request from 'supertest';
 import app from '../src/app.js';
+import { coverCacheControl } from '../src/controllers/cache.controller.js';
 import { prismaMock } from './mocks/prismaMock.js';
 
 vi.mock('axios', () => ({ default: { get: vi.fn() } }));
@@ -283,5 +284,19 @@ describe('GET /api/cache/legacy-thumbnail/:source_id/:manga_id', () => {
     } finally {
       lookup.mockRestore();
     }
+  });
+});
+
+describe('cover caching', () => {
+  const at = (v?: string) => ({ query: v === undefined ? {} : { v } });
+  it('caches a cover only under a URL version naming the image sent', () => {
+    expect(coverCacheControl(at('custom-2026-01-01'), true)).toBe('private, max-age=300');
+    expect(coverCacheControl(at('abc123'), false)).toBe('private, max-age=300');
+    // History and Recents ask without a version: a custom cover may change any time.
+    expect(coverCacheControl(at(), true)).toBe('private, no-cache');
+    expect(coverCacheControl(at(), false)).toBe('private, no-cache');
+    // A custom cover sent for a source-cover URL (or the reverse) is never kept.
+    expect(coverCacheControl(at('abc123'), true)).toBe('private, no-cache');
+    expect(coverCacheControl(at('custom-2026-01-01'), false)).toBe('private, no-cache');
   });
 });

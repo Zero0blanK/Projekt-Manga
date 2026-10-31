@@ -2,14 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { Panel } from '@/components/settings/field-controls';
+import { useSetting } from '@/lib/app-store';
+import { READER_ACTIONS, READER_KEY_BINDINGS, keyLabel, parseKeyBindings } from '@/lib/reader-keys';
 
 /**
  * Every shortcut the app actually binds. Grouped by where it works, since a reader-only
  * key looks broken if you try it on the library.
  *
  * Sources of truth: `components/app-shell.tsx` (G-prefixed navigation),
- * `components/floating-nav.tsx` (search), `app/reader/[id]/client.tsx` (zoom, immersive),
- * and `components/reader/paged-viewer.tsx` (paging).
+ * `components/floating-nav.tsx` (search), `components/command-palette.tsx`, the desktop
+ * app menu (`apps/desktop/src/main/app-menu.ts`) and, for the reader, the bindings in
+ * `lib/reader-keys.ts`, which this panel reads so a rebound key shows here too.
  */
 const GROUPS: Array<{ title: string; note?: string; rows: Array<[string, string[]]> }> = [
   {
@@ -28,23 +31,37 @@ const GROUPS: Array<{ title: string; note?: string; rows: Array<[string, string[
     title: 'Search',
     rows: [
       ['Focus the search box', ['Mod', 'K']],
+      ['Command palette', ['Mod', 'Shift', 'P']],
       ['Close search or a panel', ['Esc']],
     ],
   },
   {
-    title: 'Reader',
-    note: 'Paging applies to single and two-page layouts; the long strip scrolls normally',
+    title: 'Desktop app',
+    note: 'In the desktop app only; Ctrl+click or middle-click a link opens it in a new window',
     rows: [
-      ['Next page', ['→']],
-      ['Next page', ['Space']],
-      ['Previous page', ['←']],
-      ['Toggle immersive mode', ['F']],
-      ['Zoom in', ['+']],
-      ['Zoom out', ['−']],
-      ['Reset zoom', ['0']],
+      ['Library', ['Mod', '1']],
+      ['Discover', ['Mod', '2']],
+      ['History', ['Mod', '3']],
+      ['Downloads', ['Mod', '4']],
+      ['Upcoming releases', ['Mod', '5']],
+      ['Settings', ['Mod', ',']],
+      ['Fullscreen', ['F11']],
+      ['Show the menu bar', ['Alt']],
     ],
   },
 ];
+
+/** The reader's keys as they are bound now: change them in Settings › Reader. */
+function useReaderGroup() {
+  const bindings = parseKeyBindings(useSetting(READER_KEY_BINDINGS, ''));
+  return {
+    title: 'Reader',
+    note: 'Change these in Settings › Reader › Mouse and keyboard',
+    rows: READER_ACTIONS.flatMap(({ id, label }) =>
+      bindings[id].map((key): [string, string[]] => [label, [keyLabel(key)]]),
+    ),
+  };
+}
 
 function Keys({ keys }: { keys: string[] }) {
   return (
@@ -65,13 +82,14 @@ export function ShortcutsPanel() {
   // ⌘ on Apple platforms, Ctrl everywhere else. Resolved after mount so the server and
   // first client render agree.
   const [modifier, setModifier] = useState('Ctrl');
+  const readerGroup = useReaderGroup();
   useEffect(() => {
     if (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) setModifier('⌘');
   }, []);
 
   return (
     <div className="space-y-6">
-      {GROUPS.map((group) => (
+      {[...GROUPS, readerGroup].map((group) => (
         <Panel key={group.title} title={group.title} subtitle={group.note ?? 'Fly through the app'}>
           <div className="divide-y divide-border/50">
             {group.rows.map(([label, keys], i) => (

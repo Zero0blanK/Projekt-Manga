@@ -34,7 +34,16 @@ export interface LocalMangaInput {
   status?: string | null;
 }
 
-export interface LocalChapterInput {
+/** How the renderer, sync and the server name a chapter: the source's own id for it,
+ * within its title. Row ids are each database's own — this one's match the server's for
+ * chapters that came from it, and are minted here for chapters read before that. */
+export interface LocalChapterRef {
+  source: string;
+  manga_slug: string;
+  source_chapter_key: string;
+}
+
+export interface LocalChapterInput extends LocalChapterRef {
   id: string;
   manga_id: string;
   url?: string | null;
@@ -60,7 +69,8 @@ export interface LocalHistoryInput {
   source_manga_id?: string | null;
   title?: string | null;
   thumbnail_url?: string | null;
-  chapter_id?: string | null;
+  /** The source's id for the chapter, within `source` + `manga_slug`. */
+  source_chapter_key?: string | null;
   pages_read?: number;
   time_read?: number;
 }
@@ -111,17 +121,43 @@ function upsertManga(input: LocalMangaInput, membership: LibraryMembership = 'if
   ).run(input.id, nowIso());
 }
 
+/**
+ * Writes a chapter the server sent, under the server's row id.
+ *
+ * A row this device stood up for the same key before the server's arrived (a read from a
+ * source, or a pulled state for a title not synced yet) is the same chapter: it is folded
+ * into the server's row, so its state and history follow and nothing is duplicated. A
+ * server relink arrives as a new key on an id this device already has, and just updates it.
+ */
 function upsertChapter(input: LocalChapterInput): void {
   const db = getDb();
+  const stub = db
+    .prepare(
+      `SELECT id FROM chapter WHERE source = ? AND manga_slug = ? AND source_chapter_key = ? AND id <> ?`,
+    )
+    .get(input.source, input.manga_slug, input.source_chapter_key, input.id) as
+    { id: string } | undefined;
+  if (stub) {
+    // Frees the key for the server's row; the stub is folded in and deleted below.
+    db.prepare(
+      `UPDATE chapter SET source_chapter_key = source_chapter_key || char(0) || id WHERE id = ?`,
+    ).run(stub.id);
+  }
+
   db.prepare(
-    `INSERT INTO chapter (id, manga_id, url, name, scanlator, chapter_number, release_date, page_count, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO chapter (id, source, manga_slug, source_chapter_key, manga_id, url, name, scanlator, chapter_number, release_date, page_count, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET
+       source=excluded.source, manga_slug=excluded.manga_slug,
+       source_chapter_key=excluded.source_chapter_key,
        manga_id=excluded.manga_id, url=excluded.url, name=excluded.name, scanlator=excluded.scanlator,
        chapter_number=excluded.chapter_number, release_date=excluded.release_date,
        page_count=excluded.page_count, updated_at=excluded.updated_at`,
   ).run(
     input.id,
+    input.source,
+    input.manga_slug,
+    input.source_chapter_key,
     input.manga_id,
     input.url ?? null,
     input.name ?? null,
@@ -145,6 +181,79 @@ function upsertChapter(input: LocalChapterInput): void {
     input.last_page_read ?? 0,
     nowIso(),
   );
+
+  if (stub) mergeChapterInto(stub.id, input.id);
+}
+
+/**
+ * Folds chapter row `fromId` into `intoId` and deletes it. State merges as the server's
+ * does — read/bookmark as "either", progress as the furthest — and is stamped only when
+ * the merge changes something, so a state the server already has is not pushed back as a
+ * fresh edit, while a local edit it lacks is. History follows the chapter.
+ */
+function mergeChapterInto(fromId: string, intoId: string): void {
+  const db = getDb();
+  const from = db
+    .prepare(`SELECT is_read, is_bookmark, last_page_read FROM chapter_state WHERE chapter_id = ?`)
+    .get(fromId) as { is_read: number; is_bookmark: number; last_page_read: number } | undefined;
+  if (from) {
+    const intoHasState = db.prepare(`SELECT 1 FROM chapter_state WHERE chapter_id = ?`).get(intoId);
+    if (intoHasState) {
+      db.prepare(
+        `UPDATE chapter_state SET
+           is_read = MAX(is_read, ?), is_bookmark = MAX(is_bookmark, ?),
+           last_page_read = MAX(last_page_read, ?), updated_at = ?
+         WHERE chapter_id = ? AND (is_read < ? OR is_bookmark < ? OR last_page_read < ?)`,
+      ).run(
+        from.is_read,
+        from.is_bookmark,
+        from.last_page_read,
+        nowIso(),
+        intoId,
+        from.is_read,
+        from.is_bookmark,
+        from.last_page_read,
+      );
+    } else {
+      db.prepare(`UPDATE chapter_state SET chapter_id = ? WHERE chapter_id = ?`).run(
+        intoId,
+        fromId,
+      );
+    }
+  }
+  // One live history row per chapter: a row the other chapter already has takes this
+  // one's reading, and this one becomes a tombstone (as deleteHistory leaves it, with
+  // last_read bumped so the next push carries it) for the server and other devices.
+  const kept = db
+    .prepare(`SELECT id FROM history WHERE chapter_id = ? AND deleted_at IS NULL LIMIT 1`)
+    .get(intoId) as { id: string } | undefined;
+  if (kept) {
+    const folded = db
+      .prepare(`SELECT * FROM history WHERE chapter_id = ? AND deleted_at IS NULL`)
+      .all(fromId) as Array<{
+      id: string;
+      read_at: string;
+      last_read: string;
+      pages_read: number;
+      time_read: number;
+    }>;
+    const now = nowIso();
+    for (const row of folded) {
+      db.prepare(
+        `UPDATE history SET
+           read_at = MIN(read_at, ?), last_read = MAX(last_read, ?),
+           pages_read = MAX(pages_read, ?), time_read = time_read + ?
+         WHERE id = ?`,
+      ).run(row.read_at, row.last_read, row.pages_read, row.time_read, kept.id);
+      db.prepare(`UPDATE history SET deleted_at = ?, last_read = ? WHERE id = ?`).run(
+        now,
+        now,
+        row.id,
+      );
+    }
+  }
+  db.prepare(`UPDATE history SET chapter_id = ? WHERE chapter_id = ?`).run(intoId, fromId);
+  db.prepare(`DELETE FROM chapter WHERE id = ?`).run(fromId);
 }
 
 // ─── Reads ─────────────────────────────────────────────────────────────────────────────
@@ -235,6 +344,9 @@ function listLibrary(): LocalMangaListItem[] {
 
 export interface LocalMangaChapter {
   id: string;
+  source: string;
+  manga_slug: string;
+  source_chapter_key: string;
   manga_id: string;
   url: string;
   name: string | null;
@@ -277,8 +389,8 @@ function getMangaDetails(mangaId: string): LocalMangaDetails | null {
 
   const chapters = db
     .prepare(
-      `SELECT c.id, c.manga_id, c.url, c.name, c.scanlator, c.chapter_number, c.release_date,
-              c.page_count, c.updated_at,
+      `SELECT c.id, c.source, c.manga_slug, c.source_chapter_key, c.manga_id, c.url, c.name,
+              c.scanlator, c.chapter_number, c.release_date, c.page_count, c.updated_at,
               cs.is_read, cs.is_bookmark, cs.last_page_read
        FROM chapter c
        LEFT JOIN chapter_state cs ON cs.chapter_id = c.id
@@ -307,6 +419,9 @@ function getMangaDetails(mangaId: string): LocalMangaDetails | null {
     updated_at: manga.updated_at as string,
     chapters: chapters.map((c) => ({
       id: c.id as string,
+      source: c.source as string,
+      manga_slug: c.manga_slug as string,
+      source_chapter_key: c.source_chapter_key as string,
       manga_id: c.manga_id as string,
       url: (c.url as string | null) ?? '',
       name: c.name as string | null,
@@ -326,9 +441,9 @@ function getMangaDetails(mangaId: string): LocalMangaDetails | null {
 
 // ─── Writes: reading state (the "mark chapters read" half of the local-first gate) ─────
 
-/** Catalog fields a caller can supply for a chapter this database has never seen —
- * enough to stand a row up so read state has something to reference. */
-export interface LocalChapterStub {
+/** A chapter as the renderer names it, plus catalog fields for standing a row up when this
+ * database has never seen it. */
+export interface LocalChapterStub extends LocalChapterRef {
   chapter_number?: number;
   name?: string | null;
   url?: string | null;
@@ -337,47 +452,71 @@ export interface LocalChapterStub {
 }
 
 /**
- * The local counterpart of the server's `ensureChapterExists`.
+ * The local counterpart of the server's `resolveChapter`: this database's row for the
+ * chapter a key names, created when there is none. Returns its id.
  *
  * chapter_state references chapter, and foreign keys are enforced (see connection.ts), so
- * marking a chapter this device had never seeded failed outright with a FOREIGN KEY
- * error — reading anything straight from a source in the desktop app therefore recorded
- * nothing at all. `manga_id` is left null when unknown, which is exactly the case the
- * server's own nullable column exists for: progress works for a title that was never
- * added to the library.
+ * read state needs a row to hang off even for a chapter read straight from a source.
+ * `manga_id` is left null when this database has no row for the title, which is exactly
+ * the case the server's own nullable column exists for.
  */
-function ensureChapterRow(chapterId: string, stub?: LocalChapterStub): void {
+function ensureChapterRow(stub: LocalChapterStub): string {
   const db = getDb();
-  const existing = db.prepare(`SELECT id FROM chapter WHERE id = ?`).get(chapterId);
+  const mangaId =
+    (stub.manga_id && db.prepare(`SELECT 1 FROM manga WHERE id = ?`).get(stub.manga_id)
+      ? stub.manga_id
+      : null) ??
+    (
+      db
+        .prepare(`SELECT id FROM manga WHERE source = ? AND slug = ?`)
+        .get(stub.source, stub.manga_slug) as { id: string } | undefined
+    )?.id ??
+    null;
+  const existing = db
+    .prepare(
+      `SELECT id FROM chapter WHERE source = ? AND manga_slug = ? AND source_chapter_key = ?`,
+    )
+    .get(stub.source, stub.manga_slug, stub.source_chapter_key) as { id: string } | undefined;
   if (existing) {
-    if (stub?.chapter_number !== undefined && Number.isFinite(stub.chapter_number)) {
+    if (stub.chapter_number !== undefined && Number.isFinite(stub.chapter_number)) {
       db.prepare(
         `UPDATE chapter SET chapter_number = ? WHERE id = ? AND chapter_number = 0 AND ? <> 0`,
-      ).run(stub.chapter_number, chapterId, stub.chapter_number);
+      ).run(stub.chapter_number, existing.id, stub.chapter_number);
     }
-    if (stub?.page_count !== undefined && stub.page_count !== null && stub.page_count > 0) {
+    if (stub.page_count !== undefined && stub.page_count !== null && stub.page_count > 0) {
       db.prepare(
         `UPDATE chapter SET page_count = ? WHERE id = ? AND COALESCE(page_count, 0) = 0`,
-      ).run(stub.page_count, chapterId);
+      ).run(stub.page_count, existing.id);
     }
-    return;
+    if (mangaId) {
+      db.prepare(`UPDATE chapter SET manga_id = ? WHERE id = ? AND manga_id IS NULL`).run(
+        mangaId,
+        existing.id,
+      );
+    }
+    return existing.id;
   }
+  const id = createId();
   db.prepare(
-    `INSERT INTO chapter (id, manga_id, url, name, scanlator, chapter_number, release_date, page_count, updated_at)
-     VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)`,
+    `INSERT INTO chapter (id, source, manga_slug, source_chapter_key, manga_id, url, name, scanlator, chapter_number, release_date, page_count, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)`,
   ).run(
-    chapterId,
-    stub?.manga_id ?? null,
-    stub?.url ?? null,
-    stub?.name ?? null,
-    stub?.chapter_number ?? 0,
-    stub?.page_count ?? null,
+    id,
+    stub.source,
+    stub.manga_slug,
+    stub.source_chapter_key,
+    mangaId,
+    stub.url ?? null,
+    stub.name ?? null,
+    stub.chapter_number ?? 0,
+    stub.page_count ?? null,
     nowIso(),
   );
+  return id;
 }
 
-function markChapterRead(chapterId: string, isRead: boolean, stub?: LocalChapterStub): void {
-  ensureChapterRow(chapterId, stub);
+function markChapterRead(stub: LocalChapterStub, isRead: boolean): void {
+  const chapterId = ensureChapterRow(stub);
   const db = getDb();
   db.prepare(
     `INSERT INTO chapter_state (chapter_id, is_read, last_page_read, updated_at) VALUES (?, ?, 0, ?)
@@ -388,12 +527,8 @@ function markChapterRead(chapterId: string, isRead: boolean, stub?: LocalChapter
   ).run(chapterId, isRead ? 1 : 0, nowIso());
 }
 
-function updateChapterProgress(
-  chapterId: string,
-  lastPageRead: number,
-  stub?: LocalChapterStub,
-): void {
-  ensureChapterRow(chapterId, stub);
+function updateChapterProgress(stub: LocalChapterStub, lastPageRead: number): void {
+  const chapterId = ensureChapterRow(stub);
   const db = getDb();
   db.prepare(
     `INSERT INTO chapter_state (chapter_id, last_page_read, updated_at) VALUES (?, ?, ?)
@@ -420,6 +555,7 @@ export interface LocalHistoryEntry {
   title?: string;
   thumbnail_url?: string;
   chapter_id?: string;
+  source_chapter_key?: string;
   read_at: string;
   last_read: string;
   pages_read: number;
@@ -435,7 +571,7 @@ export interface LocalHistoryEntry {
  * returned by `addHistory` carries the same fields as one returned by `listHistory` —
  * they used to differ, and the `as unknown as` cast on the add path meant the compiler
  * reported a LocalHistoryEntry either way. */
-const HISTORY_SELECT = `SELECT h.*, c.chapter_number, c.name, c.page_count,
+const HISTORY_SELECT = `SELECT h.*, c.source_chapter_key, c.chapter_number, c.name, c.page_count,
               CASE WHEN h.title IS NULL OR h.title = '' OR h.title = h.manga_id
                          OR h.title = h.manga_slug THEN COALESCE(m.title, h.title)
                    ELSE h.title END AS display_title,
@@ -463,6 +599,7 @@ function toHistoryEntry(row: Record<string, unknown>): LocalHistoryEntry {
     title: optional<string>(row.display_title),
     thumbnail_url: optional<string>(row.display_thumbnail_url),
     chapter_id: optional<string>(row.chapter_id),
+    source_chapter_key: optional<string>(row.source_chapter_key),
     read_at: row.read_at as string,
     last_read: row.last_read as string,
     pages_read: (row.pages_read as number | null) ?? 0,
@@ -498,13 +635,21 @@ function addHistory(input: LocalHistoryInput): LocalHistoryEntry {
   const db = getDb();
   const now = nowIso();
 
+  const chapterId = input.source_chapter_key
+    ? ensureChapterRow({
+        source: input.source,
+        manga_slug: input.manga_slug,
+        source_chapter_key: input.source_chapter_key,
+        manga_id: input.manga_id,
+      })
+    : null;
   // Deliberately not filtered on deleted_at: the server matches the row regardless and
   // then clears the tombstone, so filtering here would insert a second row for a chapter
   // whose cleared entry is still on disk — and both would then sync.
-  const existing = input.chapter_id
+  const existing = chapterId
     ? db
         .prepare(`SELECT id FROM history WHERE source = ? AND chapter_id = ? AND manga_slug = ?`)
-        .get(input.source, input.chapter_id, input.manga_slug)
+        .get(input.source, chapterId, input.manga_slug)
     : null;
 
   if (existing) {
@@ -553,7 +698,7 @@ function addHistory(input: LocalHistoryInput): LocalHistoryEntry {
     input.source_manga_id ?? null,
     input.title ?? null,
     input.thumbnail_url ?? null,
-    input.chapter_id ?? null,
+    chapterId,
     now,
     now,
     // `|| 1` not `?? 0`, matching the server: a history row exists because a chapter was
@@ -603,6 +748,9 @@ interface ServerMangaDetails {
   status: string;
   chapters: Array<{
     id: string;
+    source: string;
+    manga_slug: string;
+    source_chapter_key: string;
     url: string;
     name: string | null;
     scanlator: string | null;
@@ -628,6 +776,27 @@ interface ServerMangaDetails {
  * rather than mirroring the client's payload keeps one authority for what a manga is: the
  * id the server assigned, and the fields it actually stored.
  */
+/**
+ * Drops local chapters of a title the server no longer lists, when nothing hangs off them.
+ * One with progress or history may be a local-first mark the server has not received yet,
+ * so it stays. (A server relink keeps the row id, so it never shows up here.)
+ */
+function dropUnlistedChapters(mangaId: string, listedIds: Set<string>): void {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT c.id FROM chapter c LEFT JOIN chapter_state cs ON cs.chapter_id = c.id
+       WHERE c.manga_id = ?
+         AND COALESCE(cs.is_read, 0) = 0 AND COALESCE(cs.is_bookmark, 0) = 0
+         AND COALESCE(cs.last_page_read, 0) = 0
+         AND NOT EXISTS (SELECT 1 FROM history h WHERE h.chapter_id = c.id)`,
+    )
+    .all(mangaId) as { id: string }[];
+  for (const row of rows) {
+    if (!listedIds.has(row.id)) db.prepare(`DELETE FROM chapter WHERE id = ?`).run(row.id);
+  }
+}
+
 async function syncMangaFromServer(
   apiBaseUrl: string,
   mangaId: string,
@@ -651,8 +820,24 @@ async function syncMangaFromServer(
   upsertManga(details, membership);
   // A details payload without a chapters array is still a usable manga row, so store it
   // and skip the chapters rather than throwing.
-  for (const chapter of details.chapters ?? []) {
-    upsertChapter({ ...chapter, manga_id: details.id });
+  const db = getDb();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    for (const chapter of details.chapters ?? []) {
+      upsertChapter({
+        ...chapter,
+        source: details.source,
+        manga_slug: details.slug,
+        manga_id: details.id,
+      });
+    }
+    if (details.chapters?.length) {
+      dropUnlistedChapters(details.id, new Set(details.chapters.map((chapter) => chapter.id)));
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
   // A source-only read can predate this library row. Keep its saved history attached
   // after the title is added, just as the server's add path does for the same chapter ids.
@@ -701,7 +886,7 @@ async function seedFromServer(
         source_manga_id?: string | null;
         title: string | null;
         thumbnail_url: string | null;
-        chapter_id: string | null;
+        source_chapter_key?: string | null;
         pages_read: number;
         time_read: number;
       }>;
@@ -711,6 +896,14 @@ async function seedFromServer(
       if (!row?.id || typeof row.source !== 'string' || typeof row.manga_slug !== 'string') {
         continue;
       }
+      const chapterId = row.source_chapter_key
+        ? ensureChapterRow({
+            source: row.source,
+            manga_slug: row.manga_slug,
+            source_chapter_key: row.source_chapter_key,
+            manga_id: row.manga_id,
+          })
+        : null;
       db.prepare(
         `INSERT OR IGNORE INTO history (id, source, manga_id, manga_slug, source_manga_id, title, thumbnail_url, chapter_id, read_at, last_read, pages_read, time_read)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -720,14 +913,14 @@ async function seedFromServer(
         // node:sqlite's parameter binding only accepts null, not undefined — the server
         // omits these keys entirely for a source-only read rather than sending an
         // explicit null (see packages/api-client's HistoryEntry: manga_id?, title?,
-        // thumbnail_url?, chapter_id? are all optional, not nullable), so every one of
-        // these needs the same `?? null` coercion.
+        // thumbnail_url? are all optional, not nullable), so every one of these needs
+        // the same `?? null` coercion.
         row.manga_id ?? null,
         row.manga_slug,
         row.source_manga_id ?? null,
         row.title ?? null,
         row.thumbnail_url ?? null,
-        row.chapter_id ?? null,
+        chapterId,
         nowIso(),
         nowIso(),
         row.pages_read ?? 0,
@@ -787,7 +980,7 @@ async function reconcileRestoreFromServer(
         source_manga_id?: string;
         title?: string;
         thumbnail_url?: string;
-        chapter_id?: string;
+        source_chapter_key?: string;
         read_at: string;
         last_read: string;
         pages_read: number;
@@ -841,7 +1034,14 @@ async function reconcileRestoreFromServer(
       if (!manga || typeof manga.id !== 'string' || !Array.isArray(manga.chapters))
         throw new Error('Invalid title in restore reconciliation');
       upsertManga(manga);
-      for (const chapter of manga.chapters) upsertChapter({ ...chapter, manga_id: manga.id });
+      for (const chapter of manga.chapters) {
+        upsertChapter({
+          ...chapter,
+          source: manga.source,
+          manga_slug: manga.slug,
+          manga_id: manga.id,
+        });
+      }
     }
     const stamped = nowIso();
     for (const state of states) {
@@ -866,23 +1066,25 @@ async function reconcileRestoreFromServer(
       if (effectiveMode === 'merge') {
         const duplicate = db
           .prepare(
-            `SELECT 1 FROM history WHERE source = ? AND manga_slug = ? AND IFNULL(chapter_id, '') = ? LIMIT 1`,
+            `SELECT 1 FROM history h LEFT JOIN chapter c ON c.id = h.chapter_id
+             WHERE h.source = ? AND h.manga_slug = ? AND IFNULL(c.source_chapter_key, '') = ?
+             LIMIT 1`,
           )
-          .get(row.source, row.manga_slug, row.chapter_id ?? '');
+          .get(row.source, row.manga_slug, row.source_chapter_key ?? '');
         if (duplicate) continue;
       }
-      if (row.chapter_id) {
-        db.prepare(
-          `INSERT OR IGNORE INTO chapter (id, manga_id, url, name, chapter_number, page_count, updated_at)
-           VALUES (?, ?, '', ?, ?, ?, ?)`,
-        ).run(
-          row.chapter_id,
-          row.manga_id && catalogIds.has(row.manga_id) ? row.manga_id : null,
-          row.name ?? '',
-          row.chapter_number ?? 0,
-          row.page_count ?? null,
-          stamped,
-        );
+      const chapterId = row.source_chapter_key
+        ? ensureChapterRow({
+            source: row.source,
+            manga_slug: row.manga_slug,
+            source_chapter_key: row.source_chapter_key,
+            manga_id: row.manga_id && catalogIds.has(row.manga_id) ? row.manga_id : null,
+            name: row.name ?? '',
+            chapter_number: row.chapter_number ?? 0,
+            page_count: row.page_count ?? null,
+          })
+        : null;
+      if (chapterId) {
         db.prepare(
           `INSERT INTO chapter_state (chapter_id, is_read, last_page_read, updated_at)
            VALUES (?, ?, ?, ?)
@@ -890,7 +1092,7 @@ async function reconcileRestoreFromServer(
              is_read = MAX(chapter_state.is_read, excluded.is_read),
              last_page_read = MAX(chapter_state.last_page_read, excluded.last_page_read),
              updated_at = excluded.updated_at`,
-        ).run(row.chapter_id, row.is_read ? 1 : 0, row.last_page_read ?? 0, stamped);
+        ).run(chapterId, row.is_read ? 1 : 0, row.last_page_read ?? 0, stamped);
       }
       db.prepare(
         `INSERT INTO history (id, source, manga_id, manga_slug, source_manga_id, title, thumbnail_url, chapter_id, read_at, last_read, pages_read, time_read) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -902,7 +1104,7 @@ async function reconcileRestoreFromServer(
         row.source_manga_id ?? null,
         row.title ?? null,
         row.thumbnail_url ?? null,
-        row.chapter_id ?? null,
+        chapterId,
         row.read_at,
         row.last_read,
         row.pages_read,
@@ -983,13 +1185,12 @@ export interface PendingSyncPush {
     notification_read: boolean;
     updated_at: string;
   }[];
-  chapter_state: {
-    chapter_id: string;
+  chapter_state: (LocalChapterRef & {
     is_read: boolean;
     is_bookmark: boolean;
     last_page_read: number;
     updated_at: string;
-  }[];
+  })[];
   manga_category: {
     manga_id: string;
     category_name: string;
@@ -1004,7 +1205,7 @@ export interface PendingSyncPush {
     source_manga_id?: string | null;
     title: string | null;
     thumbnail_url: string | null;
-    chapter_id: string | null;
+    source_chapter_key: string | null;
     read_at: string;
     last_read: string;
     pages_read: number;
@@ -1036,12 +1237,19 @@ function getPendingChanges(): PendingSyncPush {
     updated_at: string;
   }[];
 
+  // Named by source key: this device's row ids are its own. A stub with no title yet
+  // (source '') has nothing the server could file it under, so it waits.
   const chapterStateRows = db
     .prepare(
-      `SELECT chapter_id, is_read, is_bookmark, last_page_read, updated_at FROM chapter_state WHERE updated_at > ?`,
+      `SELECT c.source, c.manga_slug, c.source_chapter_key,
+              cs.is_read, cs.is_bookmark, cs.last_page_read, cs.updated_at
+       FROM chapter_state cs JOIN chapter c ON c.id = cs.chapter_id
+       WHERE cs.updated_at > ? AND c.source <> '' AND c.manga_slug <> ''`,
     )
     .all(since) as {
-    chapter_id: string;
+    source: string;
+    manga_slug: string;
+    source_chapter_key: string;
     is_read: number;
     is_bookmark: number;
     last_page_read: number;
@@ -1058,9 +1266,10 @@ function getPendingChanges(): PendingSyncPush {
 
   const historyRows = db
     .prepare(
-      `SELECT id, source, manga_id, manga_slug, source_manga_id, title, thumbnail_url, chapter_id, read_at, last_read,
-              pages_read, time_read, deleted_at
-       FROM history WHERE last_read > ?`,
+      `SELECT h.id, h.source, h.manga_id, h.manga_slug, h.source_manga_id, h.title, h.thumbnail_url,
+              c.source_chapter_key, h.read_at, h.last_read, h.pages_read, h.time_read, h.deleted_at
+       FROM history h LEFT JOIN chapter c ON c.id = h.chapter_id
+       WHERE h.last_read > ?`,
     )
     .all(since) as unknown as PendingSyncPush['history'];
 
@@ -1078,7 +1287,9 @@ function getPendingChanges(): PendingSyncPush {
       updated_at: r.updated_at,
     })),
     chapter_state: chapterStateRows.map((r) => ({
-      chapter_id: r.chapter_id,
+      source: r.source,
+      manga_slug: r.manga_slug,
+      source_chapter_key: r.source_chapter_key,
       is_read: Boolean(r.is_read),
       is_bookmark: Boolean(r.is_bookmark),
       last_page_read: r.last_page_read,
@@ -1112,13 +1323,12 @@ export interface PulledSyncData {
     updated_at: string;
     edited_at?: string | null;
   }[];
-  chapter_state: {
-    chapter_id: string;
+  chapter_state: (LocalChapterRef & {
     is_read: boolean;
     is_bookmark: boolean;
     last_page_read: number;
     updated_at: string;
-  }[];
+  })[];
   manga_category: {
     manga_id: string;
     category_id: string;
@@ -1134,7 +1344,7 @@ export interface PulledSyncData {
     source_manga_id?: string | null;
     title: string | null;
     thumbnail_url: string | null;
-    chapter_id: string | null;
+    source_chapter_key: string | null;
     read_at: string;
     last_read: string;
     pages_read: number;
@@ -1173,8 +1383,6 @@ function applyPulledChanges(pulled: PulledSyncData): ApplyPulledChangesResult {
 
   const mangaExists = (manga_id: string) =>
     !!db.prepare(`SELECT 1 FROM manga WHERE id = ?`).get(manga_id);
-  const chapterExists = (chapter_id: string) =>
-    !!db.prepare(`SELECT 1 FROM chapter WHERE id = ?`).get(chapter_id);
 
   // manga_state backs two pulled domains (library and manga_state) that share one local
   // updated_at, so "is the local row newer" is judged against the value from before this
@@ -1248,18 +1456,17 @@ function applyPulledChanges(pulled: PulledSyncData): ApplyPulledChangesResult {
 
     // Unlike the other domains the server keeps no separate edit time for chapter_state
     // (it merges progress monotonically on push), so `updated_at` is all there is to compare.
+    // A chapter this device has not stored yet gets a stub by its key, like a local read
+    // would, rather than being skipped: the key is all a row needs.
     for (const row of pulled.chapter_state) {
-      if (!chapterExists(row.chapter_id)) {
-        noteSkipped(row.updated_at);
-        continue;
-      }
+      const chapterId = ensureChapterRow(row);
       db.prepare(
         `INSERT INTO chapter_state (chapter_id, is_read, is_bookmark, last_page_read, updated_at) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(chapter_id) DO UPDATE SET is_read = excluded.is_read, is_bookmark = excluded.is_bookmark,
            last_page_read = excluded.last_page_read, updated_at = excluded.updated_at
          WHERE chapter_state.updated_at <= excluded.updated_at`,
       ).run(
-        row.chapter_id,
+        chapterId,
         row.is_read ? 1 : 0,
         row.is_bookmark ? 1 : 0,
         row.last_page_read,
@@ -1294,6 +1501,14 @@ function applyPulledChanges(pulled: PulledSyncData): ApplyPulledChangesResult {
         );
         continue;
       }
+      const chapterId = row.source_chapter_key
+        ? ensureChapterRow({
+            source: row.source,
+            manga_slug: row.manga_slug,
+            source_chapter_key: row.source_chapter_key,
+            manga_id: row.manga_id,
+          })
+        : null;
       db.prepare(
         `INSERT INTO history (id, source, manga_id, manga_slug, source_manga_id, title, thumbnail_url, chapter_id, read_at, last_read, pages_read, time_read, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
@@ -1312,7 +1527,7 @@ function applyPulledChanges(pulled: PulledSyncData): ApplyPulledChangesResult {
         row.source_manga_id ?? null,
         row.title,
         row.thumbnail_url,
-        row.chapter_id,
+        chapterId,
         row.read_at,
         row.last_read,
         row.pages_read,

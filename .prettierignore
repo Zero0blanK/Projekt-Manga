@@ -44,3 +44,6 @@ bun.lock
 .claude/
 **/CLAUDE.md
 **/AGENTS.md
+
+# The OCR engine and model copied by apps/web/scripts/copy-ocr-assets.mjs (gitignored)
+apps/web/public/ocr/

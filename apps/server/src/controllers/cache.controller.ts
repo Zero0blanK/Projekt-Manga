@@ -8,6 +8,7 @@ import storage from '../utils/storage.js';
 import { MangaNotFoundError, NotFoundError } from '../utils/customErrors.js';
 import type { TriggerSyncBody } from '@projekt-manga/schemas';
 import sourceService from '../services/source.service.js';
+import mangaOverrideService from '../services/mangaOverride.service.js';
 
 const triggerSync = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -52,9 +53,40 @@ const getStatus = async (req: Request, res: Response, next: NextFunction) => {
   }
 };
 
+/**
+ * A cover may be cached briefly only when the URL's version names the image being sent:
+ * `v=custom-…` for a custom cover, any other `v` for the source's. An unversioned URL
+ * (History, Recents) or one naming the other kind is revalidated every time, so changing
+ * or removing a custom cover never leaves the old image showing for minutes. The
+ * revalidation is a cheap 304 when nothing changed (sendFile sends ETag/Last-Modified).
+ */
+export function coverCacheControl(req: Pick<Request, 'query'>, custom: boolean): string {
+  const version = typeof req.query.v === 'string' ? req.query.v : '';
+  const matches = custom
+    ? version.startsWith('custom-')
+    : !!version && !version.startsWith('custom-');
+  return matches ? 'private, max-age=300' : 'private, no-cache';
+}
+
 const getThumbnail = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { manga_id } = req.params as { manga_id: string };
+    // This identity's custom cover wins over the cached source one. Clients version the
+    // URL by the override's updated_at, so the short private cache never shows a stale one.
+    let customCover: string | null = null;
+    try {
+      customCover = await mangaOverrideService.getCoverFile(manga_id, req.user?.id);
+      if (customCover) await fs.access(customCover);
+    } catch {
+      if (customCover) console.warn('Custom cover unavailable; using source cover', manga_id);
+      customCover = null;
+    }
+    if (customCover) {
+      res.setHeader('Cache-Control', coverCacheControl(req, true));
+      return res.sendFile(customCover, (error) => {
+        if (error) next(error);
+      });
+    }
     const cache = await cacheRepository.findByMangaId(manga_id);
     if (cache?.thumbnail_url) {
       let file: string | null = null;
@@ -67,7 +99,7 @@ const getThumbnail = async (req: Request, res: Response, next: NextFunction) => 
         console.warn('Cached thumbnail unavailable; using source cover', manga_id);
       }
       if (file) {
-        res.setHeader('Cache-Control', 'private, max-age=300');
+        res.setHeader('Cache-Control', coverCacheControl(req, false));
         return res.sendFile(file, (error) => {
           if (error) next(error);
         });

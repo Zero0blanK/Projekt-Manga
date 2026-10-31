@@ -4,8 +4,10 @@ import { hasLocalDataBridge, localInvoke } from './runtime.js';
 import { addHistory } from './history.js';
 import type { MangaChapterRecord, MangaWithDetails } from './manga.js';
 
+/** Chapter payloads name a chapter the way its source does: `id` is the source's key (a
+ * stored record's `source_chapter_key`), never a stored row id. */
 export type ChapterBulkPayload = Partial<Chapters> & { source?: string };
-export type ChapterProgressMeta = Partial<Chapters> & { source?: string };
+export type ChapterProgressMeta = Partial<Chapters> & { source: string };
 
 export interface UpdateResult {
   count: number;
@@ -13,7 +15,7 @@ export interface UpdateResult {
 
 export interface BulkMarkResult {
   count: number;
-  failed_chapter_ids: string[];
+  failed_source_chapter_keys: string[];
 }
 
 export interface ChapterProgress {
@@ -38,61 +40,63 @@ const encode = (value: string) => encodeURIComponent(value);
 
 // The recent-chapters feed remains HTTP-only; bulk marks use local state on desktop.
 
+/** What the desktop needs to find — or stand up — its own row for the chapter: the
+ * source's key within the title, plus enough catalog data to create the row (its local
+ * database enforces a foreign key from read state to the chapter, as the server does). */
+const localChapterStub = (
+  mangaSlug: string,
+  sourceChapterKey: string,
+  chapterMeta: ChapterProgressMeta & { manga_id?: string },
+) => ({ ...chapterMeta, manga_slug: mangaSlug, source_chapter_key: sourceChapterKey });
+
 export const markChapterAsRead = (
   mangaSlug: string,
-  chapterId: string,
-  chapterMeta?: ChapterProgressMeta,
+  sourceChapterKey: string,
+  chapterMeta: ChapterProgressMeta,
 ) => {
   if (hasLocalDataBridge()) {
-    // chapterMeta is forwarded, not dropped: the desktop's local database enforces a
-    // foreign key from read state to the chapter row, so marking a chapter it has never
-    // seeded needs enough catalog data to stand that row up first — the same thing the
-    // server does with ensureChapterExists on this path.
     return localInvoke<null>('chapter', 'markRead', {
-      chapterId,
       isRead: true,
-      chapter: chapterMeta,
+      chapter: localChapterStub(mangaSlug, sourceChapterKey, chapterMeta),
     }).then(() => ({ count: 1 }));
   }
-  return request<UpdateResult>(`/chapter/${encode(mangaSlug)}/${encode(chapterId)}/mark-read`, {
-    method: 'POST',
-    body: chapterMeta,
-  });
+  return request<UpdateResult>(
+    `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/mark-read`,
+    { method: 'POST', body: chapterMeta },
+  );
 };
 
 export const markChapterAsUnread = (
   mangaSlug: string,
-  chapterId: string,
-  chapterMeta?: ChapterProgressMeta,
+  sourceChapterKey: string,
+  chapterMeta: ChapterProgressMeta,
 ) => {
   if (hasLocalDataBridge()) {
     return localInvoke<null>('chapter', 'markRead', {
-      chapterId,
       isRead: false,
-      chapter: chapterMeta,
+      chapter: localChapterStub(mangaSlug, sourceChapterKey, chapterMeta),
     }).then(() => ({ count: 1 }));
   }
-  return request<UpdateResult>(`/chapter/${encode(mangaSlug)}/${encode(chapterId)}/mark-unread`, {
-    method: 'POST',
-    body: chapterMeta,
-  });
+  return request<UpdateResult>(
+    `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/mark-unread`,
+    { method: 'POST', body: chapterMeta },
+  );
 };
 
 export const markChapterByLastPage = (
   mangaSlug: string,
-  chapterId: string,
+  sourceChapterKey: string,
   lastPageRead: number,
-  chapterMeta?: ChapterProgressMeta,
+  chapterMeta: ChapterProgressMeta,
 ) => {
   if (hasLocalDataBridge()) {
     return localInvoke<null>('chapter', 'updateProgress', {
-      chapterId,
       lastPageRead,
-      chapter: chapterMeta,
+      chapter: localChapterStub(mangaSlug, sourceChapterKey, chapterMeta),
     }).then(() => ({ count: 1 }));
   }
   return request<UpdateResult>(
-    `/chapter/${encode(mangaSlug)}/${encode(chapterId)}/${lastPageRead}/mark-by-page`,
+    `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/${lastPageRead}/mark-by-page`,
     { method: 'POST', body: chapterMeta },
   );
 };
@@ -123,10 +127,14 @@ const markChaptersBulk = async (
   const results = await Promise.allSettled(
     chapters.map(async (chapter) => {
       if (!chapter.id) throw new Error('Chapter ID is required');
+      if (!chapter.source) throw new Error('Chapter source is required');
       await localInvoke<null>('chapter', 'markRead', {
-        chapterId: chapter.id,
         isRead,
-        chapter: { ...chapter, manga_id: manga?.manga_id },
+        chapter: localChapterStub(mangaSlug, chapter.id, {
+          ...chapter,
+          source: chapter.source,
+          manga_id: manga?.manga_id,
+        }),
       });
       if (chapter.source) {
         await addHistory({
@@ -136,7 +144,7 @@ const markChaptersBulk = async (
           source_manga_id: manga?.source_manga_id,
           title: manga?.title,
           thumbnail_url: manga?.thumbnail_url,
-          chapter_id: chapter.id,
+          source_chapter_key: chapter.id,
           pages_read: isRead ? (chapter.page_count ?? 0) : 0,
         });
       }
@@ -144,7 +152,7 @@ const markChaptersBulk = async (
   );
   return {
     count: results.filter((result) => result.status === 'fulfilled').length,
-    failed_chapter_ids: chapters.flatMap((chapter, index) =>
+    failed_source_chapter_keys: chapters.flatMap((chapter, index) =>
       results[index]?.status === 'rejected' && chapter.id ? [chapter.id] : [],
     ),
   };
@@ -162,8 +170,9 @@ export const markPreviousChaptersAsUnread = (
   manga?: BulkMarkMangaMeta,
 ) => markChaptersBulk(mangaSlug, chapters, false, manga);
 
-export const addChapterAsHistory = (chapterData: Chapters) =>
-  request<MangaChapterRecord>('/chapter/add-history', { method: 'POST', body: chapterData });
+export const addChapterAsHistory = (
+  chapterData: Chapters & { source: string; manga_slug: string },
+) => request<MangaChapterRecord>('/chapter/add-history', { method: 'POST', body: chapterData });
 
 export const getChapterProgressById = (chapterId: string, signal?: AbortSignal) =>
   request<ChapterProgress | null>(`/chapter/${encode(chapterId)}/progress`, { signal });

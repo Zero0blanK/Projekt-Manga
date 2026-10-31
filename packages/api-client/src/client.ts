@@ -13,12 +13,16 @@ export class ApiError extends Error {
    *  'timeout' — no answer within the deadline; the request may still be running server-side.
    *  'http' — the server responded, just not with success. */
   kind: ApiErrorKind;
+  /** The server's machine-readable reason, when it sent one — e.g. CHALLENGE_REQUIRED
+   * for a source that wants a browser check. */
+  code?: string;
 
-  constructor(message: string, status: number, kind: ApiErrorKind) {
+  constructor(message: string, status: number, kind: ApiErrorKind, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.kind = kind;
+    if (code) this.code = code;
   }
 }
 
@@ -121,6 +125,7 @@ export interface RequestOptions {
 interface ResponseEnvelope<T> {
   success: boolean;
   message?: string;
+  code?: string;
   data?: T;
 }
 
@@ -219,6 +224,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       envelope?.message || `Request failed with status ${response.status}`,
       response.status,
       'http',
+      typeof envelope?.code === 'string' ? envelope.code : undefined,
     );
   }
 

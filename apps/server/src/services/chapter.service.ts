@@ -1,67 +1,109 @@
 import type { Chapters } from '@projekt-manga/types';
+import type { AddChapterAsHistoryBody } from '@projekt-manga/schemas';
 import chapterRepository from '../repositories/chapter.repository.js';
 import historyRepository from '../repositories/history.repository.js';
 import mangaRepository from '../repositories/manga.repository.js';
 import userChapterStateRepository from '../repositories/userChapterState.repository.js';
 import trackerService from './tracker.service.js';
-import { MangaNotFoundError, PrismaError, rethrowKnownOrWrap } from '../utils/customErrors.js';
+import mangaLinkRepository from '../repositories/mangaLink.repository.js';
+import {
+  MangaNotFoundError,
+  PrismaError,
+  ValidationError,
+  rethrowKnownOrWrap,
+} from '../utils/customErrors.js';
+import { planChapterSync } from '../utils/chapterSync.js';
 
 type ChapterBulkPayload = Partial<Chapters> & { source?: string };
 type ChapterProgressPayload = Partial<Chapters> & { source?: string };
 type BulkMangaMeta = { source_manga_id?: string; title?: string; thumbnail_url?: string };
 
-const ensureChapterExists = async (chapter_id: string, chapter_data?: Partial<Chapters>) => {
-  await chapterRepository.ensureChapterForProgress({
-    id: chapter_id,
-    url: chapter_data?.url || '',
-    name: chapter_data?.name || '',
-    scanlator: chapter_data?.scanlator || '',
-    chapter_number: chapter_data?.chapter_number || 0,
-    release_date: chapter_data?.release_date || new Date().toISOString(),
-    last_page_read: chapter_data?.last_page_read || 0,
-    page_count: chapter_data?.page_count || 0,
-  } as Chapters);
-
-  const chapterNumber = chapter_data?.chapter_number;
-  if (chapterNumber !== undefined && Number.isFinite(chapterNumber) && chapterNumber !== 0) {
-    await chapterRepository.updatePlaceholderChapterNumber(chapter_id, chapterNumber);
+/**
+ * The row a progress write lands on, created if no stored list has it yet. Clients name
+ * chapters by the source's key within the title — the only name a preview read or a
+ * device that has never synced this title knows — never by row id. `source` comes from
+ * the request, or from the one stored title with this slug.
+ */
+const resolveForWrite = async (
+  manga_slug: string,
+  source_chapter_key: string,
+  chapter_data?: ChapterProgressPayload,
+) => {
+  let source = chapter_data?.source;
+  if (!source) {
+    const manga = await mangaRepository.getMangaIdBySlug(manga_slug);
+    source = manga ? (await mangaRepository.getMangaById(manga.id))?.source : undefined;
   }
-
-  return await chapterRepository.getChapterId(chapter_id);
+  if (!source) throw new ValidationError('source is required for a title that is not stored');
+  return chapterRepository.resolveChapter(
+    { source, manga_slug, source_chapter_key },
+    chapter_data ?? {},
+  );
 };
+
+/**
+ * Merged titles (Linked sources): a chapter read or unread on one source of a group is
+ * read or unread on the others too, matched by chapter number, so the library's progress
+ * and unread count follow the main title whichever source a chapter was read on.
+ * Best-effort: the reader's own write has already succeeded and stays that way.
+ */
+export async function shareReadState(
+  manga_id: string | null | undefined,
+  numbers: number[],
+  is_read: boolean,
+  user_id?: string,
+) {
+  // 0 is "no number" for extras and placeholders: never shared.
+  const shared = [...new Set(numbers.filter((n) => Number.isFinite(n) && n > 0))];
+  if (!manga_id || shared.length === 0) return;
+  try {
+    const { primary_id, links } = await mangaLinkRepository.groupFor(manga_id, user_id ?? null);
+    const others = [primary_id, ...links.map((link) => link.linked.id)].filter(
+      (id) => id !== manga_id,
+    );
+    for (const chapter of await chapterRepository.chaptersByNumber(others, shared)) {
+      if (user_id)
+        await userChapterStateRepository.upsert(user_id, chapter.id, {
+          is_read,
+          ...(is_read ? {} : { last_page_read: 0 }),
+        });
+      else if (is_read)
+        await chapterRepository.markChapterAsRead(chapter.manga_id ?? '', chapter.id);
+      else await chapterRepository.markChapterAsUnread(chapter.manga_id ?? '', chapter.id);
+    }
+  } catch (error) {
+    console.error('[chapter.service] Sharing read state with linked sources failed:', error);
+  }
+}
 
 const markChapterAsRead = async (
   manga_slug: string,
-  chapter_id: string,
+  source_chapter_key: string,
   chapter_data?: ChapterProgressPayload,
   user_id?: string,
 ) => {
   try {
-    await ensureChapterExists(chapter_id, chapter_data);
-
-    let manga_id = '';
-    const manga = await mangaRepository.getMangaIdBySlug(manga_slug, chapter_data?.source);
-    if (manga) {
-      manga_id = manga.id;
-    }
+    const chapter = await resolveForWrite(manga_slug, source_chapter_key, chapter_data);
 
     if (user_id) {
-      const result = await userChapterStateRepository.upsert(user_id, chapter_id, {
+      const result = await userChapterStateRepository.upsert(user_id, chapter.id, {
         is_read: true,
       });
+      await shareReadState(chapter.manga_id, [chapter.chapter_number], true, user_id);
       // Best-effort, never blocks the response above — a tracker being slow or down
       // must not turn "mark chapter read" into a failure for something unrelated to
       // reading itself.
-      if (manga_id) {
-        trackerService.pushProgressIfLinked(user_id, manga_id).catch((error) => {
+      if (chapter.manga_id) {
+        trackerService.pushProgressIfLinked(user_id, chapter.manga_id).catch((error) => {
           console.error('[chapter.service] Tracker progress push failed:', error);
         });
       }
       return result;
     }
 
-    const chapter = await chapterRepository.markChapterAsRead(manga_id, chapter_id);
-    return chapter;
+    const result = await chapterRepository.markChapterAsRead('', chapter.id);
+    await shareReadState(chapter.manga_id, [chapter.chapter_number], true);
+    return result;
   } catch (error) {
     rethrowKnownOrWrap(error, new PrismaError('Failed to mark chapter as read'));
   }
@@ -69,28 +111,25 @@ const markChapterAsRead = async (
 
 const markChapterAsUnread = async (
   manga_slug: string,
-  chapter_id: string,
+  source_chapter_key: string,
   chapter_data?: ChapterProgressPayload,
   user_id?: string,
 ) => {
   try {
-    await ensureChapterExists(chapter_id, chapter_data);
+    const chapter = await resolveForWrite(manga_slug, source_chapter_key, chapter_data);
 
     if (user_id) {
-      return await userChapterStateRepository.upsert(user_id, chapter_id, {
+      const result = await userChapterStateRepository.upsert(user_id, chapter.id, {
         is_read: false,
         last_page_read: 0,
       });
+      await shareReadState(chapter.manga_id, [chapter.chapter_number], false, user_id);
+      return result;
     }
 
-    let manga_id = '';
-    const manga = await mangaRepository.getMangaIdBySlug(manga_slug, chapter_data?.source);
-    if (manga) {
-      manga_id = manga.id;
-    }
-
-    const chapter = await chapterRepository.markChapterAsUnread(manga_id, chapter_id);
-    return chapter;
+    const result = await chapterRepository.markChapterAsUnread('', chapter.id);
+    await shareReadState(chapter.manga_id, [chapter.chapter_number], false);
+    return result;
   } catch (error) {
     rethrowKnownOrWrap(error, new PrismaError('Failed to mark chapter as unread'));
   }
@@ -98,41 +137,35 @@ const markChapterAsUnread = async (
 
 const markChapterByLastPage = async (
   manga_slug: string,
-  chapter_id: string,
+  source_chapter_key: string,
   last_page_read: number,
   chapter_data: ChapterProgressPayload,
   user_id?: string,
 ) => {
   try {
-    await ensureChapterExists(chapter_id, chapter_data);
+    const chapter = await resolveForWrite(manga_slug, source_chapter_key, chapter_data);
 
     if (user_id) {
       // page_count is shared catalog metadata (same for every account), so it still
       // gets corrected on the shared row even though last_page_read itself is per-user.
-      await chapterRepository.updateChapterPageCount(chapter_id, chapter_data?.page_count);
-      return await userChapterStateRepository.upsert(user_id, chapter_id, { last_page_read });
+      await chapterRepository.updateChapterPageCount(chapter.id, chapter_data?.page_count);
+      return await userChapterStateRepository.upsert(user_id, chapter.id, { last_page_read });
     }
 
-    let manga_id = '';
-    const manga = await mangaRepository.getMangaIdBySlug(manga_slug, chapter_data?.source);
-    if (manga) {
-      manga_id = manga.id;
-    }
-
-    const chapter = await chapterRepository.markChapterByLastPage(
-      manga_id,
-      chapter_id,
+    return await chapterRepository.markChapterByLastPage(
+      '',
+      chapter.id,
       last_page_read,
       chapter_data?.page_count,
     );
-    return chapter;
   } catch (error) {
     rethrowKnownOrWrap(error, new PrismaError('Failed to mark chapter by page count'));
   }
 };
 
 /** One chapter's worth of `markChaptersBulk` work. Chapters have no ordering dependency,
- * so the caller runs these concurrently via Promise.allSettled. */
+ * so the caller runs these concurrently via Promise.allSettled. `chapter.id` is the
+ * source's key, as in every chapter payload a client sends. */
 const markOneChapterBulk = async (
   chapter: ChapterBulkPayload & { id: string },
   manga_id: string,
@@ -141,17 +174,17 @@ const markOneChapterBulk = async (
   mangaMeta: BulkMangaMeta | undefined,
   user_id: string | undefined,
 ): Promise<void> => {
-  await ensureChapterExists(chapter.id, chapter);
+  const row = await resolveForWrite(manga_slug, chapter.id, chapter);
 
   if (user_id) {
-    await userChapterStateRepository.upsert(user_id, chapter.id, {
+    await userChapterStateRepository.upsert(user_id, row.id, {
       is_read: markAsRead,
       ...(markAsRead ? {} : { last_page_read: 0 }),
     });
   } else if (markAsRead) {
-    await chapterRepository.markChapterAsRead(manga_id, chapter.id);
+    await chapterRepository.markChapterAsRead(manga_id, row.id);
   } else {
-    await chapterRepository.markChapterAsUnread(manga_id, chapter.id);
+    await chapterRepository.markChapterAsUnread(manga_id, row.id);
   }
 
   if (chapter.source) {
@@ -161,7 +194,7 @@ const markOneChapterBulk = async (
         manga_id: manga_id || undefined,
         manga_slug,
         source_manga_id: mangaMeta?.source_manga_id,
-        chapter_id: chapter.id,
+        source_chapter_key: chapter.id,
         pages_read: markAsRead ? chapter.page_count || 0 : 0,
         // Only meaningful when there's no manga row to join from; addHistory leaves
         // the stored values alone when these are absent.
@@ -206,14 +239,22 @@ const markChaptersBulk = async (
     }
 
     let count = 0;
-    const failed_chapter_ids: string[] = [];
+    const failed_source_chapter_keys: string[] = [];
     outcomes.forEach((outcome, i) => {
       if (outcome.status === 'fulfilled') {
         count += 1;
       } else {
-        failed_chapter_ids.push(validChapters[i].id);
+        failed_source_chapter_keys.push(validChapters[i].id);
       }
     });
+    await shareReadState(
+      manga_id,
+      validChapters
+        .filter((_, i) => outcomes[i].status === 'fulfilled')
+        .map((chapter) => Number(chapter.chapter_number)),
+      markAsRead,
+      user_id,
+    );
 
     // One push for the whole batch, not one per chapter: pushProgressIfLinked recomputes
     // the furthest-read chapter from user_chapter_state anyway, so per-chapter pushes
@@ -226,7 +267,7 @@ const markChaptersBulk = async (
       });
     }
 
-    return { count, failed_chapter_ids };
+    return { count, failed_source_chapter_keys };
   } catch (error) {
     rethrowKnownOrWrap(
       error,
@@ -302,57 +343,38 @@ const getChapterProgressById = async (chapter_id: string, user_id?: string) => {
   }
 };
 
-const addChapter = async (manga_slug: string, chapterData: Chapters) => {
+/**
+ * Brings a stored title's chapters in line with the source's current list — new chapters,
+ * changed metadata, and chapters the source now lists under a different key, which keep
+ * their row (and so their state). See utils/chapterSync.ts.
+ *
+ * Reads the shared rows, not an account's overlay: the plan is about which chapter rows
+ * exist.
+ */
+const syncChapters = async (manga_slug: string, latest: Chapters[], source?: string) => {
   try {
-    const manga = await mangaRepository.getMangaIdBySlug(manga_slug);
+    const found = await mangaRepository.getMangaIdBySlug(manga_slug, source);
+    const manga = found ? await mangaRepository.getMangaById(found.id) : null;
     if (!manga) {
       throw new MangaNotFoundError('Manga not found');
     }
-    const chapter = await chapterRepository.addChapter(manga.id, chapterData);
-    return chapter;
-  } catch (error) {
-    console.error('[ChapterService.addChapter] Failed to add chapter', {
-      manga_slug,
-      chapter_id: chapterData?.id,
-      chapter_number: chapterData?.chapter_number,
-      error,
-    });
-    rethrowKnownOrWrap(error, new PrismaError('Failed to add chapter'));
-  }
-};
-
-/** Batched counterpart to addChapter, used by the library update sweep. Returns how
- * many chapters were actually inserted — the sweep reports that as "new chapters", so it
- * must reflect real rows rather than the size of the batch it was handed. */
-const addChapters = async (
-  manga_slug: string,
-  chapters: Chapters[],
-  source?: string,
-): Promise<number> => {
-  if (chapters.length === 0) {
-    return 0;
-  }
-  try {
-    const manga = await mangaRepository.getMangaIdBySlug(manga_slug, source);
-    if (!manga) {
-      throw new MangaNotFoundError('Manga not found');
+    const stored = await chapterRepository.getChapter(manga.id);
+    const plan = planChapterSync(stored, latest);
+    if (plan.suspicious) {
+      console.warn(
+        `[ChapterService.syncChapters] ${source ?? '?'}/${manga_slug}: most stored chapters are ` +
+          'missing from the source and few match by number; keeping them and only adding.',
+      );
     }
-    return await chapterRepository.addChapters(manga.id, chapters);
+    const result = await chapterRepository.applyChapterSync(manga, plan);
+    return { ...result, suspicious: plan.suspicious };
   } catch (error) {
-    console.error('[ChapterService.addChapters] Failed to add chapters', {
+    console.error('[ChapterService.syncChapters] Failed to sync chapters', {
       manga_slug,
-      count: chapters.length,
+      count: latest.length,
       error,
     });
-    rethrowKnownOrWrap(error, new PrismaError('Failed to add chapters'));
-  }
-};
-
-const renumberChapters = async (changes: Array<{ id: string; chapter_number: number }>) => {
-  try {
-    return await chapterRepository.renumberChapters(changes);
-  } catch (error) {
-    rethrowKnownOrWrap(error, new PrismaError('Failed to renumber chapters'));
+    rethrowKnownOrWrap(error, new PrismaError('Failed to sync chapters'));
   }
 };
 
@@ -365,15 +387,15 @@ const getChapterFetchDate = async () => {
   }
 };
 
-const addChapterAsHistory = async (chapterData: Chapters) => {
+/** Stores a chapter a client read before any list had it. Keyed like every client
+ * write: by the source's key within its title. */
+const addChapterAsHistory = async (chapterData: AddChapterAsHistoryBody) => {
   try {
-    const existingChapter = await chapterRepository.getChapterId(chapterData.id);
-    if (existingChapter) {
-      return existingChapter;
-    }
-
-    const chapter = await chapterRepository.addChapterAsHistory(chapterData);
-    return chapter;
+    const { source, manga_slug, id, ...meta } = chapterData;
+    return await chapterRepository.resolveChapter(
+      { source, manga_slug, source_chapter_key: id },
+      meta,
+    );
   } catch (error) {
     rethrowKnownOrWrap(error, new PrismaError('Failed to add chapter as history'));
   }
@@ -400,9 +422,7 @@ const chapterService = {
   markPreviousChaptersAsUnread,
   getChapter,
   getChapterProgressById,
-  addChapter,
-  addChapters,
-  renumberChapters,
+  syncChapters,
   getChapterFetchDate,
   addChapterAsHistory,
   getChapterReadStatusById,

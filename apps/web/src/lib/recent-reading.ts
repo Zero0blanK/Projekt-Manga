@@ -43,3 +43,22 @@ export function mostRecentlyReadLibraryManga(
 
   return mostRecent;
 }
+
+/**
+ * Reading on a linked source (Linked sources) counted as reading the main title: each
+ * history entry of a linked title is credited to its group's primary, so Continue reading
+ * and the latest chapter follow the library entry rather than a title outside it.
+ */
+export function creditLinkedReading<T extends Pick<HistoryEntry, 'manga_id'>>(
+  history: readonly T[],
+  groups: ReadonlyArray<{ primary_id: string; linked: ReadonlyArray<{ id: string }> }>,
+): T[] {
+  const primaryOf = new Map<string, string>();
+  for (const group of groups)
+    for (const linked of group.linked) primaryOf.set(linked.id, group.primary_id);
+  if (primaryOf.size === 0) return [...history];
+  return history.map((entry) => {
+    const primary = entry.manga_id ? primaryOf.get(entry.manga_id) : undefined;
+    return primary ? { ...entry, manga_id: primary } : entry;
+  });
+}

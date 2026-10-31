@@ -4,6 +4,13 @@ import syncService from '../../src/services/sync.service.js';
 import historyRepository from '../../src/repositories/history.repository.js';
 
 describe('history sync paging (real SQLite)', () => {
+  // Devices name chapters by the source's key within the title, never by row id.
+  const CHAPTER_KEY = {
+    source: 'sync-fixture',
+    manga_slug: 'conflict-title',
+    source_chapter_key: 'sync-conflict-chapter',
+  };
+
   it('merges conflicting chapter progress monotonically within each account', async () => {
     const user = await prisma.user.create({
       data: { email: 'sync-conflict@example.test', password_hash: 'fixture-only' },
@@ -24,6 +31,7 @@ describe('history sync paging (real SQLite)', () => {
     const chapter = await prisma.chapter.create({
       data: {
         id: 'sync-conflict-chapter',
+        ...CHAPTER_KEY,
         manga_id: manga.id,
         url: 'https://example.test/chapter',
         chapter_number: 1,
@@ -44,7 +52,7 @@ describe('history sync paging (real SQLite)', () => {
       generation: 0,
       chapter_state: [
         {
-          chapter_id: chapter.id,
+          ...CHAPTER_KEY,
           is_read: true,
           is_bookmark: false,
           last_page_read: 2,
@@ -56,7 +64,7 @@ describe('history sync paging (real SQLite)', () => {
       generation: 0,
       chapter_state: [
         {
-          chapter_id: chapter.id,
+          ...CHAPTER_KEY,
           is_read: false,
           is_bookmark: false,
           last_page_read: 9,
@@ -68,7 +76,7 @@ describe('history sync paging (real SQLite)', () => {
       generation: 0,
       chapter_state: [
         {
-          chapter_id: chapter.id,
+          ...CHAPTER_KEY,
           is_read: false,
           is_bookmark: false,
           last_page_read: 1,
@@ -156,7 +164,7 @@ describe('history sync paging (real SQLite)', () => {
       manga_slug: 'fixture',
       title: null,
       thumbnail_url: null,
-      chapter_id: null,
+      source_chapter_key: null,
       read_at: oldRead,
       last_read: oldRead,
       pages_read: 1,

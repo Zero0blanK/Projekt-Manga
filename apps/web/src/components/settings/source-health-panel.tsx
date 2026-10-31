@@ -14,6 +14,9 @@ import { SUPPORTED_EXTENSION_API_VERSION } from '@projekt-manga/schemas';
 import { summarizeSourceHealth, type SourceHealthStatus } from '@/lib/source-health-status';
 import { absoluteTime, countdown, relativeTime } from '@/lib/relative-time';
 import { Panel, Field } from '@/components/settings/field-controls';
+import { SourceChallengeNotice } from '@/components/discover/source-challenge-notice';
+import { SourceSessionManager } from '@/components/discover/source-session-manager';
+import { CHALLENGE_REQUIRED } from '@/lib/source-browser';
 import {
   Dialog,
   DialogContent,
@@ -185,6 +188,24 @@ function SourceHealthRow({
           {VERDICT_LABEL[verdict]}
         </span>
       </div>
+
+      {[entry?.browse, entry?.update].some(
+        (operation) => operation?.lastErrorCode === CHALLENGE_REQUIRED,
+      ) ? (
+        <SourceChallengeNotice
+          sourceId={extension.source_key}
+          sourceName={extension.name}
+          compact
+        />
+      ) : (
+        // A session saved earlier stays visible, to edit or delete, once the check passes.
+        <SourceSessionManager
+          sourceId={extension.source_key}
+          sourceName={extension.name}
+          siteUrl={extension.base_url}
+          hideWhenEmpty
+        />
+      )}
 
       {verdict === 'unsupported' && (
         <p className="mt-2 text-xs text-destructive">

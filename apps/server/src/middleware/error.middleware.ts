@@ -8,12 +8,15 @@ interface PrismaLikeError {
   code: string;
 }
 
+/** Prisma's known request errors carry a `P` code ("P2002"). Node and Axios errors have
+ * string codes too ("EPROTO", "ECONNRESET"), which are not database failures. */
 function isPrismaLikeError(err: unknown): err is PrismaLikeError {
   return (
     typeof err === 'object' &&
     err !== null &&
     'code' in err &&
-    typeof (err as { code: unknown }).code === 'string'
+    typeof (err as { code: unknown }).code === 'string' &&
+    /^Pd{4}$/.test((err as { code: string }).code)
   );
 }
 
@@ -62,7 +65,7 @@ export default function errorHandler(
   }
 
   if (err instanceof AppError) {
-    return HTTPErrorResponse(res, err.statusCode, err.message);
+    return HTTPErrorResponse(res, err.statusCode, err.message, err.code);
   }
 
   if (isPrismaLikeError(err)) {

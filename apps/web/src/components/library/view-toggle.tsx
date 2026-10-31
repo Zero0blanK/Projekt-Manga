@@ -1,5 +1,5 @@
 import { actions, useAppState } from '@/lib/app-store';
-import { LayoutGrid, List } from 'lucide-react';
+import { Grid3x3, LayoutGrid, List } from 'lucide-react';
 
 export function ViewToggle() {
   const view = useAppState((s) => s.view);
@@ -17,6 +17,18 @@ export function ViewToggle() {
         }`}
       >
         <LayoutGrid className="h-4 w-4" />
+      </button>
+      <button
+        onClick={() => actions.setView('compact')}
+        aria-label="Compact grid view"
+        aria-pressed={view === 'compact'}
+        className={`grid h-9 w-9 place-items-center rounded-lg border transition ${
+          view === 'compact'
+            ? 'border-primary/50 bg-primary/10 text-primary'
+            : 'border-border/60 text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <Grid3x3 className="h-4 w-4" />
       </button>
       <button
         onClick={() => actions.setView('list')}

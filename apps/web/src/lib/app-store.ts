@@ -23,7 +23,8 @@ export type SettingValue = string | boolean | number;
 
 export type AppState = {
   settings: Record<string, SettingValue>;
-  view: 'grid' | 'list';
+  /** Library display: covers with titles below, covers with titles on them, or rows. */
+  view: 'grid' | 'compact' | 'list';
   sort: 'latest' | 'title' | 'rating' | 'progress' | 'lastRead';
   sortDir: 'asc' | 'desc';
   /** User-created library categories, e.g. "Favorites". */
@@ -77,7 +78,7 @@ function sanitizeStoredState(parsed: unknown): Partial<AppState> {
   if (typeof raw.settings === 'object' && raw.settings !== null && !Array.isArray(raw.settings)) {
     out.settings = raw.settings as AppState['settings'];
   }
-  if (raw.view === 'grid' || raw.view === 'list') out.view = raw.view;
+  if (raw.view === 'grid' || raw.view === 'compact' || raw.view === 'list') out.view = raw.view;
   if (typeof raw.sort === 'string') out.sort = raw.sort as AppState['sort'];
   if (raw.sortDir === 'asc' || raw.sortDir === 'desc') out.sortDir = raw.sortDir;
   if (

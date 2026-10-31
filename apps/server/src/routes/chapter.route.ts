@@ -9,18 +9,21 @@ import {
 
 const router = express.Router();
 
+// Writes name a chapter by the source's key within the title (`manga_slug` + `source`),
+// since a client may be writing a chapter no stored list has yet. Reads take a row id.
+
 router.post(
-  '/:manga_slug/:chapter_id/mark-read',
+  '/:manga_slug/:source_chapter_key/mark-read',
   validateBody(chapterMetaSchema),
   chapterController.markChapterAsRead,
 );
 router.post(
-  '/:manga_slug/:chapter_id/mark-unread',
+  '/:manga_slug/:source_chapter_key/mark-unread',
   validateBody(chapterMetaSchema),
   chapterController.markChapterAsUnread,
 );
 router.post(
-  '/:manga_slug/:chapter_id/:last_page_read/mark-by-page',
+  '/:manga_slug/:source_chapter_key/:last_page_read/mark-by-page',
   validateBody(chapterMetaSchema),
   chapterController.markChapterByLastPage,
 );

@@ -488,7 +488,7 @@ export class DownloadWorker extends EventEmitter {
       await this.rateLimiter.wait();
 
       const result = await Promise.race([
-        source.fetchChapterPages(chapter.id, chapter.manga.slug, {
+        source.fetchChapterPages(chapter.source_chapter_key, chapter.manga.slug, {
           limit: DownloadWorker.PAGE_BATCH_SIZE,
           offset: 0,
         }),

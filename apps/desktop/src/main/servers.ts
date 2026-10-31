@@ -217,6 +217,8 @@ export async function startServers(
   paths: ServerPaths,
   databaseFile: string,
   extensionBundlesDir: string,
+  /** Secrets for the API process only (main/server-secrets.ts). */
+  apiSecrets: { tokenEncryptionKey?: string } = {},
 ): Promise<RunningServers> {
   const [apiPort, webPort] = await Promise.all([findFreePort(), findFreePort()]);
 
@@ -243,6 +245,11 @@ export async function startServers(
       // set explicitly so a user environment carrying PROJEKT_MANGA_AUTO_MIGRATE=0 can't
       // turn it off for the installer.
       PROJEKT_MANGA_AUTO_MIGRATE: '1',
+      // Only when generated here: a key the user set in their own environment is
+      // inherited unchanged.
+      ...(apiSecrets.tokenEncryptionKey
+        ? { TOKEN_ENCRYPTION_KEY: apiSecrets.tokenEncryptionKey }
+        : {}),
     },
     'api',
     paths.nodeBinary,

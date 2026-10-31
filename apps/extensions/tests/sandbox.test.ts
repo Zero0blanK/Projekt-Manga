@@ -8,10 +8,11 @@ import { fileURLToPath } from 'node:url';
 // child entry point (runner.js) relative to its own `import.meta.url`, which only lines
 // up with dist/sandbox/runner.js when loaded from dist. This matches how apps/server
 // consumes the built package.
-import { spawnSandboxedSource } from '../dist/sandbox/index.js';
+import { spawnSandboxedSource, CookieJar } from '../dist/sandbox/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = path.join(__dirname, 'fixtures', 'sandbox', 'hostile-source.mjs');
+const COOKIE_FIXTURE_PATH = path.join(__dirname, 'fixtures', 'sandbox', 'cookie-probe-source.mjs');
 
 /**
  * Proves the sandbox subsystem (apps/extensions/sandbox/*) actually holds against a
@@ -375,6 +376,388 @@ describe('spawnSandboxedSource (hostile fixture)', () => {
       // those belong in `detail`.
       expect(error?.message).toBe('Stalling Test Source took too long to respond. Try again.');
       expect(String(error?.detail)).toMatch(/timed out after 1000ms/);
+    }, 20000);
+  });
+
+  /**
+   * The browser session (Cloudflare clearance, a login) belongs to the parent. A hostile
+   * bundle that could read it could replay it from anywhere, so it is added to requests
+   * here, only for allowlisted hosts, and `Set-Cookie` is consumed here rather than
+   * forwarded.
+   */
+  describe('browser session cookies', () => {
+    async function startEchoServer(): Promise<number> {
+      server = http.createServer((req, res) => {
+        if (req.url === '/redirect-out') {
+          res.writeHead(302, {
+            Location: 'http://localhost:1/collect',
+            'Set-Cookie': 'hop=1; Path=/',
+          });
+          res.end();
+          return;
+        }
+        if (req.url === '/challenge') {
+          res.writeHead(403, {
+            'Content-Type': 'text/html',
+            Server: 'cloudflare',
+            'cf-mitigated': 'challenge',
+          });
+          res.end('<html><head><title>Just a moment...</title></head></html>');
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Set-Cookie': ['fresh=abc; Path=/; HttpOnly', 'other=def; Path=/'],
+        });
+        res.end(
+          JSON.stringify({
+            cookie: req.headers.cookie ?? null,
+            userAgent: req.headers['user-agent'] ?? null,
+          }),
+        );
+      });
+      return new Promise<number>((resolve) => {
+        server!.listen(0, '127.0.0.1', () => {
+          resolve((server!.address() as { port: number }).port);
+        });
+      });
+    }
+
+    async function writeProbe(config: object): Promise<string> {
+      tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sandbox-test-'));
+      const bundlePath = path.join(tmpDir, 'cookie-probe-source.mjs');
+      await fs.copyFile(COOKIE_FIXTURE_PATH, bundlePath);
+      await fs.writeFile(path.join(tmpDir, 'test-config.json'), JSON.stringify(config));
+      return bundlePath;
+    }
+
+    const probeMetadata = {
+      id: 'cookie-probe-source',
+      name: 'Cookie Probe Source',
+      lang: 'en',
+      base_url: 'https://example.invalid',
+      isNSFW: false,
+    };
+
+    it('adds the session cookie and User-Agent for allowlisted hosts only, and the child never sees a cookie', async () => {
+      const port = await startEchoServer();
+      const base = `http://127.0.0.1:${port}`;
+      const bundlePath = await writeProbe({
+        urls: [`${base}/echo`, `${base}/redirect-out`, `http://localhost:${port}/echo`],
+      });
+
+      const jar = new CookieJar([
+        {
+          name: 'cf_clearance',
+          value: 'secret-clearance',
+          domain: '127.0.0.1',
+          hostOnly: true,
+          path: '/',
+          secure: false,
+          httpOnly: true,
+        },
+      ]);
+      const consultedHosts: string[] = [];
+      const receivedFrom: string[] = [];
+      sandboxed = spawnSandboxedSource(probeMetadata, {
+        bundlePath,
+        allowedNetHosts: ['127.0.0.1'],
+        timeoutMs: 15000,
+        browserSession: {
+          headersFor(url: URL) {
+            consultedHosts.push(url.hostname);
+            return { cookie: jar.cookieHeader(url), userAgent: 'Browser-UA/1.0' };
+          },
+          receiveSetCookies(url: URL, setCookies: string[]) {
+            receivedFrom.push(url.hostname);
+            jar.setCookies(url, setCookies);
+          },
+        },
+      });
+
+      const results = (await sandboxed.fetchManga()) as unknown as Array<{
+        url: string;
+        status?: number;
+        headerNames?: string[];
+        setCookie?: string | null;
+        body?: string;
+        error?: string;
+      }>;
+
+      const [allowed, redirected, disallowed] = results;
+      // The upstream got the session cookie (beside the source's own) and the browser's UA.
+      expect(JSON.parse(allowed.body!)).toEqual({
+        cookie: 'own=1; cf_clearance=secret-clearance',
+        userAgent: 'Browser-UA/1.0',
+      });
+      // ...but the child saw neither the cookie it sent nor the ones the server set.
+      expect(allowed.setCookie).toBeNull();
+      expect(allowed.headerNames).not.toContain('set-cookie');
+      expect(JSON.stringify(results)).not.toMatch(/fresh=abc|other=def|hop=1/);
+
+      // A redirect off the allowlist is refused before any request leaves, so the cookie
+      // cannot follow it; a disallowed host is never consulted for one either.
+      expect(redirected.error).toMatch(/not in this source's allowlist/);
+      expect(disallowed.error).toMatch(/not in this source's allowlist/);
+      expect(new Set(consultedHosts)).toEqual(new Set(['127.0.0.1']));
+      expect(new Set(receivedFrom)).toEqual(new Set(['127.0.0.1']));
+
+      // Set-Cookie (including the one on the redirect hop) went into the parent's jar.
+      expect(jar.cookieHeader(new URL(`${base}/`))).toContain('fresh=abc');
+      expect(jar.cookieHeader(new URL(`${base}/`))).toContain('hop=1');
+    }, 20000);
+
+    it('strips Set-Cookie from what the child receives even without a browser session', async () => {
+      const port = await startEchoServer();
+      const bundlePath = await writeProbe({ urls: [`http://127.0.0.1:${port}/echo`] });
+      sandboxed = spawnSandboxedSource(probeMetadata, {
+        bundlePath,
+        allowedNetHosts: ['127.0.0.1'],
+        timeoutMs: 15000,
+      });
+
+      const [result] = (await sandboxed.fetchManga()) as unknown as Array<{
+        setCookie: string | null;
+        body: string;
+      }>;
+      expect(result.setCookie).toBeNull();
+      expect(JSON.parse(result.body)).toEqual({ cookie: 'own=1', userAgent: 'probe-ua' });
+    }, 20000);
+
+    it('reports a call that hit a Cloudflare challenge as CHALLENGE_REQUIRED', async () => {
+      const port = await startEchoServer();
+      const bundlePath = await writeProbe({
+        urls: [],
+        challengeUrl: `http://127.0.0.1:${port}/challenge`,
+      });
+      sandboxed = spawnSandboxedSource(probeMetadata, {
+        bundlePath,
+        allowedNetHosts: ['127.0.0.1'],
+        timeoutMs: 15000,
+      });
+
+      const error = await sandboxed.fetchChapters('anything').then(
+        () => null,
+        (caught: unknown) => caught as Record<string, unknown>,
+      );
+      expect(error?.code).toBe('CHALLENGE_REQUIRED');
+      expect(error?.reason).toBe('Cloudflare challenge');
+      expect(error?.detail).toBe('Unexpected status 403');
+      expect(error?.url).toBe(`http://127.0.0.1:${port}/challenge`);
+    }, 20000);
+
+    it("keeps another call's own error when only one call hit the challenge", async () => {
+      const port = await startEchoServer();
+      const bundlePath = await writeProbe({
+        urls: [],
+        challengeUrl: `http://127.0.0.1:${port}/challenge`,
+        failAfterMs: 1500,
+      });
+      sandboxed = spawnSandboxedSource(probeMetadata, {
+        bundlePath,
+        allowedNetHosts: ['127.0.0.1'],
+        timeoutMs: 15000,
+      });
+
+      const caught = (call: Promise<unknown>) =>
+        call.then(
+          () => null,
+          (error: unknown) => error as Record<string, unknown>,
+        );
+      // Both start together; the challenge comes back while the other call is still running.
+      const [challenged, gone] = await Promise.all([
+        caught(sandboxed.fetchChapters('anything')),
+        caught(sandboxed.fetchChapterPages('anything')),
+      ]);
+      expect(challenged?.code).toBe('CHALLENGE_REQUIRED');
+      expect(gone?.code).not.toBe('CHALLENGE_REQUIRED');
+      expect(String(gone?.detail ?? gone?.message)).toContain('Chapter is gone');
+    }, 20000);
+  });
+
+  /**
+   * The operator's User-Agent and DNS over HTTPS change how a request goes out, never
+   * whether it may: the allowlist still runs on the hostname, and the public-address check
+   * still runs on every address the resolver returns.
+   */
+  describe('network settings', () => {
+    type ProbeResult = { url: string; status?: number; body?: string; error?: string };
+
+    async function writeProbe(config: object): Promise<string> {
+      tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sandbox-test-'));
+      const bundlePath = path.join(tmpDir, 'cookie-probe-source.mjs');
+      await fs.copyFile(COOKIE_FIXTURE_PATH, bundlePath);
+      await fs.writeFile(path.join(tmpDir, 'test-config.json'), JSON.stringify(config));
+      return bundlePath;
+    }
+
+    async function startEchoServer(): Promise<number> {
+      server = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            userAgent: req.headers['user-agent'] ?? null,
+            evil: req.headers['x-evil'] ?? null,
+          }),
+        );
+      });
+      return new Promise<number>((resolve) => {
+        server!.listen(0, '127.0.0.1', () => {
+          resolve((server!.address() as { port: number }).port);
+        });
+      });
+    }
+
+    const probeMetadata = {
+      id: 'network-probe-source',
+      name: 'Network Probe Source',
+      lang: 'en',
+      base_url: 'https://example.invalid',
+      isNSFW: false,
+    };
+
+    /** The server's guard, reduced: IP literals in private ranges are refused, and so is
+     * any hostname, standing in for system DNS that cannot (or must not) resolve it. */
+    function publicLiteralOnly(url: URL): boolean {
+      const host = url.hostname.replace(/^\[|\]$/g, '');
+      if (!/^[\d.]+$/.test(host) && !host.includes(':')) return false;
+      return !/^(10\.|127\.|169\.254\.|192\.168\.|0\.)/.test(host) && host !== '::1';
+    }
+
+    function dohAnswer(addresses: Record<string, { A?: string[]; AAAA?: string[] }>) {
+      return (url: URL) => {
+        const name = url.searchParams.get('name') ?? '';
+        const type = url.searchParams.get('type') as 'A' | 'AAAA';
+        const data = addresses[name]?.[type] ?? [];
+        return new Response(
+          JSON.stringify({
+            Status: addresses[name] ? 0 : 3,
+            Answer: data.map((address) => ({
+              name,
+              type: type === 'A' ? 1 : 28,
+              TTL: 60,
+              data: address,
+            })),
+          }),
+          { headers: { 'content-type': 'application/dns-json' } },
+        );
+      };
+    }
+
+    it('sends the operator User-Agent without letting a disallowed or private host through', async () => {
+      const port = await startEchoServer();
+      const bundlePath = await writeProbe({
+        urls: [
+          `http://127.0.0.1:${port}/echo`,
+          `http://not-on-the-allowlist.test:${port}/`,
+          `http://private.test:${port}/`,
+        ],
+      });
+      sandboxed = spawnSandboxedSource(probeMetadata, {
+        bundlePath,
+        allowedNetHosts: ['127.0.0.1', 'private.test'],
+        timeoutMs: 15000,
+        // 127.0.0.1 stands in for a public host here; private.test for one resolving inward.
+        validateOutboundUrl: (url: URL) => url.hostname !== 'private.test',
+        networkSettings: () => ({ userAgent: 'Operator-UA/2.0' }),
+      });
+
+      const [allowed, disallowed, privateHost] =
+        (await sandboxed.fetchManga()) as unknown as ProbeResult[];
+      expect(JSON.parse(allowed.body!)).toEqual({ userAgent: 'Operator-UA/2.0', evil: null });
+      expect(disallowed.error).toMatch(/not in this source's allowlist/);
+      expect(privateHost.error).toMatch(/Blocked by outbound URL validation/);
+    }, 20000);
+
+    it('ignores a User-Agent that could inject a header', async () => {
+      const port = await startEchoServer();
+      const bundlePath = await writeProbe({ urls: [`http://127.0.0.1:${port}/echo`] });
+      sandboxed = spawnSandboxedSource(probeMetadata, {
+        bundlePath,
+        allowedNetHosts: ['127.0.0.1'],
+        timeoutMs: 15000,
+        networkSettings: () => ({ userAgent: 'Operator\r\nX-Evil: 1' }),
+      });
+      const [result] = (await sandboxed.fetchManga()) as unknown as ProbeResult[];
+      expect(JSON.parse(result.body!)).toEqual({ userAgent: 'probe-ua', evil: null });
+    }, 20000);
+
+    it('resolves over DoH, pins the validated address, and refuses private answers and disallowed hosts', async () => {
+      const bundlePath = await writeProbe({
+        urls: [
+          'http://manga.test/chapter',
+          'http://evil.test/',
+          'http://mixed.test/',
+          'http://other.test/',
+          'http://manga.test/redirect',
+          'http://nowhere.test/',
+        ],
+      });
+      const dohQueries: string[] = [];
+      const upstream: Array<{ host: string; pin: unknown; userAgent: string | null }> = [];
+      const resolver = dohAnswer({
+        'manga.test': { A: ['93.184.216.34'] },
+        'evil.test': { A: ['169.254.169.254'] },
+        'mixed.test': { A: ['93.184.216.34'], AAAA: ['::1'] },
+        'other.test': { A: ['93.184.216.34'] },
+      });
+      sandboxed = spawnSandboxedSource(probeMetadata, {
+        bundlePath,
+        allowedNetHosts: ['manga.test', 'evil.test', 'mixed.test', 'nowhere.test'],
+        timeoutMs: 15000,
+        validateOutboundUrl: publicLiteralOnly,
+        fetchImpl: async (url: URL, init: RequestInit, pin?: unknown) => {
+          if (url.hostname === 'doh.test') {
+            dohQueries.push(url.searchParams.get('name') ?? '');
+            return resolver(url);
+          }
+          upstream.push({
+            host: url.hostname,
+            pin,
+            userAgent: new Headers(init.headers).get('user-agent'),
+          });
+          if (url.pathname === '/redirect') {
+            return new Response(null, { status: 302, headers: { location: 'http://evil.test/' } });
+          }
+          return new Response('ok');
+        },
+        networkSettings: () => ({
+          dohUrl: 'https://doh.test/dns-query',
+          userAgent: 'Operator-UA/2.0',
+        }),
+      });
+
+      const [manga, evil, mixed, other, redirect, nowhere] =
+        (await sandboxed.fetchManga()) as unknown as ProbeResult[];
+      expect(manga).toMatchObject({ status: 200, body: 'ok' });
+      expect(evil.error).toMatch(/Blocked by outbound URL validation/);
+      expect(mixed.error).toMatch(/Blocked by outbound URL validation/);
+      expect(other.error).toMatch(/not in this source's allowlist/);
+      expect(redirect.error).toMatch(/Blocked by outbound URL validation/);
+      expect(nowhere.error).toMatch(/DNS over HTTPS lookup failed for nowhere\.test/);
+      // The resolver URL never appears in what the child sees.
+      expect(JSON.stringify([evil, mixed, nowhere])).not.toContain('doh.test');
+
+      // Only validated, allowlisted hosts were contacted, each pinned to its checked address.
+      const pinned = { address: '93.184.216.34', family: 4 };
+      expect(upstream).toEqual([
+        { host: 'manga.test', pin: pinned, userAgent: 'Operator-UA/2.0' },
+        { host: 'manga.test', pin: pinned, userAgent: 'Operator-UA/2.0' },
+      ]);
+      // A disallowed host is refused before the resolver is even asked.
+      expect(dohQueries).not.toContain('other.test');
+    }, 20000);
+
+    it('refuses requests when DoH is on but nothing can validate and pin the answer', async () => {
+      const bundlePath = await writeProbe({ urls: ['http://manga.test/'] });
+      sandboxed = spawnSandboxedSource(probeMetadata, {
+        bundlePath,
+        allowedNetHosts: ['manga.test'],
+        timeoutMs: 15000,
+        networkSettings: () => ({ dohUrl: 'https://doh.test/dns-query' }),
+      });
+      const [result] = (await sandboxed.fetchManga()) as unknown as ProbeResult[];
+      expect(result.error).toMatch(/DNS over HTTPS needs outbound URL validation/);
     }, 20000);
   });
 });

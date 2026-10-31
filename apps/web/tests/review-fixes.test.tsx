@@ -18,6 +18,7 @@ const stable = vi.hoisted(() => ({
   language: ['all', () => {}] as const,
 }));
 vi.mock('@/lib/library-store', () => ({
+  useMangaLibrary: () => ({ manga: [], loading: false }),
   useSourceCapabilities: () => stable.capabilities,
   useSourceFilters: () => stable.filters,
 }));

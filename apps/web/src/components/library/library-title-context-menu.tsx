@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, type ReactNode } from 'react';
-import { setMangaInLibrary, type PublicUser } from '@projekt-manga/api-client';
-import { libraryActions, useLibraryState } from '@/lib/library-store';
+import type { PublicUser } from '@projekt-manga/api-client';
+import { libraryActions, setTitleInLibrary, useLibraryState } from '@/lib/library-store';
 import { actions, getAppState, useAppState } from '@/lib/app-store';
 import { queryClient, queryKeys } from '@/lib/query-client';
 import { useCurrentUser } from '@/lib/session-resource';
@@ -64,7 +64,7 @@ export function LibraryTitleContextMenu({
     try {
       if (action === 'bookmark')
         await libraryActions.setBookmark(target.id, !bookmarks.includes(target.id));
-      else if (action === 'remove') await setMangaInLibrary(target.id, false);
+      else if (action === 'remove') await setTitleInLibrary(target.id, false);
       else if (action === 'category') {
         if (
           category &&

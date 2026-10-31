@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@projekt-manga/api-client', () => ({ searchSourceMangaPage: state.search }));
 vi.mock('@/lib/library-store', () => ({
+  useMangaLibrary: () => ({ manga: [], loading: false }),
   useSourceFilters: () => ({ filters: state.filters }),
   useSourceCapabilities: () => ({ capabilities }),
 }));

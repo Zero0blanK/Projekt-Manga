@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fetchSourceMangaUpdates = vi.fn();
 const triggerCacheSync = vi.fn();
+const getAllMangaLinks = vi.fn(async (): Promise<unknown[]> => []);
 const invalidateRecentChapters = vi.fn();
 
 vi.mock('@projekt-manga/api-client', () => ({
   fetchSourceMangaUpdates: (...args: unknown[]) => fetchSourceMangaUpdates(...args),
   triggerCacheSync: (...args: unknown[]) => triggerCacheSync(...args),
+  getAllMangaLinks: (...args: unknown[]) => getAllMangaLinks(...args),
 }));
 vi.mock('@/lib/notifications-store', () => ({
   invalidateRecentChapters: () => invalidateRecentChapters(),
@@ -25,6 +27,29 @@ beforeEach(() => {
 });
 
 describe('runLibraryUpdate', () => {
+  it("checks the titles' linked sources after the titles themselves", async () => {
+    getAllMangaLinks.mockResolvedValueOnce([
+      {
+        primary_id: 'one',
+        linked: [{ id: 'one-b', source: 'source-c', slug: 'one-elsewhere', title: 'One (C)' }],
+      },
+    ]);
+    fetchSourceMangaUpdates.mockResolvedValue({ newChapters: 0 });
+    await runLibraryUpdate(manga, { refreshCovers: false });
+    expect(fetchSourceMangaUpdates.mock.calls.map((call) => call[2])).toEqual([
+      'one',
+      'two',
+      'one-b',
+    ]);
+  });
+
+  it('checks the titles alone when linked sources cannot be read', async () => {
+    getAllMangaLinks.mockRejectedValueOnce(new Error('offline'));
+    fetchSourceMangaUpdates.mockResolvedValue({ newChapters: 0 });
+    await runLibraryUpdate(manga, { refreshCovers: false });
+    expect(fetchSourceMangaUpdates).toHaveBeenCalledTimes(2);
+  });
+
   it('continues after one source fails and refreshes the notification feed for found chapters', async () => {
     fetchSourceMangaUpdates
       .mockResolvedValueOnce({ newChapters: 2 })
@@ -34,6 +59,8 @@ describe('runLibraryUpdate', () => {
       found: 2,
       failed: ['Two'],
       foundBySource: { 'source-a': 2 },
+      foundByManga: { one: 2 },
+      foundTitles: expect.any(Object),
       failedBySource: { 'source-b': 1 },
       cancelled: false,
     });
@@ -74,6 +101,8 @@ describe('runLibraryUpdate', () => {
       found: 1,
       failed: ['One'],
       foundBySource: { 'source-b': 1 },
+      foundByManga: { two: 1 },
+      foundTitles: expect.any(Object),
       failedBySource: { 'source-a': 1 },
       cancelled: false,
     });
@@ -89,6 +118,8 @@ describe('runLibraryUpdate', () => {
       found: 2,
       failed: ['One'],
       foundBySource: { 'source-a': 2 },
+      foundByManga: { one: 2 },
+      foundTitles: expect.any(Object),
       failedBySource: { 'source-a': 1 },
       cancelled: false,
     });
@@ -115,6 +146,8 @@ describe('runLibraryUpdate', () => {
       found: 1,
       failed: [],
       foundBySource: { 'source-a': 1 },
+      foundByManga: { one: 1 },
+      foundTitles: expect.any(Object),
       failedBySource: {},
       cancelled: false,
     });
@@ -122,6 +155,8 @@ describe('runLibraryUpdate', () => {
       found: 1,
       failed: [],
       foundBySource: { 'source-a': 1 },
+      foundByManga: { one: 1 },
+      foundTitles: expect.any(Object),
       failedBySource: {},
       cancelled: false,
     });

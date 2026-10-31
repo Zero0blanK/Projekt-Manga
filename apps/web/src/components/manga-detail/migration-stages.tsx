@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 import { useHoldToSelect } from '@/hooks/use-hold-to-select';
+import { mergeVisibleOrder, useDragReorder } from '@/hooks/use-drag-reorder';
 import { sourceLanguageName } from '@/lib/source-language';
 import type { MigrationOptions, MigrationSearchStatus } from '@/lib/migration-state';
 export type { MigrationOptions, MigrationSearchStatus } from '@/lib/migration-state';
@@ -148,16 +149,6 @@ export function MigrationOptionsStage({
   onApply: () => void;
 }) {
   const [filter, setFilter] = useState('');
-  const [dragged, setDragged] = useState<string | null>(null);
-  const drag = useRef<{
-    id: string;
-    pointer: number;
-    x: number;
-    y: number;
-    active: boolean;
-  } | null>(null);
-  const suppressClick = useRef(false);
-  const list = useRef<HTMLUListElement>(null);
   const selected = selectedIds.flatMap((id) => {
     const source = sources.find((source) => source.id === id);
     return source ? [source] : [];
@@ -174,36 +165,18 @@ export function MigrationOptionsStage({
     ids.splice(to, 0, id);
     onSources(ids);
   };
-  const stopDrag = () => {
-    drag.current = null;
-    setDragged(null);
-  };
-  const finishDrag = (event: PointerEvent<HTMLUListElement>) => {
-    const current = drag.current;
-    if (!current || current.pointer !== event.pointerId) return;
-    suppressClick.current = true;
-    const row = document
-      .elementFromPoint(event.clientX, event.clientY)
-      ?.closest<HTMLElement>('[data-migration-source-id]');
-    if (!disabled && !current.active && row?.dataset.migrationSourceId === current.id)
-      onSources(selected.filter((source) => source.id !== current.id).map((source) => source.id));
-    stopDrag();
-  };
-  const moveDrag = (event: PointerEvent<HTMLUListElement>) => {
-    const current = drag.current;
-    if (!current || current.pointer !== event.pointerId || disabled) return;
-    if (!current.active && Math.hypot(event.clientX - current.x, event.clientY - current.y) < 6)
-      return;
-    current.active = true;
-    setDragged(current.id);
-    const row = document
-      .elementFromPoint(event.clientX, event.clientY)
-      ?.closest<HTMLElement>('[data-migration-source-id]');
-    if (row && list.current?.contains(row) && row.dataset.migrationSourceId)
-      reorder(current.id, row.dataset.migrationSourceId);
-    if (event.clientY < 80) window.scrollBy({ top: -24 });
-    else if (event.clientY > window.innerHeight - 80) window.scrollBy({ top: 24 });
-  };
+  const visibleIds = selected.filter(matches).map((source) => source.id);
+  const order = useDragReorder<HTMLUListElement>({
+    ids: visibleIds,
+    onReorder: (ids) =>
+      onSources(
+        mergeVisibleOrder(
+          selected.map((source) => source.id),
+          ids,
+        ),
+      ),
+    disabled,
+  });
   return (
     <form
       onSubmit={(event) => {
@@ -300,29 +273,27 @@ export function MigrationOptionsStage({
             </span>
           </h3>
           <ul
-            ref={list}
-            onPointerMove={moveDrag}
-            onPointerUp={finishDrag}
-            onPointerCancel={stopDrag}
-            onLostPointerCapture={stopDrag}
+            ref={order.listRef}
             onClickCapture={(event) => {
-              if (suppressClick.current && event.detail > 0) {
-                suppressClick.current = false;
+              if (order.takeSuppressedClick() && event.detail > 0) {
                 event.preventDefault();
                 event.stopPropagation();
               }
             }}
-            className="divide-y divide-border/40"
+            className="space-y-1.5 p-2"
           >
             {selected.filter(matches).map((source) => {
               const index = selected.findIndex((entry) => entry.id === source.id);
               return (
                 <li
                   key={source.id}
-                  data-migration-source-id={source.id}
-                  className={
-                    dragged === source.id ? 'bg-primary/15 ring-1 ring-inset ring-primary/40' : ''
-                  }
+                  data-drag-id={source.id}
+                  style={order.itemStyle(source.id)}
+                  className={`overflow-hidden rounded-xl border bg-background ${
+                    order.dragging === source.id
+                      ? 'border-primary/60 ring-1 ring-primary/30'
+                      : 'border-border/50'
+                  }`}
                 >
                   <button
                     type="button"
@@ -334,8 +305,8 @@ export function MigrationOptionsStage({
                         selected.filter((entry) => entry.id !== source.id).map((entry) => entry.id),
                       )
                     }
-                    aria-description="Drag anywhere to reorder, or use arrow up and down. Click to remove."
-                    className="flex w-full touch-none select-none items-center gap-3 px-4 py-3 text-left hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary active:cursor-grabbing"
+                    aria-description="Hold and drag to reorder, or use arrow up and down. Click to remove."
+                    className="flex w-full cursor-grab touch-none select-none items-center gap-3 px-4 py-3 text-left hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary active:cursor-grabbing"
                     onKeyDown={(event) => {
                       if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
                       event.preventDefault();
@@ -343,22 +314,14 @@ export function MigrationOptionsStage({
                       if (target) reorder(source.id, target.id);
                     }}
                     onPointerDown={(event) => {
-                      if (event.button !== 0 || !event.isPrimary || disabled) return;
+                      if (event.button !== 0 || disabled) return;
                       event.preventDefault();
                       event.currentTarget.focus();
-                      suppressClick.current = false;
-                      list.current?.setPointerCapture(event.pointerId);
-                      drag.current = {
-                        id: source.id,
-                        pointer: event.pointerId,
-                        x: event.clientX,
-                        y: event.clientY,
-                        active: false,
-                      };
+                      order.start(source.id, event);
                     }}
                   >
                     <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-secondary text-xs font-medium text-muted-foreground">
-                      {index + 1}
+                      {order.dragging ? order.position(source.id) + 1 : index + 1}
                     </span>
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">{source.name}</span>
@@ -391,7 +354,7 @@ export function MigrationOptionsStage({
             </p>
           )}
           <p className="sr-only" role="status">
-            {dragged
+            {order.dragging
               ? 'Reordering selected sources.'
               : selected.map((source, index) => `${index + 1}. ${source.name}`).join(', ')}
           </p>
@@ -818,6 +781,8 @@ export function MigrationReviewStage({
   onEdit,
   onRetryPreview,
   onMigrate,
+  onLink,
+  linking = false,
 }: {
   manga: Manga;
   originalSource: string;
@@ -835,8 +800,11 @@ export function MigrationReviewStage({
   onEdit: () => void;
   onRetryPreview: () => void;
   onMigrate: () => void;
+  /** Keeps this title and reads the match as another source of it, instead of moving. */
+  onLink?: () => void;
+  linking?: boolean;
 }) {
-  const saving = transfer.state === 'saving';
+  const saving = transfer.state === 'saving' || linking;
   const thumbnail = details?.thumbnail_url || selected.thumbnail_url;
   if (transfer.state === 'success')
     return (
@@ -881,6 +849,12 @@ export function MigrationReviewStage({
               <ArrowRight />
               {transfer.state === 'partial' ? 'Retry remaining transfers' : 'Migrate'}
             </DropdownMenuItem>
+            {onLink && (
+              <DropdownMenuItem disabled={saving || preview !== 'ready'} onSelect={onLink}>
+                <Layers />
+                Link as another source
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled={saving} onSelect={onBack}>
               <Search />
@@ -1023,10 +997,28 @@ export function MigrationReviewStage({
           )}
           <div className="sticky bottom-0 z-20 mt-8 flex flex-wrap items-center justify-between gap-3 border-t border-border/60 bg-background/95 py-4 backdrop-blur">
             <p role="status" className="text-xs text-muted-foreground">
-              {saving
+              {transfer.state === 'saving'
                 ? transfer.label
-                : 'The original leaves your library and its downloads are removed after migration.'}
+                : linking
+                  ? 'Linking this source…'
+                  : 'Migrating moves this title to the new source and removes the original. Linking keeps both.'}
             </p>
+            {onLink && (
+              <Button
+                variant="outline"
+                disabled={saving || preview !== 'ready'}
+                onClick={onLink}
+                title="Keep this title, and read chapters it lacks from this source"
+                className="h-11 w-full gap-2 sm:w-auto"
+              >
+                {linking ? (
+                  <Loader2 size={16} className="animate-spin motion-reduce:animate-none" />
+                ) : (
+                  <Layers size={16} />
+                )}
+                Link as another source
+              </Button>
+            )}
             <Button
               disabled={saving}
               onClick={onMigrate}

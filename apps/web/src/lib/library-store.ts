@@ -13,6 +13,7 @@ import {
   searchSourceMangaPage,
   getSourceCapabilities,
   getSourceFilters,
+  setMangaInLibrary,
   ApiError,
   type LibraryState as ApiLibraryState,
   type ShelfStatus as ApiShelfStatus,
@@ -588,4 +589,53 @@ export const libraryActions = {
  */
 export function applyLibraryAction(action: Promise<unknown>, failureMessage: string) {
   action.catch(() => toast({ variant: 'destructive', description: failureMessage }));
+}
+
+/**
+ * Adds a title to the library or removes it, with every view that shows membership kept
+ * current: the library list, the reading/notification state beside it, and everything
+ * derived from those (Discover's "in library" marks, Continue reading, the goal chip).
+ *
+ * A removal leaves the cached list at once instead of waiting for the server and a
+ * refetch of the whole library, and comes back if the server refuses it. Bulk callers
+ * pass `refresh: false` and call {@link refreshLibrary} once at the end, so a hundred
+ * removals don't start a hundred refetches.
+ */
+export async function setTitleInLibrary(
+  mangaId: string,
+  inLibrary: boolean,
+  { refresh = true }: { refresh?: boolean } = {},
+): Promise<void> {
+  let removed: Manga | undefined;
+  if (!inLibrary) {
+    // An older refetch still in flight would put the title back when it lands.
+    await queryClient.cancelQueries({ queryKey: queryKeys.mangaLibrary });
+    queryClient.setQueryData<Manga[]>(queryKeys.mangaLibrary, (current) => {
+      removed = current?.find((manga) => manga.id === mangaId);
+      return current?.filter((manga) => manga.id !== mangaId);
+    });
+  }
+  try {
+    await setMangaInLibrary(mangaId, inLibrary);
+  } catch (error) {
+    if (removed) {
+      const restore = removed;
+      queryClient.setQueryData<Manga[]>(queryKeys.mangaLibrary, (current) =>
+        current && !current.some((manga) => manga.id === restore.id)
+          ? [...current, restore]
+          : current,
+      );
+    }
+    throw error;
+  } finally {
+    if (refresh) void refreshLibrary();
+  }
+}
+
+/** Refetches what library membership feeds: the list and its per-title state. */
+export function refreshLibrary(): Promise<void> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.mangaLibrary }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.libraryState }),
+  ]).then(() => undefined);
 }

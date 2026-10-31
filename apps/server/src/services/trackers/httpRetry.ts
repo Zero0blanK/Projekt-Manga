@@ -1,4 +1,4 @@
-import { RateLimitedError, UpstreamError } from '../../utils/customErrors.js';
+import { RateLimitedError, UnauthorizedError, UpstreamError } from '../../utils/customErrors.js';
 
 /**
  * Retry/backoff shared by every tracker adapter's HTTP layer.
@@ -34,7 +34,7 @@ type ResponseHeaders = Record<string, unknown> | undefined;
  * functions don't exist there and calling one would throw inside the error path — the
  * one place that must never throw for the wrong reason.
  */
-function statusOf(error: unknown): number | null {
+export function statusOf(error: unknown): number | null {
   if (typeof error !== 'object' || error === null) {
     return null;
   }
@@ -141,5 +141,24 @@ export function toTrackerError(error: unknown, label: string): never {
   }
   throw new UpstreamError(
     `${label} request failed: ${error instanceof Error ? error.message : String(error)}`,
+  );
+}
+
+/**
+ * Like toTrackerError, for the one call that sends a reader's own credentials (a
+ * password login or an API-key check). A 400/401/403 there means "wrong credentials",
+ * which the reader can fix, so it gets its own message — and the upstream error text is
+ * never echoed, since some servers repeat the submitted username or key back in it.
+ */
+export function toCredentialError(error: unknown, label: string): never {
+  const status = statusOf(error);
+  if (status === 400 || status === 401 || status === 403) {
+    throw new UnauthorizedError(`${label} didn't accept those credentials.`);
+  }
+  if (isRateLimited(error)) {
+    toTrackerError(error, label);
+  }
+  throw new UpstreamError(
+    status === null ? `Couldn't reach ${label}.` : `${label} sign-in failed (HTTP ${status}).`,
   );
 }

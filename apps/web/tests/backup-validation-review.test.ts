@@ -71,9 +71,21 @@ describe('restore backup validation', () => {
     expect(() => parseBackup({ ...emptyBackup, manga: [title('m1'), title('m2', 'm1')] })).toThrow(
       /duplicate title in entry 2/,
     );
+    const twice = title('m2');
+    twice.chapters.push({ ...twice.chapters[0] });
+    expect(() => parseBackup({ ...emptyBackup, manga: [title('m1'), twice] })).toThrow(
+      /duplicate chapter in title 2, chapter 2/,
+    );
+  });
+
+  it('accepts the same source chapter key under two titles', () => {
+    // Keys only name a chapter within its title (MangaGeko-style `chapter-1` slugs).
     expect(() =>
-      parseBackup({ ...emptyBackup, manga: [title('m1'), title('m2', 'm2', 'm1-chapter')] }),
-    ).toThrow(/duplicate chapter in title 2, chapter 1/);
+      parseBackup({
+        ...emptyBackup,
+        manga: [title('m1', 'm1', 'chapter-1'), title('m2', 'm2', 'chapter-1')],
+      }),
+    ).not.toThrow();
   });
 
   it('identifies a duplicate library state at the second row', () => {

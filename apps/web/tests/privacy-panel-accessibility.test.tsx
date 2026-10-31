@@ -30,11 +30,12 @@ const {
 }));
 
 vi.mock('@projekt-manga/api-client', () => ({
-  getAllDownloads: vi.fn(),
+  exportReadingDataFromServer: vi.fn(),
+  getBackupStatus: vi.fn(() => new Promise(() => {})),
+  createBackupNow: vi.fn(),
+  getBackupFile: vi.fn(),
+  updateBackupConfig: vi.fn(),
   getHistory,
-  getLibraryState: vi.fn(),
-  getManga: vi.fn(),
-  getMangaDetailsById: vi.fn(),
   previewRestore,
   startReplaceRestore,
   ApiError: class ApiError extends Error {},
@@ -52,6 +53,9 @@ vi.mock('@/lib/backup-validation', () => ({
   parseBackup,
   previewBackupMerge: vi.fn(),
 }));
+vi.mock('@/components/settings/desktop-privacy-controls', () => ({
+  DesktopPrivacyControls: () => null,
+}));
 vi.mock('@/components/settings/field-controls', () => ({
   Panel: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
   Field: ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -61,6 +65,7 @@ vi.mock('@/components/settings/field-controls', () => ({
     </div>
   ),
   Group: ({ label }: { label: string }) => <h3>{label}</h3>,
+  Toggle: () => null,
   ActionButton: (props: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...props} />,
 }));
 vi.mock('@/lib/app-store', () => ({
@@ -68,6 +73,9 @@ vi.mock('@/lib/app-store', () => ({
   setState: vi.fn(),
 }));
 vi.mock('@/lib/theme', () => ({ APP_STATE_STORAGE_KEY: 'fixture-settings' }));
+vi.mock('@/lib/migration-state', () => ({
+  useMigrationPreferences: () => [{ sourceOrder: [] }],
+}));
 vi.mock('@/lib/session-resource', () => ({
   useCurrentUser: () => currentUser,
   sessionActions: { deleteAccount },

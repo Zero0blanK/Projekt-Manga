@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { HTTPSuccessResponse, HTTPErrorResponse } from '../utils/responseHandlers.js';
 import downloadService from '../services/download.service.js';
 import { NotFoundError } from '../utils/customErrors.js';
+import { writeStoredZip } from '../utils/storedZip.js';
 import type {
   CleanupOrphanedDownloadsBody,
   InitiateDownloadBody,
@@ -196,6 +197,48 @@ const getDownloadedPageFile = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+/** A file name safe on every desktop OS, for the Content-Disposition header. */
+function safeFileName(name: string): string {
+  const cleaned = name
+    .split('')
+    .map((char) => (char.charCodeAt(0) < 32 || '\\/:*?"<>|'.includes(char) ? ' ' : char))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 150);
+  return cleaned || 'chapter.cbz';
+}
+
+/**
+ * A downloaded chapter as a CBZ, for "Export as CBZ". Streamed as it is built; a failure
+ * once bytes have gone out can only cut the response short, so the client sees a broken
+ * download rather than a corrupt file that looks complete.
+ */
+const getDownloadedChapterCbz = async (req: Request, res: Response, next: NextFunction) => {
+  let archive: Awaited<ReturnType<typeof downloadService.getDownloadedChapterArchive>>;
+  try {
+    const { chapterId } = req.params as { chapterId: string };
+    archive = await downloadService.getDownloadedChapterArchive(chapterId);
+  } catch (error) {
+    return next(error);
+  }
+  const fileName = safeFileName(archive.fileName);
+  const ascii = fileName.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, "'");
+  res.setHeader('Content-Type', 'application/vnd.comicbook+zip');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+  );
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    await writeStoredZip(archive.entries, res);
+    res.end();
+  } catch (error) {
+    console.error('[downloads] CBZ export failed:', error instanceof Error ? error.message : error);
+    res.destroy();
+  }
+};
+
 const downloadController = {
   initiateDownload,
   getDownloadDirectory,
@@ -212,6 +255,7 @@ const downloadController = {
   isChapterDownloaded,
   getDownloadedChapterPages,
   getDownloadedPageFile,
+  getDownloadedChapterCbz,
 };
 
 export default downloadController;

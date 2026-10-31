@@ -33,6 +33,7 @@ async function withStore(run) {
 /** Loads dist/main/ipc.js against a stub Electron and a recording local store. */
 function loadIpc() {
   const handlers = new Map();
+  const lock = { locked: false };
   const calls = [];
   const record =
     (name, result) =>
@@ -51,7 +52,28 @@ function loadIpc() {
     ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) },
     shell: {},
     clipboard: { writeText: record('writeText') },
-    BrowserWindow: { fromWebContents: (webContents) => ({ webContents }) },
+    BrowserWindow: {
+      fromWebContents: (webContents) => ({
+        webContents,
+        isAlwaysOnTop: () => webContents.alwaysOnTop === true,
+        setAlwaysOnTop: (value) => {
+          calls.push({ name: 'setAlwaysOnTop', args: [value] });
+          webContents.alwaysOnTop = value;
+        },
+        setProgressBar: (value) => calls.push({ name: 'setProgressBar', args: [value] }),
+        setOverlayIcon: (icon, description) =>
+          calls.push({ name: 'setOverlayIcon', args: [icon && icon.source, description] }),
+      }),
+    },
+    app: { setBadgeCount: (count) => calls.push({ name: 'setBadgeCount', args: [count] }) },
+    nativeImage: {
+      createFromDataURL: (url) => ({
+        source: url,
+        isEmpty: () => !url.endsWith('AAAA'),
+        getSize: () =>
+          url.includes('huge') ? { width: 512, height: 512 } : { width: 32, height: 32 },
+      }),
+    },
     session: { defaultSession: { cookies: { get: async () => [] } } },
   };
   const stubs = {
@@ -62,8 +84,35 @@ function loadIpc() {
     './diagnostics': {},
     './init-state': {},
     './updater': {},
-    './startup-background': {},
+    './startup-background': {
+      setCloseToTray: async (value) => {
+        calls.push({ name: 'setCloseToTray', args: [value] });
+        return { supported: true, enabled: value };
+      },
+    },
     './local-archives': { registerLocalArchiveHandlers() {} },
+    './app-lock': {
+      isAppLocked: () => lock.locked,
+      getAppLockState: () => ({ enabled: true, idleMinutes: 0, locked: lock.locked }),
+      setAppLock: async () => ({ enabled: true, idleMinutes: 0, locked: false }),
+      clearAppLock: async () => ({ enabled: false, idleMinutes: 0, locked: false }),
+      lockApp: () => {
+        lock.locked = true;
+      },
+    },
+    './desktop-preferences': { getDesktopPreferences: () => ({ hideFromCapture: false }) },
+    './window': {
+      setHideFromCapture: (value) => {
+        calls.push({ name: 'setHideFromCapture', args: [value] });
+        return value;
+      },
+    },
+    './source-browser': {
+      openSourceBrowser: async (...args) => {
+        calls.push({ name: 'openSourceBrowser', args });
+        return { saved: true, cookieCount: 1, message: 'Saved' };
+      },
+    },
   };
   const originalLoad = Module._load;
   Module._load = function (request, parent, isMain) {
@@ -89,22 +138,31 @@ function loadIpc() {
   };
   const invoke = (event, domain, op, args) =>
     handlers.get('desktop:data:invoke')(event, domain, op, args);
-  return { handlers, calls, appEvent, subframe, foreignEvent, invoke };
+  return { handlers, calls, appEvent, subframe, foreignEvent, invoke, lock };
 }
+
+const CHAPTER = { source: 'source-a', manga_slug: 'slug-1', source_chapter_key: 'chapter-1' };
 
 test('data IPC rejects invalid ids and progress values before reaching the store', async () => {
   const { calls, appEvent, invoke } = loadIpc();
 
   for (const lastPageRead of [-1, Number.NaN, Number.POSITIVE_INFINITY, '3', null]) {
     const result = await invoke(appEvent, 'chapter', 'updateProgress', {
-      chapterId: 'chapter-1',
+      chapter: CHAPTER,
       lastPageRead,
     });
     assert.equal(result.success, false, `lastPageRead ${String(lastPageRead)}`);
   }
   for (const [domain, op, args] of [
-    ['chapter', 'updateProgress', { chapterId: '', lastPageRead: 1 }],
-    ['chapter', 'markRead', { chapterId: '', isRead: true }],
+    [
+      'chapter',
+      'updateProgress',
+      { chapter: { ...CHAPTER, source_chapter_key: '' }, lastPageRead: 1 },
+    ],
+    ['chapter', 'markRead', { chapter: { ...CHAPTER, source: '' }, isRead: true }],
+    ['chapter', 'markRead', { isRead: true }],
+    ['chapter', 'markRead', { chapter: { ...CHAPTER, page_count: 'many' }, isRead: true }],
+    ['chapter', 'markRead', { chapter: { ...CHAPTER, manga_slug: 'x'.repeat(513) }, isRead: true }],
     ['manga', 'getDetails', { mangaId: '' }],
     ['manga', 'syncOne', { mangaId: '' }],
     ['manga', 'setInLibrary', { mangaId: '', inLibrary: true }],
@@ -115,7 +173,7 @@ test('data IPC rejects invalid ids and progress values before reaching the store
   assert.deepEqual(calls, []);
 
   const valid = await invoke(appEvent, 'chapter', 'updateProgress', {
-    chapterId: 'chapter-1',
+    chapter: CHAPTER,
     lastPageRead: 0,
   });
   assert.deepEqual(valid, { success: true, message: 'OK', data: null });
@@ -156,6 +214,190 @@ test('every IPC channel refuses callers outside the app main frame', async () =>
   // And the same handlers do run for the real main frame.
   await handlers.get('desktop:clipboard:write')(appEvent, 'copied');
   assert.equal(calls[0].name, 'writeText');
+});
+
+test('window.setAlwaysOnTop accepts only a boolean, for the calling window', async () => {
+  const { handlers, calls, appEvent } = loadIpc();
+  const set = handlers.get('desktop:window:set-always-on-top');
+  const get = handlers.get('desktop:window:get-always-on-top');
+  assert.ok(set && get, 'always-on-top channels are registered');
+  for (const value of [undefined, null, 'true', 1, {}, []]) {
+    await assert.rejects(
+      Promise.resolve().then(() => set(appEvent, value)),
+      /must be a boolean/,
+      JSON.stringify(value) ?? 'undefined',
+    );
+  }
+  assert.deepEqual(calls, []);
+  assert.deepEqual(await set(appEvent, true), { success: true, message: 'OK', data: true });
+  assert.deepEqual(await get(appEvent), { success: true, message: 'OK', data: true });
+  assert.deepEqual(calls, [{ name: 'setAlwaysOnTop', args: [true] }]);
+});
+
+test('window progress and close-to-tray accept only their own value types', async () => {
+  const { handlers, calls, appEvent } = loadIpc();
+  const progress = handlers.get('desktop:window:set-progress');
+  const closeToTray = handlers.get('desktop:close-to-tray:set');
+  for (const value of [undefined, 'half', Number.NaN, Number.POSITIVE_INFINITY, {}, [0.5]]) {
+    await assert.rejects(
+      Promise.resolve().then(() => progress(appEvent, value)),
+      /progress must be/,
+      String(value),
+    );
+  }
+  for (const value of [undefined, null, 'true', 1]) {
+    await assert.rejects(
+      Promise.resolve().then(() => closeToTray(appEvent, value)),
+      /must be a boolean/,
+      String(value),
+    );
+  }
+  assert.deepEqual(calls, []);
+  await progress(appEvent, 0.5);
+  await progress(appEvent, 7);
+  await progress(appEvent, -3);
+  await progress(appEvent, null);
+  await closeToTray(appEvent, true);
+  assert.deepEqual(calls, [
+    { name: 'setProgressBar', args: [0.5] },
+    { name: 'setProgressBar', args: [1] },
+    { name: 'setProgressBar', args: [0] },
+    { name: 'setProgressBar', args: [-1] },
+    { name: 'setCloseToTray', args: [true] },
+  ]);
+});
+
+test('while the app is locked every channel refuses, data included', async () => {
+  const { handlers, calls, appEvent, invoke, lock } = loadIpc();
+  await handlers.get('desktop:lock:now')(appEvent);
+  assert.equal(lock.locked, true);
+  for (const [channel, handler] of handlers) {
+    if (channel === 'desktop:data:invoke') continue;
+    await assert.rejects(
+      Promise.resolve().then(() => handler(appEvent, true)),
+      /locked/,
+      channel,
+    );
+  }
+  const result = await invoke(appEvent, 'manga', 'getDetails', { mangaId: 'manga-1' });
+  assert.equal(result.success, false);
+  assert.deepEqual(calls, []);
+  lock.locked = false;
+  await assert.rejects(
+    Promise.resolve().then(() => handlers.get('desktop:capture:set')(appEvent, 'yes')),
+    /must be a boolean/,
+  );
+  await handlers.get('desktop:capture:set')(appEvent, true);
+  assert.deepEqual(calls, [{ name: 'setHideFromCapture', args: [true] }]);
+});
+
+test('source.openBrowser validates its argument before opening anything', async () => {
+  const { handlers, calls, appEvent } = loadIpc();
+  const open = handlers.get('desktop:source:open-browser');
+  assert.ok(open, 'source.openBrowser is registered');
+
+  for (const args of [
+    undefined,
+    null,
+    'mangadex',
+    ['mangadex'],
+    {},
+    { sourceId: '' },
+    { sourceId: 42 },
+    { sourceId: '../../etc' },
+    { sourceId: 'a b' },
+    { sourceId: 'https://evil.test/' },
+    { sourceId: 'x'.repeat(129) },
+    { sourceId: '-leading-dash' },
+  ]) {
+    await assert.rejects(
+      Promise.resolve().then(() => open(appEvent, args)),
+      /openBrowser expects|sourceId must be/,
+      JSON.stringify(args) ?? 'undefined',
+    );
+  }
+  assert.deepEqual(calls, []);
+
+  // Only the id crosses the boundary: a renderer cannot choose the URL or the hosts.
+  const result = await open(appEvent, {
+    sourceId: 'manga-site.en',
+    baseUrl: 'https://evil.test/',
+    allowedHosts: ['evil.test'],
+  });
+  assert.equal(result.success, true);
+  assert.deepEqual(calls, [{ name: 'openSourceBrowser', args: ['manga-site.en'] }]);
+});
+
+test('source browser policy keeps cookies for allowed hosts only, on a local server only', () => {
+  const policy = require('../dist/main/source-browser-policy.js');
+
+  assert.equal(policy.isLoopbackApi('http://127.0.0.1:4123/api'), true);
+  assert.equal(policy.isLoopbackApi('http://localhost:4000/api'), true);
+  assert.equal(policy.isLoopbackApi('http://[::1]:4000/api'), true);
+  assert.equal(policy.isLoopbackApi('https://manga.example.com/api'), false);
+  assert.equal(policy.isLoopbackApi('http://192.168.1.20:4000/api'), false);
+  assert.equal(policy.isLoopbackApi('not a url'), false);
+
+  assert.equal(
+    policy.startUrlFor('https://www.site.example/', ['site.example']),
+    'https://www.site.example/',
+  );
+  assert.throws(() => policy.startUrlFor('https://other.example/', ['site.example']), /not one/);
+  assert.throws(() => policy.startUrlFor('file:///etc/passwd', ['site.example']), /no usable/);
+  assert.throws(() => policy.startUrlFor('javascript:alert(1)', ['site.example']), /no usable/);
+
+  assert.equal(policy.partitionFor('Manga.Site'), 'persist:source-browser-manga-site');
+  assert.notEqual(policy.partitionFor('a'), policy.partitionFor('b'));
+
+  assert.equal(
+    policy.browserUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) projekt-manga/1.2.3 Chrome/140.0.0.0 Electron/38.0.0 Safari/537.36',
+    ),
+    'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
+  );
+  // The header lists what navigator.languages lists; Electron adds the weights.
+  assert.equal(policy.acceptLanguages(['en-US', 'ja', 'en-US']), 'en-US,ja');
+  assert.equal(policy.acceptLanguages(['bad tag;q=1']), 'en-US');
+
+  const kept = policy.cookiesForAllowedHosts(
+    [
+      {
+        name: 'cf_clearance',
+        value: 'a',
+        domain: '.site.example',
+        path: '/',
+        secure: true,
+        httpOnly: true,
+        expirationDate: 2000000000,
+      },
+      { name: 'login', value: 'b', domain: 'www.site.example', hostOnly: true, session: true },
+      { name: 'ads', value: 'c', domain: '.tracker.example' },
+      { name: 'tld', value: 'd', domain: '.example' },
+      { name: 'huge', value: 'x'.repeat(4097), domain: 'site.example' },
+    ],
+    ['www.site.example'],
+  );
+  assert.deepEqual(kept, [
+    {
+      name: 'cf_clearance',
+      value: 'a',
+      domain: 'site.example',
+      hostOnly: false,
+      path: '/',
+      secure: true,
+      httpOnly: true,
+      expires: 2000000000,
+    },
+    {
+      name: 'login',
+      value: 'b',
+      domain: 'www.site.example',
+      hostOnly: true,
+      path: '/',
+      secure: false,
+      httpOnly: false,
+    },
+  ]);
 });
 
 test('session cookie origins put the page first and drop the API for .localhost pages', () => {
@@ -227,7 +469,7 @@ function pullFixture(overrides = {}) {
 test('pulled changes do not overwrite newer local rows', async () => {
   await withStore((store, db) => {
     store.upsertManga({ id: 'manga-1', slug: 'slug-1', title: 'A', source: 'source-a' });
-    store.upsertChapter({ id: 'chapter-1', manga_id: 'manga-1', chapter_number: 1 });
+    store.upsertChapter({ id: 'chapter-1', ...CHAPTER, manga_id: 'manga-1', chapter_number: 1 });
     db.prepare('UPDATE manga_state SET in_library = 1, updated_at = ?').run(
       '2026-02-01T00:00:00.000Z',
     );
@@ -257,7 +499,7 @@ test('pulled changes do not overwrite newer local rows', async () => {
         ],
         chapter_state: [
           {
-            chapter_id: 'chapter-1',
+            ...CHAPTER,
             is_read: false,
             is_bookmark: false,
             last_page_read: 2,
@@ -405,5 +647,50 @@ test('a rebuild migration that leaves a dangling reference rolls back instead of
     );
   } finally {
     db.close();
+  }
+});
+
+test('the taskbar badge takes only a whole count and, on Windows, a small PNG', async () => {
+  const { handlers, calls, appEvent } = loadIpc();
+  const badge = handlers.get('desktop:window:set-badge');
+  for (const input of [
+    undefined,
+    {},
+    { count: -1 },
+    { count: 1.5 },
+    { count: '3' },
+    { count: 1e6 },
+  ]) {
+    await assert.rejects(
+      Promise.resolve().then(() => badge(appEvent, input)),
+      /badge count must be/,
+      JSON.stringify(input) ?? 'undefined',
+    );
+  }
+  assert.deepEqual(calls, []);
+  const png = 'data:image/png;base64,AAAA';
+  if (process.platform === 'win32') {
+    for (const image of [
+      undefined,
+      'https://evil.test/x.png',
+      'data:image/svg+xml;base64,AAAA',
+      `data:image/png;base64,${'A'.repeat(40_000)}`,
+      'data:image/png;base64,hugeAAAA',
+    ]) {
+      await assert.rejects(
+        Promise.resolve().then(() => badge(appEvent, { count: 3, image })),
+        /badge image must be a small PNG/,
+      );
+    }
+    assert.deepEqual(calls, []);
+    await badge(appEvent, { count: 3, image: png });
+    await badge(appEvent, { count: 0 });
+    assert.deepEqual(calls, [
+      { name: 'setOverlayIcon', args: [png, '3 titles with new chapters'] },
+      { name: 'setOverlayIcon', args: [null, ''] },
+    ]);
+  } else {
+    await badge(appEvent, { count: 3, image: png });
+    assert.deepEqual(calls, [{ name: 'setBadgeCount', args: [3] }]);
   }
 });

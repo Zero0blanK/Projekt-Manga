@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client",
+    "predev": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client && node scripts/copy-ocr-assets.mjs",
     "dev": "next dev",
-    "prebuild": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client",
+    "prebuild": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client && node scripts/copy-ocr-assets.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
@@ -48,6 +48,7 @@
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tanstack/react-query": "^5.102.8",
+    "@tesseract.js-data/jpn_vert": "^1.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -63,6 +64,7 @@
     "react-resizable-panels": "^4.6.5",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1",
+    "tesseract.js": "^7.0.0",
     "tw-animate-css": "^1.3.4",
     "vaul": "^1.1.2",
     "zod": "^4.6.7"

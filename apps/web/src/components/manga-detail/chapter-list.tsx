@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -64,13 +64,27 @@ import { copyToClipboard } from '@/lib/clipboard';
 import { copySourceChapterLink } from '@/lib/source-url';
 import { useHoldToSelect } from '@/hooks/use-hold-to-select';
 import { useChapterWindow } from '@/lib/chapter-window';
+import { afterChapterRead } from '@/lib/auto-downloads';
+import { useSetting } from '@/lib/app-store';
+import { useProfilePreference } from '@/lib/profile-preferences';
+import { DEFAULT_CHAPTER_FILTER, chapterFilterKey, parseChapterFilter } from '@/lib/chapter-filter';
+import {
+  SHOW_CHAPTER_GAPS,
+  bulkPayload,
+  markDuplicatesRead,
+  missingBefore,
+} from '@/lib/chapter-gaps';
 import { useChapterBookmarks } from '@/lib/chapter-bookmarks';
 import { useChapterFilterScroll } from '@/lib/chapter-filter-scroll';
 import { useCurrentUser } from '@/lib/session-resource';
 import { useNewSinceLastVisit } from '@/lib/chapter-visits';
+import { applyMihonChapterState } from '@/lib/mihon-backup/extras';
 
 type ChapterRow = {
+  /** The stored row's id: reader links, downloads and bookmarks look it up. */
   id: string;
+  /** The source's id for the chapter, which every write names it by. */
+  key: string;
   n: number;
   title: string;
   read: boolean;
@@ -100,9 +114,12 @@ function ChapterListItem({
   onNavigate,
   index,
   total,
+  missing = 0,
 }: {
   manga: Manga;
   chapter: ChapterRow;
+  /** Whole chapter numbers missing just before this one (Settings › Reader › gaps). */
+  missing?: number;
   downloaded: boolean;
   /** Arrived since the last time this title was opened. */
   isNew: boolean;
@@ -169,6 +186,18 @@ function ChapterListItem({
                 {c.group && ` · ${c.group}`}
               </div>
             </div>
+            {missing > 0 && (
+              <span
+                title={
+                  missing === 1
+                    ? `Chapter ${Math.floor(c.n) - 1} is missing`
+                    : `Chapters ${Math.floor(c.n) - missing}–${Math.floor(c.n) - 1} are missing`
+                }
+                className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+              >
+                {missing} missing before
+              </span>
+            )}
             {isNew && !c.read && (
               <span
                 title="New since your last visit"
@@ -244,6 +273,7 @@ type SortMode = (typeof SORTS)[number]['value'];
 function toRow(c: MangaChapterRecord): ChapterRow {
   return {
     id: c.id,
+    key: c.source_chapter_key,
     n: c.chapter_number,
     title: c.name || `Chapter ${c.chapter_number}`,
     read: c.is_read,
@@ -289,10 +319,25 @@ export function ChapterList({ manga }: { manga: Manga }) {
   const [excludedDownloadIds, setExcludedDownloadIds] = useState<Set<string>>(new Set());
   const [downloadsAvailable, setDownloadsAvailable] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
-  const { isBookmarked, toggle: toggleBookmark } = useChapterBookmarks(records);
+  // Bookmarks are kept under the source's key, the one name a chapter has both here and on
+  // its source preview.
+  const bookmarkTargets = useMemo(
+    () => records.map((r) => ({ id: r.source_chapter_key, is_bookmark: r.is_bookmark })),
+    [records],
+  );
+  const { isBookmarked, toggle: toggleBookmark } = useChapterBookmarks(bookmarkTargets);
   const [query, setQuery] = useState('');
-  const [status, setStatus] = useState<(typeof STATUS_FILTERS)[number]>('All');
-  const [group, setGroup] = useState<string>('All');
+  // Kept per title: it survives leaving the page, and the reader can skip what it hides
+  // (Settings › Reader › Skip filtered chapters).
+  const [listFilter, setListFilter] = useProfilePreference(
+    chapterFilterKey(manga.id),
+    parseChapterFilter,
+    DEFAULT_CHAPTER_FILTER,
+  );
+  const { status, group } = listFilter;
+  const setStatus = (next: (typeof STATUS_FILTERS)[number]) =>
+    setListFilter((current) => ({ ...current, status: next }));
+  const setGroup = (next: string) => setListFilter((current) => ({ ...current, group: next }));
   const [sort, setSort] = useState<SortMode>('latest');
   const [sortDir, setSortDir] = useState<SortDirection>('desc');
   const [batchBusy, setBatchBusy] = useState(false);
@@ -344,6 +389,18 @@ export function ChapterList({ manga }: { manga: Manga }) {
         if (!controller.signal.aborted) {
           setRecords(rows);
           setRecordsOwner(owner);
+          // Read state from a Mihon import whose source could not name its chapters,
+          // matched by number now that the chapter list exists.
+          void applyMihonChapterState(
+            owner,
+            { id: manga.id, slug: manga.slug, source: manga.source },
+            rows,
+          ).then(
+            (marked) => {
+              if (marked && !controller.signal.aborted) setRecords(marked);
+            },
+            (error: unknown) => reportError(error, "Couldn't apply imported read state."),
+          );
         }
       })
       // An empty list otherwise reads as "this title has no chapters".
@@ -413,8 +470,24 @@ export function ChapterList({ manga }: { manga: Manga }) {
     const requestGeneration = generation.current;
     const mutate = c.read ? markChapterAsUnread : markChapterAsRead;
     setRecords((prev) => prev.map((r) => (r.id === c.id ? { ...r, is_read: !c.read } : r)));
-    mutate(manga.slug, c.id, { source: manga.source })
-      .then(invalidateSavedReadingProgress)
+    mutate(manga.slug, c.key, { source: manga.source })
+      .then(() => {
+        invalidateSavedReadingProgress();
+        if (c.read) return;
+        // Settings > Sync & Storage > Delete after reading. Best effort.
+        const numbers = [...new Set(records.map((r) => r.chapter_number))].sort((a, b) => a - b);
+        void afterChapterRead(manga, c.n, numbers, (number) =>
+          records.find((r) => r.chapter_number === number),
+        ).catch(() => undefined);
+        // Settings > Reader > Mark duplicates read: the other groups' releases go too.
+        void markDuplicatesRead(manga, records, c.n, c.id)
+          .then((marked) => {
+            if (marked.length === 0 || generation.current !== requestGeneration) return;
+            const ids = new Set(marked);
+            setRecords((prev) => prev.map((r) => (ids.has(r.id) ? { ...r, is_read: true } : r)));
+          })
+          .catch(() => undefined);
+      })
       .catch(() => {
         if (generation.current !== requestGeneration) return;
         setRecords((prev) => prev.map((r) => (r.id === c.id ? { ...r, is_read: c.read } : r)));
@@ -443,18 +516,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
     // (ensureChapterExists) plus `source` — the target read/unread state itself is the
     // `read` flag chosen above, via markPreviousChaptersAsRead/Unread, not anything on
     // the payload.
-    const payload: ChapterBulkPayload[] = targets.map((r) => ({
-      id: r.id,
-      name: r.name ?? undefined,
-      url: r.url,
-      scanlator: r.scanlator ?? undefined,
-      chapter_number: r.chapter_number,
-      last_page_read: r.last_page_read,
-      page_count: r.page_count ?? undefined,
-      fetched_at: r.fetched_at ?? undefined,
-      release_date: r.release_date ?? undefined,
-      source: manga.source,
-    }));
+    const payload: ChapterBulkPayload[] = targets.map((r) => bulkPayload(r, manga.source));
     const mutate = read ? markPreviousChaptersAsRead : markPreviousChaptersAsUnread;
     mutate(manga.slug, payload, {
       manga_id: manga.id,
@@ -463,18 +525,20 @@ export function ChapterList({ manga }: { manga: Manga }) {
       .then((result) => {
         if (generation.current !== requestGeneration) return;
         invalidateSavedReadingProgress();
-        if (result.failed_chapter_ids.length > 0) {
-          const failed = new Set(result.failed_chapter_ids);
+        if (result.failed_source_chapter_keys.length > 0) {
+          const failed = new Set(result.failed_source_chapter_keys);
           setRecords((current) =>
             current.map((row) =>
-              failed.has(row.id) ? (previous.find((old) => old.id === row.id) ?? row) : row,
+              failed.has(row.source_chapter_key)
+                ? (previous.find((old) => old.id === row.id) ?? row)
+                : row,
             ),
           );
         }
         toast({
           description:
-            result.failed_chapter_ids.length > 0
-              ? `Updated ${result.count} chapters; ${result.failed_chapter_ids.length} failed`
+            result.failed_source_chapter_keys.length > 0
+              ? `Updated ${result.count} chapters; ${result.failed_source_chapter_keys.length} failed`
               : `Marked ${targets.length} chapter${targets.length === 1 ? '' : 's'} as ${read ? 'read' : 'unread'}`,
         });
       })
@@ -493,7 +557,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
       status === 'Downloaded'
         ? !downloadedIds.has(c.id)
         : status === 'Bookmarked'
-          ? !isBookmarked(c.id)
+          ? !isBookmarked(c.key)
           : !passesChapterStatusFilter(c.read, status)
     )
       return false;
@@ -510,6 +574,16 @@ export function ChapterList({ manga }: { manga: Manga }) {
     return b.n - a.n;
   };
   const flip = sortDir === 'asc' ? -1 : 1;
+  const showGaps = useSetting(SHOW_CHAPTER_GAPS, true) as boolean;
+  // Grouped by scanlator, neighbouring rows aren't consecutive chapters, so a gap marker
+  // would point at the wrong place.
+  const gaps = useMemo(
+    () =>
+      showGaps && sort !== 'scanlation'
+        ? missingBefore(records.map((r) => r.chapter_number))
+        : new Map<number, number>(),
+    [records, showGaps, sort],
+  );
   const sorted = [...filtered].sort((a, b) => flip * compare(a, b));
   const filterKey = JSON.stringify([q, status, group, sort, sortDir]);
   useChapterFilterScroll(filterKey);
@@ -546,12 +620,12 @@ export function ChapterList({ manga }: { manga: Manga }) {
               sourceId: manga.source,
               mangaSlug: manga.slug,
               mangaTitle: manga.title,
-              chapter: { id: c.id, name: c.title, chapter_number: c.n },
+              chapter: { id: c.key, name: c.title, chapter_number: c.n },
             });
             if (current()) setExcludedDownloadIds((existing) => new Set(existing).add(c.id));
           } else {
             const read = action === 'read';
-            await (read ? markChapterAsRead : markChapterAsUnread)(manga.slug, c.id, {
+            await (read ? markChapterAsRead : markChapterAsUnread)(manga.slug, c.key, {
               source: manga.source,
             });
             if (current())
@@ -783,13 +857,19 @@ export function ChapterList({ manga }: { manga: Manga }) {
                   current.includes(c.id) ? current.filter((id) => id !== c.id) : [...current, c.id],
                 )
               }
-              bookmarked={isBookmarked(c.id)}
-              onBookmark={() => toggleBookmark(c.id)}
+              bookmarked={isBookmarked(c.key)}
+              onBookmark={() => toggleBookmark(c.key)}
               selectionMode={selected.length > 0}
               onDownload={() => void batch('download', c)}
               index={chapterWindow.start + index}
               total={sorted.length}
               onNavigate={chapterWindow.onKeyDown}
+              missing={
+                // Once per whole number: on the first of its releases (or extras) in the list.
+                Math.floor(visibleChapters[index - 1]?.n ?? NaN) !== Math.floor(c.n)
+                  ? (gaps.get(Math.floor(c.n)) ?? 0)
+                  : 0
+              }
             />
           ))}
           {chapterWindow.bottom > 0 && (

@@ -13,6 +13,7 @@ import { applySqlitePragmas } from './configs/prisma.config.js';
 import { migrateWithBackup } from './configs/migrate.js';
 import { resolveDatabaseConfig } from './configs/env.js';
 import { recoverRestoreJobs } from './services/restore.service.js';
+import { startBackupScheduler } from './services/backup.service.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -135,6 +136,7 @@ async function main() {
 
   trackerService.initializeTrackerPolling();
   startExtensionUpdateChecks();
+  startBackupScheduler();
 
   // Overload chosen rather than always passing a host: `listen(port)` binds every
   // interface, and passing an explicit '0.0.0.0' instead would quietly drop IPv6.

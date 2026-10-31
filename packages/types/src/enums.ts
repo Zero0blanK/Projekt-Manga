@@ -36,7 +36,16 @@ export type UpdateLogKind = (typeof UPDATE_LOG_KIND_VALUES)[number];
 export const DEVICE_PLATFORM_VALUES = ['WEB', 'DESKTOP'] as const;
 export type DevicePlatform = (typeof DEVICE_PLATFORM_VALUES)[number];
 
-export const TRACKER_SERVICE_VALUES = ['ANILIST', 'MYANIMELIST'] as const;
+export const TRACKER_SERVICE_VALUES = [
+  'ANILIST',
+  'MYANIMELIST',
+  'KITSU',
+  'MANGAUPDATES',
+  'SHIKIMORI',
+  'BANGUMI',
+  'KOMGA',
+  'KAVITA',
+] as const;
 export type TrackerService = (typeof TRACKER_SERVICE_VALUES)[number];
 
 /** Narrowing helper for the many places that read one of these back out of the database,

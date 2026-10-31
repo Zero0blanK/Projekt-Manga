@@ -2,6 +2,7 @@ import axios from 'axios';
 import crypto from 'crypto';
 import type { Readable } from 'node:stream';
 import cacheRepository from '../repositories/cache.repository.js';
+import mangaOverrideRepository from '../repositories/mangaOverride.repository.js';
 import storage from '../utils/storage.js';
 import { createImageRequestHeaders } from '../utils/userAgent.js';
 import {
@@ -123,8 +124,14 @@ const syncThumbnailUnlocked = async (
 
 const pendingByManga = new Map<string, Promise<void>>();
 
-const pruneOrphanedThumbnails = async (): Promise<number> =>
-  storage.pruneOrphanedThumbnails(await cacheRepository.listPrivateUrls());
+/** Custom covers share the thumbnails folder, so they count as referenced too. */
+const pruneOrphanedThumbnails = async (): Promise<number> => {
+  const [cached, covers] = await Promise.all([
+    cacheRepository.listPrivateUrls(),
+    mangaOverrideRepository.listCoverPaths(),
+  ]);
+  return storage.pruneOrphanedThumbnails(new Set([...cached, ...covers]));
+};
 
 const syncThumbnail = async (
   manga_id: string,

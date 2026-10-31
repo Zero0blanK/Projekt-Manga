@@ -3,10 +3,12 @@
 import { useEffect, useState } from 'react';
 import { ChapterListPanel } from '@/components/reader/chapter-list-panel';
 import { ExitReaderButton } from '@/components/reader/exit-reader-button';
+import { PageImageActions } from '@/components/reader/page-image-actions';
 import { ReaderSettingsMenu } from '@/components/reader/reader-settings-menu';
+import { useReaderInput } from '@/components/reader/use-reader-input';
 import type { Manga } from '@/lib/manga-data';
 import type { MangaChapterRecord } from '@projekt-manga/api-client';
-import { X, Minimize2, List, ZoomIn, ZoomOut } from 'lucide-react';
+import { X, Minimize2, List, ZoomIn, ZoomOut, Bookmark } from 'lucide-react';
 
 export function ReaderHeader({
   manga,
@@ -20,6 +22,10 @@ export function ReaderHeader({
   onZoomIn,
   onZoomOut,
   onZoomReset,
+  page,
+  pageImageUrl,
+  bookmarked,
+  onToggleBookmark,
 }: {
   manga: Manga;
   chapters: MangaChapterRecord[];
@@ -32,8 +38,16 @@ export function ReaderHeader({
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset: () => void;
+  /** The page being read and its image, for saving, copying or sharing it. */
+  page?: number;
+  pageImageUrl?: string;
+  /** Whether this chapter is bookmarked, and how to change that (Settings › Reader ›
+   * Keyboard: B). Omitted where the chapter can't be bookmarked. */
+  bookmarked?: boolean;
+  onToggleBookmark?: () => void;
 }) {
   const [chapterListOpen, setChapterListOpen] = useState(false);
+  useReaderInput({ chapterList: () => setChapterListOpen((v) => !v) });
 
   return (
     <div className="flex h-14 items-center gap-4 border-b border-white/10 bg-black/80 px-4 backdrop-blur-xl">
@@ -64,6 +78,19 @@ export function ReaderHeader({
         >
           <List className="h-4 w-4" />
         </button>
+        {onToggleBookmark && (
+          <button
+            onClick={onToggleBookmark}
+            aria-pressed={!!bookmarked}
+            aria-label={bookmarked ? 'Remove chapter bookmark' : 'Bookmark chapter'}
+            title={bookmarked ? 'Remove chapter bookmark' : 'Bookmark chapter'}
+            className={`grid h-9 w-9 place-items-center rounded-lg transition ${
+              bookmarked ? 'text-primary' : 'text-white/70 hover:bg-white/5 hover:text-white'
+            }`}
+          >
+            <Bookmark className="h-4 w-4" fill={bookmarked ? 'currentColor' : 'none'} />
+          </button>
+        )}
         <div className="flex items-center gap-0.5 rounded-lg border border-white/10 px-0.5">
           <button
             onClick={onZoomOut}
@@ -90,6 +117,14 @@ export function ReaderHeader({
             <ZoomIn className="h-4 w-4" />
           </button>
         </div>
+        {page !== undefined && (
+          <PageImageActions
+            imageUrl={pageImageUrl}
+            mangaTitle={manga.title}
+            chapter={chapter}
+            page={page}
+          />
+        )}
         <ReaderSettingsMenu />
         <ExitReaderButton
           fallbackHref={`/manga/${manga.id}`}

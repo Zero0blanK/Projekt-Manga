@@ -11,7 +11,10 @@ export interface HistoryEntry {
   in_library?: boolean;
   manga_slug: string;
   source_manga_id?: string;
+  /** The stored chapter's own id, for library reader links. */
   chapter_id?: string;
+  /** The source's id for the chapter, for source (preview) reader links. */
+  source_chapter_key?: string;
   pages_read: number;
   time_read: number;
   last_read: string;
@@ -42,6 +45,7 @@ export interface HistoryRecord {
 export interface HistoryByMangaSlugEntry extends HistoryRecord {
   chapter: {
     id: string;
+    source_chapter_key: string;
     chapter_number: number;
     name: string | null;
     is_read: boolean;

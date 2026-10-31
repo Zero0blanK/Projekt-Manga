@@ -5,7 +5,8 @@ import { IconButton } from '@/components/downloads/icon-button';
 import { OpenFolderButton } from '@/components/downloads/open-folder-button';
 import { DownloadCover } from '@/components/downloads/download-cover';
 import { formatRelative } from '@/lib/manga-data';
-import { CheckCircle2, Trash2, Play } from 'lucide-react';
+import { CheckCircle2, FileArchive, Trash2, Play } from 'lucide-react';
+import { exportChapterCbz } from '@/components/downloads/export-cbz';
 import { useMemo } from 'react';
 import { useConfirm } from '@/hooks/use-confirm';
 
@@ -70,6 +71,9 @@ export function CompletedDownloadsList({
                     <Play className="h-3 w-3 fill-current" /> Read
                   </Link>
                   <OpenFolderButton path={r.folderPath} />
+                  <IconButton label="Export as CBZ" onClick={() => void exportChapterCbz(r)}>
+                    <FileArchive className="h-3.5 w-3.5" />
+                  </IconButton>
                   <IconButton label="Delete" onClick={() => removeDownload(r, onChange)}>
                     <Trash2 className="h-3.5 w-3.5" />
                   </IconButton>

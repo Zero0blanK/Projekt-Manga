@@ -67,7 +67,7 @@ export function DownloadFolderField() {
         loading
           ? 'Loading…'
           : loadError
-            ? "Couldn't load the configured folder. Retry before changing it."
+            ? "Couldn't load the folder; retry before changing it"
             : `Chapters are saved to ${saved || 'the default folder'}`
       }
     >

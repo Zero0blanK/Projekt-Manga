@@ -389,10 +389,12 @@ try {
       .prepare('SELECT id, in_library FROM mangas WHERE source = ? AND slug = ?')
       .get('restore-restart-smoke', browserRestore.titleSlug);
     const chapter = db
-      .prepare('SELECT id, manga_id FROM chapters WHERE id = ?')
-      .get(browserRestore.chapterId);
+      .prepare(
+        'SELECT source_chapter_key, manga_id FROM chapters WHERE source = ? AND manga_slug = ? AND source_chapter_key = ?',
+      )
+      .get('restore-restart-smoke', browserRestore.titleSlug, browserRestore.chapterId);
     assert.ok(manga && typeof manga.id === 'string' && manga.in_library === 1);
-    assert.ok(chapter && chapter.id === browserRestore.chapterId && chapter.manga_id === manga.id);
+    assert.ok(chapter && chapter.manga_id === manga.id);
   } finally {
     db.close();
   }
@@ -460,12 +462,12 @@ try {
         .prepare('SELECT id, in_library FROM mangas WHERE source = ? AND slug = ?')
         .get('restore-restart-smoke', electronRestore.titleSlug);
       const chapter = verifiedDb
-        .prepare('SELECT id, manga_id FROM chapters WHERE id = ?')
-        .get(electronRestore.chapterId);
+        .prepare(
+          'SELECT source_chapter_key, manga_id FROM chapters WHERE source = ? AND manga_slug = ? AND source_chapter_key = ?',
+        )
+        .get('restore-restart-smoke', electronRestore.titleSlug, electronRestore.chapterId);
       assert.ok(manga && typeof manga.id === 'string' && manga.in_library === 1);
-      assert.ok(
-        chapter && chapter.id === electronRestore.chapterId && chapter.manga_id === manga.id,
-      );
+      assert.ok(chapter && chapter.manga_id === manga.id);
     } finally {
       verifiedDb.close();
     }

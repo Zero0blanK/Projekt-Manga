@@ -41,6 +41,9 @@ router.get('/chapter/:chapterId/pages', downloadController.getDownloadedChapterP
 // GET /api/downloads/chapter/:chapterId/page/:index - Stream one downloaded page image
 router.get('/chapter/:chapterId/page/:index', downloadController.getDownloadedPageFile);
 
+// GET /api/downloads/chapter/:chapterId/cbz - The downloaded chapter as a CBZ file
+router.get('/chapter/:chapterId/cbz', downloadController.getDownloadedChapterCbz);
+
 // GET /api/downloads/directory - Get active download directory
 router.get('/directory', requireAdmin, downloadController.getDownloadDirectory);
 

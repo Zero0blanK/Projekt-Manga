@@ -5,10 +5,17 @@ import Link from 'next/link';
 import { localArchiveBridge, type LocalArchive } from '@/lib/local-archives';
 import { useCurrentUser } from '@/lib/session-resource';
 import { useProfilePreference } from '@/lib/profile-preferences';
-import { useReaderSettings } from '@/lib/reader-settings';
+import { ReaderColorFilterContext, useReaderSettings } from '@/lib/reader-settings';
 import { PagedViewer } from '@/components/reader/paged-viewer';
 import { ReaderProgressBar } from '@/components/reader/reader-progress-bar';
 import type { Manga } from '@/lib/manga-data';
+import { PageImageActions } from '@/components/reader/page-image-actions';
+import { ReaderTintOverlay } from '@/components/reader/reader-tint';
+import { ReaderShortcuts } from '@/components/reader/reader-shortcuts';
+import { ReaderContextMenu } from '@/components/reader/reader-context-menu';
+import { useReaderInput } from '@/components/reader/use-reader-input';
+import { useReaderZoom } from '@/lib/reader-zoom';
+import { isAppIncognito } from '@/lib/incognito';
 
 function parseLocalPage(value: unknown): number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 2000
@@ -35,7 +42,12 @@ export default function LocalReaderPage({ params }: { params: Promise<{ id: stri
     zoomBehavior,
     background,
     brightness,
+    colorFilter,
+    tint,
+    tintStrength,
   } = useReaderSettings();
+  const { zoom, setZoom, zoomIn, zoomOut, zoomReset } = useReaderZoom();
+  useReaderInput({ zoomIn, zoomOut, zoomReset });
   useEffect(() => {
     setPage(savedPage);
   }, [savedPage, id, user?.id]);
@@ -163,68 +175,82 @@ export default function LocalReaderPage({ params }: { params: Promise<{ id: stri
   };
   const seek = (next: number) => setPage(Math.min(archive.pageCount, Math.max(1, next)));
   return (
-    <div className="fixed inset-0 z-50 flex flex-col" style={{ background }}>
-      <header className="flex flex-wrap items-center gap-4 border-b border-white/10 bg-black p-3 text-sm text-white">
-        <Link href="/local" className="underline">
-          Local collection
-        </Link>
-        <span className="min-w-0 flex-1 truncate">{archive.title}</span>
-        <span>
-          {page} / {archive.pageCount}
-        </span>
-        {pageLayout === 'Long strip' && (
-          <span className="text-xs">Local comics use paged reading.</span>
-        )}
-      </header>
-      {brightness < 100 && (
-        <div
-          aria-hidden
-          className="pointer-events-none fixed inset-0 z-20 bg-black"
-          style={{ opacity: (100 - brightness) / 100 }}
-        />
-      )}
-      {error && (
-        <p role="alert" className="bg-black p-3 text-center text-sm text-white">
-          {error}
-          <button
-            type="button"
-            className="ml-2 underline"
-            onClick={() => {
-              setError('');
-              setRetry((value) => value + 1);
-            }}
-          >
-            Retry page
-          </button>
-        </p>
-      )}
-      <PagedViewer
-        key={`${id}:${user?.id ?? 'anonymous'}`}
-        manga={manga}
-        totalPages={archive.pageCount}
-        pageUrls={urls}
-        pagesPerView={pageLayout === 'Single page' ? 1 : 2}
-        page={Math.min(page, archive.pageCount)}
-        onPositionChange={(next) => {
-          seek(next);
-          savePage(next);
-        }}
-        onVisiblePage={seek}
-        hasNextChapter={false}
-        nextChapterNumber={0}
-        onRequestNextChapter={() => undefined}
-        hasPrevChapter={false}
-        prevChapterNumber={0}
-        onRequestPrevChapter={() => undefined}
-        readingDirection={readingDirection}
-        fitOverride={zoomBehavior}
-        completionActions={
-          <Link href="/local" className="rounded border border-white/30 p-3">
-            Return to local collection
+    <ReaderColorFilterContext.Provider value={colorFilter}>
+      <div className="fixed inset-0 z-50 flex flex-col" style={{ background }}>
+        <header className="flex flex-wrap items-center gap-4 border-b border-white/10 bg-black p-3 text-sm text-white">
+          <Link href="/local" className="underline">
+            Local collection
           </Link>
-        }
-      />
-      <ReaderProgressBar page={page} totalPages={archive.pageCount} onSeek={seek} />
-    </div>
+          <span className="min-w-0 flex-1 truncate">{archive.title}</span>
+          <span>
+            {page} / {archive.pageCount}
+          </span>
+          <PageImageActions
+            imageUrl={urls[page - 1] || undefined}
+            mangaTitle={archive.title}
+            page={page}
+          />
+          {pageLayout === 'Long strip' && (
+            <span className="text-xs">Local comics use paged reading.</span>
+          )}
+        </header>
+        {brightness < 100 && (
+          <div
+            aria-hidden
+            className="pointer-events-none fixed inset-0 z-20 bg-black"
+            style={{ opacity: (100 - brightness) / 100 }}
+          />
+        )}
+        <ReaderTintOverlay tint={tint} strength={tintStrength} />
+        <ReaderShortcuts />
+        {error && (
+          <p role="alert" className="bg-black p-3 text-center text-sm text-white">
+            {error}
+            <button
+              type="button"
+              className="ml-2 underline"
+              onClick={() => {
+                setError('');
+                setRetry((value) => value + 1);
+              }}
+            >
+              Retry page
+            </button>
+          </p>
+        )}
+        <ReaderContextMenu pageUrls={urls} page={page} mangaTitle={manga.title}>
+          <PagedViewer
+            key={`${id}:${user?.id ?? 'anonymous'}`}
+            manga={manga}
+            totalPages={archive.pageCount}
+            pageUrls={urls}
+            pagesPerView={pageLayout === 'Single page' ? 1 : 2}
+            page={Math.min(page, archive.pageCount)}
+            onPositionChange={(next) => {
+              seek(next);
+              // Incognito: the page is shown but its position isn't remembered.
+              if (!isAppIncognito()) savePage(next);
+            }}
+            onVisiblePage={seek}
+            hasNextChapter={false}
+            nextChapterNumber={0}
+            onRequestNextChapter={() => undefined}
+            hasPrevChapter={false}
+            prevChapterNumber={0}
+            onRequestPrevChapter={() => undefined}
+            readingDirection={readingDirection}
+            fitOverride={zoomBehavior}
+            zoom={zoom}
+            onZoomChange={setZoom}
+            completionActions={
+              <Link href="/local" className="rounded border border-white/30 p-3">
+                Return to local collection
+              </Link>
+            }
+          />
+        </ReaderContextMenu>
+        <ReaderProgressBar page={page} totalPages={archive.pageCount} onSeek={seek} />
+      </div>
+    </ReaderColorFilterContext.Provider>
   );
 }

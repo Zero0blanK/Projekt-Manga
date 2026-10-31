@@ -31,6 +31,8 @@ export type SectionId = (typeof sections)[number]['id'];
 
 /** Valid URL hashes for deep-linking a settings panel — see app/settings/client.tsx. */
 export const SECTION_IDS = sections.map((s) => s.id);
+/** Ids and names, for places that list the sections (the command palette). */
+export const SETTINGS_SECTIONS = sections.map(({ id, label }) => ({ id, label }));
 
 /**
  * A sidebar on desktop, a horizontal strip on phones.

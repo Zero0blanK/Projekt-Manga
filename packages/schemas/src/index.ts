@@ -14,3 +14,7 @@ export * from './sync.js';
 export * from './extensionRepository.js';
 export * from './tracker.js';
 export * from './restore.js';
+export * from './backup.js';
+export * from './sourceNetwork.js';
+export * from './notificationChannel.js';
+export * from './translate.js';

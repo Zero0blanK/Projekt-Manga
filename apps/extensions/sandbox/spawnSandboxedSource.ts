@@ -6,6 +6,7 @@
  * `--allow-net`.
  */
 import { fork, type ChildProcess } from 'node:child_process';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
@@ -29,9 +30,13 @@ import type {
   FetchProxyRequest,
   SandboxedMethod,
   SerializedSourceError,
+  UrlKeysRequest,
+  UrlKeysResult,
 } from './types.js';
 import { SourceError } from '../sourceError.js';
 import { waitForMangaDexDispatch } from './mangadexPacing.js';
+import { isCloudflareChallenge, type SandboxBrowserSession } from './cookieJar.js';
+import { resolveWithDoh, type ResolvedAddress } from './doh.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Always the compiled output: fork needs a real .js entry point, so apps/extensions must be
@@ -118,8 +123,34 @@ export interface SandboxedSourceOptions {
   validateOutboundUrl?: (url: URL) => Promise<boolean> | boolean;
   /** Replaces the global `fetch` for proxied requests, so the caller can pin the connection
    * to a validated address (the URL check alone leaves a DNS-rebinding window). */
-  fetchImpl?: (url: URL, init: RequestInit) => Promise<Response>;
+  fetchImpl?: (url: URL, init: RequestInit, pin?: PinnedAddress) => Promise<Response>;
+  /** Cookies and User-Agent from a real browser session (see cookieJar.ts), added to
+   * requests here in the parent so the child never sees them. Without one, requests go
+   * out with only the headers the source set. Either way `Set-Cookie` never reaches the
+   * child. */
+  browserSession?: SandboxBrowserSession;
+  /** Custom User-Agent and DNS over HTTPS; see `SandboxNetworkSettings`. */
+  networkSettings?: () => SandboxNetworkSettings | null | undefined;
 }
+
+/**
+ * Operator-level network settings for proxied requests, read on every request so a change
+ * takes effect without respawning the source. Neither changes which hosts are allowed.
+ */
+export interface SandboxNetworkSettings {
+  /** Replaces the User-Agent a source sets. A browser session's own User-Agent still wins
+   * for its hosts, because its clearance cookie is tied to it. */
+  userAgent?: string | null;
+  /** A DNS over HTTPS resolver (JSON API) used instead of system DNS. Every address it
+   * returns goes through `validateOutboundUrl` as an IP literal, and the connection is
+   * pinned to one of them through `fetchImpl`'s third argument; without both options set,
+   * requests are refused rather than resolved some other way. */
+  dohUrl?: string | null;
+}
+
+/** The address a hop must connect to, already validated. Passed to `fetchImpl`, which
+ * must connect there (and may check it again) instead of resolving the hostname itself. */
+export type PinnedAddress = ResolvedAddress;
 
 interface PendingCall {
   resolve: (value: unknown) => void;
@@ -128,6 +159,59 @@ interface PendingCall {
 
 function isHostAllowed(hostname: string, allowedHosts: readonly string[]): boolean {
   return allowedHosts.some((allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`));
+}
+
+/** A User-Agent safe to send: printable ASCII only, so it can never inject a header. */
+const SAFE_USER_AGENT = /^[\x20-\x7e]{1,512}$/;
+
+/** `URL.hostname` keeps the brackets around an IPv6 literal. */
+function isIpLiteral(hostname: string): boolean {
+  const bare =
+    hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+  return net.isIP(bare) !== 0;
+}
+
+/** Response headers the child never receives: cookies belong to the parent's jar. */
+const STRIPPED_RESPONSE_HEADERS = new Set(['set-cookie', 'set-cookie2']);
+
+/** How much of a response body is inspected for a challenge page's markers. */
+const CHALLENGE_SNIFF_BYTES = 16 * 1024;
+
+/**
+ * The request headers for one hop: the source's own, the operator's User-Agent if one is
+ * set, plus the browser session's cookie and User-Agent for an allowlisted host. The session's User-Agent replaces the source's,
+ * because Cloudflare ties its clearance cookie to the browser that earned it.
+ */
+async function buildHopHeaders(
+  url: URL,
+  sourceHeaders: Record<string, string>,
+  allowedHosts: readonly string[],
+  session: SandboxBrowserSession | undefined,
+  customUserAgent?: string | null,
+): Promise<Headers> {
+  const headers = new Headers(sourceHeaders);
+  if (customUserAgent && SAFE_USER_AGENT.test(customUserAgent)) {
+    headers.set('user-agent', customUserAgent);
+  }
+  if (!session || !isHostAllowed(url.hostname, allowedHosts)) {
+    return headers;
+  }
+  const extra = await session.headersFor(url);
+  if (extra?.cookie) {
+    const own = headers.get('cookie');
+    headers.set('cookie', own ? `${own}; ${extra.cookie}` : extra.cookie);
+  }
+  if (extra?.userAgent) {
+    headers.set('user-agent', extra.userAgent);
+  }
+  return headers;
+}
+
+function setCookiesOf(response: Response): string[] {
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] };
+  if (typeof headers.getSetCookie === 'function') return headers.getSetCookie();
+  const single = response.headers.get('set-cookie');
+  return single ? [single] : [];
 }
 
 /**
@@ -169,17 +253,32 @@ function assertNodeSupportsNetworkPermission(): void {
   }
 }
 
+/** A source running in its sandbox. `keyFromUrl` is synchronous in the contract, so across
+ * the process boundary it is offered batched as `keysFromUrls` instead. */
+export type SandboxedSource = Source & {
+  dispose(): void;
+  keysFromUrls(request: UrlKeysRequest): Promise<UrlKeysResult>;
+};
+
 /** One sandboxed child process per installed source, started lazily and reused across
  * calls. Call `dispose()` when the source is uninstalled or the app is shutting down. */
 export function spawnSandboxedSource(
   metadata: SandboxedSourceMetadata,
   options: SandboxedSourceOptions,
-): Source & { dispose(): void } {
+): SandboxedSource {
   let child: ChildProcess | null = null;
   let nextRequestId = 0;
   const pending = new Map<number, PendingCall>();
   /** Proxied fetches still in flight, so `killChild` can cancel them. */
   const inflightFetches = new Map<number, AbortController>();
+  /** Calls whose own fetches came back as a Cloudflare challenge, with the page's URL. A
+   * call that then fails is reported as CHALLENGE_REQUIRED, whatever the source made of
+   * the page; another call failing at the same time keeps its own error. */
+  const challengedCalls = new Map<number, string>();
+  /** A challenge on a fetch that named no call (an older runner): any call that fails
+   * after it is reclassified, as before. */
+  let lastUnattributedChallengeAt = 0;
+  let lastUnattributedChallengeUrl: string | undefined;
 
   /**
    * Sends a message to the child, tolerating a channel that has already closed.
@@ -242,9 +341,42 @@ export function spawnSandboxedSource(
     }
   }
 
-  async function validateOutboundHop(url: URL): Promise<void> {
+  /**
+   * Checks one hop and returns the address to pin it to when DNS over HTTPS is on.
+   *
+   * The allowlist is always checked on the hostname first. With DoH, every address the
+   * resolver returns then goes through `validateOutboundUrl` as an IP literal, the same
+   * public-address check a literal URL gets, and one bad address refuses the hop, as it
+   * does for system DNS.
+   */
+  async function validateOutboundHop(
+    url: URL,
+    dohUrl: string | null | undefined,
+    signal: AbortSignal,
+  ): Promise<PinnedAddress | undefined> {
     if (!isHostAllowed(url.hostname, options.allowedNetHosts)) {
       throw new Error(`Host "${url.hostname}" is not in this source's allowlist`);
+    }
+    if (dohUrl && !isIpLiteral(url.hostname)) {
+      const { validateOutboundUrl, fetchImpl } = options;
+      if (!validateOutboundUrl || !fetchImpl) {
+        throw new Error('DNS over HTTPS needs outbound URL validation and a pinning fetch');
+      }
+      const addresses = await resolveWithDoh(
+        url.hostname,
+        dohUrl,
+        fetchImpl,
+        readBodyWithCap,
+        signal,
+      );
+      for (const { address, family } of addresses) {
+        const literal = new URL(url);
+        literal.hostname = family === 6 ? `[${address}]` : address;
+        if (!(await validateOutboundUrl(literal))) {
+          throw new Error(`Blocked by outbound URL validation: ${url.href}`);
+        }
+      }
+      return addresses[0];
     }
     if (options.validateOutboundUrl) {
       const allowed = await options.validateOutboundUrl(url);
@@ -252,6 +384,7 @@ export function spawnSandboxedSource(
         throw new Error(`Blocked by outbound URL validation: ${url.href}`);
       }
     }
+    return undefined;
   }
 
   const MAX_REDIRECTS = 5;
@@ -267,21 +400,38 @@ export function spawnSandboxedSource(
       let method = request.method;
       let body = request.body ?? undefined;
       let response: Response;
+      // Read once per request so every hop of it uses the same settings.
+      const network = options.networkSettings?.() ?? {};
 
       // Redirects are followed manually: `redirect: "follow"` would let an allowlisted host
       // redirect to a private or internal address (e.g. a cloud metadata endpoint),
       // bypassing the allowlist and SSRF guard. Every hop is re-validated like the original URL.
       for (let hops = 0; ; hops++) {
-        await validateOutboundHop(url);
+        const pin = await validateOutboundHop(url, network.dohUrl, controller.signal);
         await waitForMangaDexDispatch(url, method, controller.signal);
         controller.signal.throwIfAborted();
-        response = await (options.fetchImpl ?? fetch)(url, {
+        const headers = await buildHopHeaders(
+          url,
+          request.headers,
+          options.allowedNetHosts,
+          options.browserSession,
+          network.userAgent,
+        );
+        const init: RequestInit = {
           method,
-          headers: request.headers,
+          headers,
           body,
           redirect: 'manual',
           signal: controller.signal,
-        });
+        };
+        response = await (pin
+          ? options.fetchImpl!(url, init, pin)
+          : (options.fetchImpl ?? fetch)(url, init));
+
+        const setCookies = setCookiesOf(response);
+        if (setCookies.length > 0 && options.browserSession) {
+          await options.browserSession.receiveSetCookies(url, setCookies);
+        }
 
         const isRedirect = response.status >= 300 && response.status < 400;
         const location = response.headers.get('location');
@@ -307,8 +457,24 @@ export function spawnSandboxedSource(
       }
 
       const bodyBuffer = await readBodyWithCap(response, MAX_PROXIED_RESPONSE_BYTES);
+      if (
+        isCloudflareChallenge(
+          response.status,
+          response.headers,
+          bodyBuffer.subarray(0, CHALLENGE_SNIFF_BYTES).toString('latin1'),
+        )
+      ) {
+        const page = `${url.origin}${url.pathname}`;
+        if (request.callId !== undefined && pending.has(request.callId)) {
+          challengedCalls.set(request.callId, page);
+        } else if (request.callId === undefined) {
+          lastUnattributedChallengeAt = Date.now();
+          lastUnattributedChallengeUrl = page;
+        }
+      }
       const headers: Record<string, string> = {};
       response.headers.forEach((value, key) => {
+        if (STRIPPED_RESPONSE_HEADERS.has(key.toLowerCase())) return;
         headers[key] = value;
       });
 
@@ -412,14 +578,45 @@ export function spawnSandboxedSource(
     return proc;
   }
 
+  /**
+   * Reclassifies a failed call that ran into a Cloudflare challenge. The source may have
+   * reported it as BLOCKED, a parse error, or an unclassified throw; what the user needs
+   * is to pass the challenge in a browser, so the code says so.
+   */
+  function withChallenge(error: Error, id: number, startedAt: number): Error {
+    const challengedUrl =
+      challengedCalls.get(id) ??
+      (lastUnattributedChallengeAt >= startedAt ? lastUnattributedChallengeUrl : undefined);
+    challengedCalls.delete(id);
+    if (!challengedUrl) {
+      return error;
+    }
+    if (error instanceof SourceError && error.code === 'TIMEOUT') {
+      return error;
+    }
+    return new SourceError(
+      'CHALLENGE_REQUIRED',
+      `${metadata.name} is asking for a browser check (Cloudflare). Open the source in a browser to pass it, then try again.`,
+      metadata.id,
+      {
+        statusCode: error instanceof SourceError ? error.statusCode : undefined,
+        reason: 'Cloudflare challenge',
+        detail: error.message,
+        url: challengedUrl,
+      },
+    );
+  }
+
   function call(method: SandboxedMethod, args: unknown[]): Promise<unknown> {
     const proc = ensureChild();
     const id = nextRequestId++;
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const startedAt = Date.now();
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
+        challengedCalls.delete(id);
         // Kill the child rather than abandon the call: a wedged process would otherwise be
         // reused by every later call. The next call spawns a clean one.
         killChild(`timed out after ${timeoutMs}ms`);
@@ -441,11 +638,12 @@ export function spawnSandboxedSource(
       pending.set(id, {
         resolve: (value) => {
           clearTimeout(timer);
+          challengedCalls.delete(id);
           resolve(value);
         },
         reject: (error) => {
           clearTimeout(timer);
-          reject(error);
+          reject(withChallenge(error, id, startedAt));
         },
       });
 
@@ -505,6 +703,9 @@ export function spawnSandboxedSource(
 
     fetchMangaUpdates: (manga_slug: string) =>
       call('fetchMangaUpdates', [manga_slug]) as Promise<Chapters[]>,
+
+    keysFromUrls: (request: UrlKeysRequest) =>
+      call('keysFromUrls', [request]) as Promise<UrlKeysResult>,
 
     dispose() {
       rejectAllPending(`Sandboxed source "${metadata.id}" was disposed`);

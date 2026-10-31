@@ -1,10 +1,15 @@
 /**
- * The app's single BrowserWindow: how it's created, hardened, and kept pointed at the
- * running web app.
+ * The app's windows: the main one (created, hardened, and kept pointed at the running
+ * web app) and the extra ones a link opens with Ctrl+click or middle-click.
  */
 import path from 'node:path';
 import { app, BrowserWindow, net, session, shell } from 'electron';
 import { resolveApiUrl, resolveWebUrl } from '../shared/config';
+import { fileURLToPath } from 'node:url';
+import { savedMainWindowBounds, trackMainWindowState } from './window-state';
+import { queueComicOpen } from './local-archives';
+import { isAppLocked, whenUnlocked } from './app-lock';
+import { getDesktopPreferences, setDesktopPreferences } from './desktop-preferences';
 
 const PRELOAD_PATH = path.join(__dirname, '..', 'preload', 'index.js');
 
@@ -88,6 +93,14 @@ async function isServing(url: string): Promise<boolean> {
   }
 }
 
+function isOnOrigin(win: BrowserWindow, webUrl: string): boolean {
+  try {
+    return new URL(win.webContents.getURL()).origin === new URL(webUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Points the window at the web app, waiting while it's still starting up rather than
  * showing Chromium's bare connection-refused page. Once it loads successfully this has
@@ -119,6 +132,10 @@ async function loadWebApp(win: BrowserWindow, managed: boolean): Promise<void> {
         await win.loadURL(webUrl);
         return;
       } catch {
+        // A navigation started before this load finished (a link clicked during startup)
+        // rejects it with ERR_ABORTED. The window is on the app already, so going back to
+        // the waiting page would throw the reader out of wherever they just went.
+        if (superseded() || isOnOrigin(win, webUrl)) return;
         // It went away between the probe and the load; put the waiting page back.
         await showStatus(false);
       }
@@ -157,6 +174,18 @@ function hardenNavigation(win: BrowserWindow, webUrl: string, retryLoad: () => v
       retryLoad();
       return;
     }
+    // A file or folder dropped on the window: Chromium would open it as a page. It is
+    // queued as a comic to import instead, by the main process from the path itself; the
+    // page only ever asks for "the next one" (local-archives.ts).
+    if (targetUrl.startsWith('file:')) {
+      event.preventDefault();
+      try {
+        queueComicOpen(fileURLToPath(targetUrl));
+      } catch {
+        /* not a local path */
+      }
+      return;
+    }
     if (!isAllowed(targetUrl)) {
       event.preventDefault();
       openExternalIfSafe(targetUrl);
@@ -180,10 +209,100 @@ function hardenNavigation(win: BrowserWindow, webUrl: string, retryLoad: () => v
     }
   });
 
+  // A link into the app itself (Ctrl+click, middle-click, target=_blank) opens another app
+  // window, the desktop version of a new tab; anything else goes to the OS browser. Denied
+  // either way, so Electron never creates a window with options the page chose.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    openExternalIfSafe(url);
+    if (isAllowed(url)) openContentWindow(url);
+    else openExternalIfSafe(url);
     return { action: 'deny' };
   });
+}
+
+/** Extra windows a page can have open at once, so a runaway loop of opens can't bury the
+ * desktop in windows. */
+const MAX_CONTENT_WINDOWS = 8;
+const contentWindows = new Set<BrowserWindow>();
+/** What the main window was created with, so extra windows get the same preload input. */
+let windowArguments: string[] | undefined;
+
+const MIN_SIZE = { width: 1024, height: 680 };
+
+function appWindowOptions(): Electron.BrowserWindowConstructorOptions {
+  return {
+    width: 1280,
+    height: 860,
+    minWidth: MIN_SIZE.width,
+    minHeight: MIN_SIZE.height,
+    title: 'Projekt Manga',
+    backgroundColor: '#16130f',
+    icon: DEV_ICON_PATH,
+    // The page has its own navigation; the menu (app-menu.ts) is there for its
+    // accelerators and stays out of sight until Alt is pressed.
+    autoHideMenuBar: true,
+    show: false,
+    webPreferences: {
+      preload: PRELOAD_PATH,
+      additionalArguments: windowArguments,
+      // The three settings that actually matter for security: no direct Node access in
+      // the page, the preload's isolated world stays isolated, and the renderer runs in
+      // Chromium's own sandbox. None of this app's Electron-only behaviour needs any of
+      // them relaxed — everything privileged goes through the preload bridge instead.
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  };
+}
+
+/** DevTools on demand, and a reload after a renderer crash, for every app window. */
+function attachWindowHandlers(win: BrowserWindow, reload: () => void): void {
+  // DevTools in the packaged build, on demand.
+  //
+  // The renderer's own console is the only place a UI-side failure is visible here: the
+  // supervisor's log buffer (log-buffer.ts) captures the two server children's stdout, not
+  // the page's, and it lives in memory, so a user hitting a bug in an installed build has
+  // nothing to send. Bound to a key rather than opened automatically, and it grants the
+  // page nothing — contextIsolation, nodeIntegration and sandbox above are untouched.
+  win.webContents.on('before-input-event', (_event, input) => {
+    if (input.type !== 'keyDown') return;
+    const isF12 = input.key === 'F12';
+    const isInspectChord = input.control && input.shift && input.key.toLowerCase() === 'i';
+    if (isF12 || isInspectChord) {
+      win.webContents.toggleDevTools();
+    }
+  });
+
+  // A renderer crash (OOM, GPU crash, etc.) would otherwise leave the window frozen on its
+  // last frame.
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[window] Renderer process gone (${details.reason}), reloading`, details);
+    if (!win.isDestroyed()) reload();
+  });
+}
+
+/** Another window on an app page, offset from the one it was opened from. Only ever
+ * called with a URL `hardenNavigation` has checked is on the web app's origin. */
+function openContentWindow(url: string): void {
+  if (contentWindows.size >= MAX_CONTENT_WINDOWS) {
+    console.warn('[window] Too many windows open; ignoring another');
+    return;
+  }
+  const opener = BrowserWindow.getFocusedWindow();
+  const options = appWindowOptions();
+  if (opener && !opener.isDestroyed()) {
+    const [x, y] = opener.getPosition();
+    Object.assign(options, { x: x + 32, y: y + 32 });
+  }
+  const win = new BrowserWindow(options);
+  win.setContentProtection(getDesktopPreferences().hideFromCapture);
+  contentWindows.add(win);
+  win.on('closed', () => contentWindows.delete(win));
+  win.once('ready-to-show', () => win.show());
+  const load = () => void win.loadURL(url).catch(() => undefined);
+  hardenNavigation(win, resolveWebUrl(), load);
+  attachWindowHandlers(win, load);
+  load();
 }
 
 /** Schemes it is safe to hand to the OS. Everything else is refused — see below. */
@@ -330,6 +449,14 @@ function applyPermissionPolicy(webUrl: string): void {
   );
 }
 
+/** Settings › Privacy › Hide from screen capture, applied to every open window now. */
+export function setHideFromCapture(value: boolean): boolean {
+  setDesktopPreferences({ hideFromCapture: value });
+  for (const win of BrowserWindow.getAllWindows())
+    if (!win.isDestroyed()) win.setContentProtection(value);
+  return value;
+}
+
 export interface MainWindowOptions {
   /** API base URL to hand the renderer's api-client, when it should not use its
    * build-time default. `/api` in the installer's single-origin mode; omitted in the dev
@@ -347,66 +474,31 @@ export function createMainWindow(options: MainWindowOptions = {}): BrowserWindow
   // The preload is sandboxed and cannot import shared/config or read this from anywhere
   // else — `additionalArguments` is Electron's documented channel into it. See
   // preload/index.ts's resolveApiBaseUrlArg.
-  const additionalArguments = options.apiBaseUrl
-    ? [`--pm-api-base-url=${options.apiBaseUrl}`]
-    : undefined;
+  windowArguments = options.apiBaseUrl ? [`--pm-api-base-url=${options.apiBaseUrl}`] : undefined;
 
   // A base URL is only handed down when this process started the servers itself, so its
   // presence is what distinguishes the installer from the dev setup for the loading screen.
   const managed = options.apiBaseUrl !== undefined;
 
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 1024,
-    minHeight: 680,
-    title: 'Projekt Manga',
-    backgroundColor: '#16130f',
-    icon: DEV_ICON_PATH,
-    show: false,
-    webPreferences: {
-      preload: PRELOAD_PATH,
-      additionalArguments,
-      // The three settings that actually matter for security: no direct Node access in
-      // the page, the preload's isolated world stays isolated, and the renderer runs in
-      // Chromium's own sandbox. None of this app's Electron-only behaviour needs any of
-      // them relaxed — everything privileged goes through the preload bridge instead.
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
+  // Reopens where it was last left, as long as that is still on a connected screen.
+  const saved = savedMainWindowBounds(MIN_SIZE);
+  const win = new BrowserWindow({ ...appWindowOptions(), ...saved?.bounds });
+  win.setContentProtection(getDesktopPreferences().hideFromCapture);
+  trackMainWindowState(win);
 
-  if (!options.startHidden) win.once('ready-to-show', () => win.show());
+  if (!options.startHidden)
+    win.once('ready-to-show', () => {
+      if (saved?.maximized) win.maximize();
+      // Shown when it is ready, unless the app lock went on in the meantime (it then
+      // brings the window back on unlock).
+      if (!isAppLocked()) win.show();
+    });
   hardenNavigation(win, webUrl, () => void loadWebApp(win, managed));
+  attachWindowHandlers(win, () => void loadWebApp(win, managed));
 
-  // DevTools in the packaged build, on demand.
-  //
-  // The renderer's own console is the only place a UI-side failure is visible here: the
-  // supervisor's log buffer (log-buffer.ts) captures the two server children's stdout, not
-  // the page's, and it lives in memory, so a user hitting a bug in an installed build has
-  // nothing to send. Bound to a key rather than opened automatically, and it grants the
-  // page nothing — contextIsolation, nodeIntegration and sandbox above are untouched.
-  win.webContents.on('before-input-event', (_event, input) => {
-    if (input.type !== 'keyDown') return;
-    const isF12 = input.key === 'F12';
-    const isInspectChord = input.control && input.shift && input.key.toLowerCase() === 'i';
-    if (isF12 || isInspectChord) {
-      win.webContents.toggleDevTools();
-    }
-  });
-
-  // A renderer crash (OOM, GPU crash, etc.) would otherwise leave the window frozen on its
-  // last frame. Reload through loadWebApp(), the same path a fresh launch takes, including
-  // its retry for "the target isn't up yet".
-  win.webContents.on('render-process-gone', (_event, details) => {
-    console.error(`[window] Renderer process gone (${details.reason}), reloading`, details);
-    if (!win.isDestroyed()) {
-      void loadWebApp(win, managed);
-    }
-  });
-
-  void loadWebApp(win, managed);
+  // Behind an app lock the page isn't even loaded until the PIN is in: nothing of the
+  // library renders, and nothing asks the main process for data.
+  whenUnlocked(() => void loadWebApp(win, managed));
 
   return win;
 }

@@ -57,6 +57,28 @@ export const DESKTOP_CHANNELS = {
   updateDismiss: 'desktop:update:dismiss',
   startupBackgroundGet: 'desktop:startup-background:get',
   startupBackgroundSet: 'desktop:startup-background:set',
+  /** Opens a source's website in its own isolated window so the user can pass a Cloudflare
+   * check or log in; the cookies go to the local server on close. See main/source-browser.ts. */
+  sourceOpenBrowser: 'desktop:source:open-browser',
+  /** Keeps the calling window above others (the reader's "keep on top"). */
+  windowGetAlwaysOnTop: 'desktop:window:get-always-on-top',
+  windowSetAlwaysOnTop: 'desktop:window:set-always-on-top',
+  /** Taskbar / dock progress for long work such as a library update: 0–1, or null. */
+  windowSetProgress: 'desktop:window:set-progress',
+  /** The number of titles with new chapters on the taskbar button / dock icon, or 0. */
+  windowSetBadge: 'desktop:window:set-badge',
+  /** Settings › Desktop › Close to tray (main/startup-background.ts). */
+  closeToTrayGet: 'desktop:close-to-tray:get',
+  closeToTraySet: 'desktop:close-to-tray:set',
+  /** Settings › Privacy › App lock (main/app-lock.ts). The unlock itself is its own
+   * channel, answered only for the lock window. */
+  lockGetState: 'desktop:lock:get-state',
+  lockSet: 'desktop:lock:set',
+  lockClear: 'desktop:lock:clear',
+  lockNow: 'desktop:lock:now',
+  /** Settings › Privacy › Hide from screen capture. */
+  captureGet: 'desktop:capture:get',
+  captureSet: 'desktop:capture:set',
 } as const;
 
 /**

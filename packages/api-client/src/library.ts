@@ -30,3 +30,16 @@ export const updateLibraryState = (mangaId: string, patch: UpdateLibraryStatePay
     method: 'PATCH',
     body: patch,
   });
+
+/** When a library title's next chapter is expected, from its recent release cadence. */
+export interface ReleaseEstimate {
+  manga_id: string;
+  interval_days: number;
+  next_expected_at: string;
+  last_chapter_at: string;
+}
+
+/** Titles without enough release history are absent. Server-only: the desktop's local
+ * database has no estimates, so callers treat a failure as "no estimates". */
+export const getReleaseEstimates = (signal?: AbortSignal) =>
+  request<ReleaseEstimate[]>('/library/release-estimates', { signal });

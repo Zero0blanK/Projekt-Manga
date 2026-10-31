@@ -308,21 +308,13 @@ class DownloadService {
         throw new MangaNotFoundError('Manga not found');
       }
 
-      let chapter = await chapterRepository.getChapterRowById(data.chapterId);
-
-      if (!chapter) {
-        chapter = await chapterRepository.createChapterForDownload({
-          id: data.chapterId,
-          manga_id: manga.id,
-          url: `${manga.source}/${data.mangaSlug}/chapter/${data.chapterId}`, // Safe placeholder URL
-          name: data.chapterTitle,
-          chapter_number: data.chapterNumber,
-        });
-      } else if (!chapter.manga_id) {
-        // Chapter exists only as a history/read-status placeholder (not yet linked to a
-        // manga) — link it now so `download.manga_id`, a required column, has a value.
-        chapter = await chapterRepository.linkChapterToManga(chapter.id, manga.id);
-      }
+      // `chapterId` is the source's key, as in every chapter a client sends. The title's
+      // manga row exists (checked above), so a new or placeholder row gets linked to it,
+      // which `download.manga_id` requires.
+      const chapter = await chapterRepository.resolveChapter(
+        { source: manga.source, manga_slug: manga.slug, source_chapter_key: data.chapterId },
+        { name: data.chapterTitle, chapter_number: data.chapterNumber },
+      );
 
       const manga_id = chapter.manga_id ?? manga.id;
       const file_path = this.generateFilePath(
@@ -334,7 +326,7 @@ class DownloadService {
 
       const download = await downloadRepository.createDownload({
         manga_id,
-        chapter_id: data.chapterId,
+        chapter_id: chapter.id,
         source_id: data.sourceId,
         file_path,
         request_id: currentRequestId() ?? null,
@@ -699,6 +691,7 @@ class DownloadService {
             id: d.id,
             manga_id: d.manga_id,
             chapter_id: d.chapter_id,
+            source_chapter_key: d.chapter.source_chapter_key,
             source_id: d.source_id,
             mangaSlug: d.manga.slug,
             status: downloadWorker.isPaused(d.id) ? 'PAUSED' : d.status,
@@ -829,6 +822,34 @@ class DownloadService {
       return fs.realpathSync(absolute);
     } catch (error) {
       rethrowKnownOrWrap(error, new PrismaError('Failed to read downloaded page'));
+    }
+  }
+
+  /**
+   * A completed download as CBZ entries, in reading order, plus a file name for it. Built
+   * from the same validated page list the reader streams from, so the export can't reach
+   * a file the reader couldn't.
+   */
+  async getDownloadedChapterArchive(
+    chapterId: string,
+  ): Promise<{ fileName: string; entries: Array<{ name: string; path: string }> }> {
+    try {
+      const { downloadPath, files } = await this.listDownloadedPageFiles(chapterId);
+      if (files.length === 0) throw new NotFoundError('Downloaded chapter has no pages');
+      const download = await downloadRepository.getDownloadByChapterId(chapterId);
+      const width = Math.max(3, String(files.length).length);
+      const entries = files.map((filename, index) => ({
+        name: `page_${String(index + 1).padStart(width, '0')}${path.extname(filename)}`,
+        path: fs.realpathSync(path.resolve(downloadPath, filename)),
+      }));
+      const title = download?.manga?.title ?? 'Chapter';
+      const number = download?.chapter?.chapter_number;
+      return {
+        fileName: `${title}${number === undefined || number === null ? '' : ` - ch${number}`}.cbz`,
+        entries,
+      };
+    } catch (error) {
+      rethrowKnownOrWrap(error, new PrismaError('Failed to read downloaded chapter'));
     }
   }
 

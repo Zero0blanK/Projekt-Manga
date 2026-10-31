@@ -1,18 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import {
+  describeZoneAction as describe,
+  ZoneLayoutPreview,
+} from '@/components/reader/zone-layout-preview';
 
 const SEEN_KEY = 'projekt-manga:tap-zones-hint-seen';
-
-/** What a tap zone does, in the reader's own direction. */
-function describe(action: string, rtl: boolean): string {
-  if (action === 'Forward') return 'Next page';
-  if (action === 'Back') return 'Previous page';
-  if (action === 'Direction') return rtl ? 'Next page' : 'Previous page';
-  if (action === 'Opposite') return rtl ? 'Previous page' : 'Next page';
-  if (action === 'Controls') return 'Show controls';
-  return 'Nothing';
-}
 
 /**
  * Shown once per browser on the first paged chapter: the three tap zones and what each
@@ -22,9 +16,12 @@ function describe(action: string, rtl: boolean): string {
 export function TapZonesHint({
   tapActions,
   rtl,
+  layout = 'Thirds',
 }: {
   tapActions: { left: string; center: string; right: string };
   rtl: boolean;
+  /** Settings › Reader › Click zones. Off has no zones to explain. */
+  layout?: string;
 }) {
   const [show, setShow] = useState(false);
   useEffect(() => {
@@ -53,7 +50,28 @@ export function TapZonesHint({
       window.removeEventListener('keydown', dismiss);
     };
   }, [show]);
-  if (!show) return null;
+  if (!show || layout === 'Off') return null;
+  if (layout !== 'Thirds')
+    return (
+      <div
+        role="note"
+        aria-label="Reader click zones"
+        className="pointer-events-none absolute inset-0 z-40 grid place-items-center bg-black/55 text-white"
+      >
+        <ZoneLayoutPreview
+          layout={layout}
+          className="w-48"
+          labels={{
+            left: describe(tapActions.left, rtl),
+            center: describe(tapActions.center, rtl),
+            right: describe(tapActions.right, rtl),
+          }}
+        />
+        <p className="absolute inset-x-0 bottom-8 text-center text-xs text-white/70">
+          Click anywhere to start reading · change zones in Settings → Reader
+        </p>
+      </div>
+    );
   const zones = [tapActions.left, tapActions.center, tapActions.right];
   return (
     <div

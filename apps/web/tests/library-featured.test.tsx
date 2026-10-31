@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Manga } from '@/lib/manga-data';
 
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('@/components/downloads/row-data', () => ({ useDownloadRows: () => ({ completed: [] }) }));
 vi.mock('@/lib/session-resource', () => ({
   useCurrentUser: () => ({ user: null, loading: false }),
@@ -39,12 +40,15 @@ const library: Manga[] = ['older', 'recent'].map((id) => ({
   inLibrary: true,
 }));
 
-vi.mock('@projekt-manga/api-client', () => ({ getHistory }));
+vi.mock('@projekt-manga/api-client', () => ({ getHistory, getAllMangaLinks: async () => [] }));
 vi.mock('@/lib/library-store', () => ({
   useMangaLibrary: () => ({ manga: library, loading: false }),
   useLibraryState: () => ({ shelf: { older: 'reading', recent: 'reading' }, bookmarks: [] }),
 }));
 vi.mock('@/lib/app-store', () => ({
+  // No reading goal set.
+  useNumberSetting: () => 0,
+  useSetting: (_key: string, fallback: unknown) => fallback,
   useAppState: (selector: (state: object) => unknown) =>
     selector({
       sort: 'title',

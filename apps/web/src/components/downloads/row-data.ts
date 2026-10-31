@@ -15,6 +15,8 @@ export type DownloadRowStatus = 'queued' | 'downloading' | 'paused' | 'done' | '
 export type DownloadRow = {
   id: string;
   mangaId: string;
+  /** The chapter row this download belongs to (for the CBZ export). */
+  chapterId: string;
   sourceId?: string;
   title: string;
   /** Real cover art, resolved from the library by manga id. Null when the title is no
@@ -46,6 +48,7 @@ function toRow(d: DownloadSummary): DownloadRow {
   return {
     id: d.id,
     mangaId: d.manga_id,
+    chapterId: d.chapter_id,
     sourceId: d.source_id,
     title: d.mangaTitle,
     thumbnailUrl: null,
@@ -199,6 +202,17 @@ function useRawRows() {
 export function useDownloadQueueCount(): number {
   const { data } = useRawRows();
   return data.filter((r) => r.status !== 'done' && r.status !== 'failed').length;
+}
+
+/**
+ * How far the download queue has got, 0–1, across chapters still queued or downloading
+ * (each counts the same), or null when nothing is. For the taskbar button.
+ */
+export function useDownloadQueueProgress(): number | null {
+  const { data } = useRawRows();
+  const working = data.filter((r) => r.status === 'queued' || r.status === 'downloading');
+  if (working.length === 0) return null;
+  return working.reduce((sum, r) => sum + r.progress, 0) / working.length;
 }
 
 export function useDownloadRows() {

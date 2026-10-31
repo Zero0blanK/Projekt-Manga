@@ -2,8 +2,9 @@ import { z } from 'zod';
 
 /** Partial chapter metadata sent when a chapter may not exist in the DB yet — matches
  * apps/server's `Partial<Chapters> & { source?: string }`. All optional: only what's
- * present gets used to create the placeholder row (chapter.service.ts's
- * ensureChapterExists supplies its own defaults for anything missing). */
+ * present gets used to create the placeholder row (chapterRepository.resolveChapter
+ * supplies its own defaults for anything missing). As in every chapter payload a client
+ * sends, `id` is the source's own id for the chapter, not a stored row id. */
 export const chapterMetaSchema = z
   .object({
     id: z.string().optional(),
@@ -37,11 +38,12 @@ export const chaptersBulkBodySchema = z.object({
 });
 export type ChaptersBulkBody = z.infer<typeof chaptersBulkBodySchema>;
 
-/** Unlike chapterMetaSchema, this goes straight to chapterRepository.addChapterAsHistory
- * with no intermediate defaulting step, and several of its columns are non-null in the
- * database — so this schema supplies the defaults itself. */
+/** A chapter read before any stored list had it. `id` is the source's own id for the
+ * chapter, which only names it within its title — hence `source` + `manga_slug`. */
 export const addChapterAsHistoryBodySchema = z.object({
-  id: z.string().min(1, 'id is required'),
+  id: z.string().min(1, 'id is required').max(512),
+  source: z.string().min(1).max(255),
+  manga_slug: z.string().min(1).max(512),
   name: z.string().default(''),
   url: z.string().default(''),
   chapter_number: z.number().default(0),

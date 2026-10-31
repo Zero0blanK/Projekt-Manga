@@ -1,6 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MangaPage } from '@/components/reader/manga-page';
 import type { Manga } from '@/lib/manga-data';
+import { READING_LINE, pageAtLine } from '@/lib/long-strip-position';
+import { useScrollBehavior } from '@/lib/scroll';
+import { useReaderInput } from '@/components/reader/use-reader-input';
 
 type ChapterPages = { status: 'loading' | 'loaded' | 'error'; urls: string[] };
 
@@ -26,6 +29,7 @@ export function LongStripViewer({
   startChapter,
   startPage,
   getNextChapter,
+  getChapterLabel = (chapter) => `Chapter ${chapter}`,
   getChapterTitle,
   getChapterPageCount,
   fetchPages,
@@ -53,6 +57,9 @@ export function LongStripViewer({
    * integers (10.3, 11.1, 11.2 …), so the next one can't be derived by adding 1. */
   getNextChapter: (chapter: number) => number | null;
   getChapterTitle: (chapter: number) => string;
+  /** The heading above a segment ("Chapter 12", or with its group when the strip runs
+   * through each group's release). `chapter` is whatever numbers the segments. */
+  getChapterLabel?: (chapter: number) => string;
   /** Known page count, for sizing the skeleton list before pages arrive (0 when the
    * source doesn't report one). */
   getChapterPageCount: (chapter: number) => number;
@@ -151,6 +158,8 @@ export function LongStripViewer({
   // "page 1" while the pages are still loading, and the parent would overwrite the very
   // page we were asked to resume at — losing the jump before it could run.
   const pendingInitialJump = useRef(startPage > 1);
+  /** Re-reads the position on the next frame; set by the position effect below. */
+  const scheduleReport = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     const target = `${startChapter}:${startPage}`;
@@ -172,6 +181,8 @@ export function LongStripViewer({
     // the pre-scroll position would immediately undo the jump.
     requestAnimationFrame(() => {
       pendingInitialJump.current = false;
+      // Nothing scrolls after a jump that was already in view, so read the position now.
+      scheduleReport.current();
     });
   }, [startChapter, startPage, pagesByChapter]);
 
@@ -213,30 +224,41 @@ export function LongStripViewer({
   const onPositionChangeRef = useRef(onPositionChange);
   onPositionChangeRef.current = onPositionChange;
 
-  // Track which chapter+page is actually in view to drive progress and the URL.
+  // Track which chapter+page is under the reading line to drive the counter, progress and
+  // the URL. Re-read on every scroll frame and whenever pages load (loading changes page
+  // heights without any scrolling), reporting only when the answer changes.
+  const lastReported = useRef<string | null>(null);
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const mostVisible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (!mostVisible) return;
-        // Don't report position until the opening jump has run — see pendingInitialJump.
-        if (pendingInitialJump.current) return;
-        const key = (mostVisible.target as HTMLElement).dataset.key;
-        if (!key) return;
-        const [chapterStr, pageStr] = key.split(':');
-        const visibleChapter = Number(chapterStr);
-        onPositionChangeRef.current(
-          visibleChapter,
-          Number(pageStr),
-          pagesByChapter[visibleChapter]?.urls.length ?? 0,
-        );
-      },
-      { threshold: [0.5] },
-    );
-    pageEls.current.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
+    const el = scrollRef.current;
+    if (!el) return;
+    let frame = 0;
+    const report = () => {
+      frame = 0;
+      // Don't report position until the opening jump has run — see pendingInitialJump.
+      if (pendingInitialJump.current) return;
+      const box = el.getBoundingClientRect();
+      const key = pageAtLine(pageEls.current, box.top + el.clientHeight * READING_LINE);
+      if (!key) return;
+      const [chapterStr, pageStr] = key.split(':');
+      const visibleChapter = Number(chapterStr);
+      const total = pagesByChapter[visibleChapter]?.urls.length ?? 0;
+      const signature = `${key}:${total}`;
+      if (signature === lastReported.current) return;
+      lastReported.current = signature;
+      onPositionChangeRef.current(visibleChapter, Number(pageStr), total);
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(report);
+    };
+    scheduleReport.current = schedule;
+    schedule();
+    el.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      el.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [loadedChapters, pagesByChapter]);
 
   // Report direction changes for the chrome auto-hide.
@@ -323,6 +345,26 @@ export function LongStripViewer({
     return () => cancelAnimationFrame(frame);
   }, [autoScrollPixelsPerSecond]);
 
+  // Page keys move a screenful (less a little, so the line just read stays in view),
+  // which is also what Space does natively; rebinding them keeps that meaning.
+  const scrollBehavior = useScrollBehavior();
+  const scrollByScreen = (direction: 1 | -1) => {
+    const el = scrollRef.current;
+    if (!el) return false;
+    el.scrollBy({ top: direction * el.clientHeight * 0.9, behavior: scrollBehavior });
+  };
+  useReaderInput({
+    nextPage: () => scrollByScreen(1),
+    prevPage: () => scrollByScreen(-1),
+    firstPage: () => {
+      scrollRef.current?.scrollTo({ top: 0, behavior: scrollBehavior });
+    },
+    lastPage: () => {
+      const el = scrollRef.current;
+      el?.scrollTo({ top: el.scrollHeight, behavior: scrollBehavior });
+    },
+  });
+
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto">
       <div className="mx-auto flex flex-col" style={{ maxWidth: `${36 * zoom}rem` }}>
@@ -336,7 +378,9 @@ export function LongStripViewer({
           return (
             <div key={chapterNum}>
               <div className="py-3 text-center text-[11px] uppercase tracking-[0.2em] text-white/60">
-                Chapter {chapterNum} · {getChapterTitle(chapterNum)}
+                {[getChapterLabel(chapterNum), getChapterTitle(chapterNum)]
+                  .filter(Boolean)
+                  .join(' · ')}
               </div>
               {entry?.status === 'error' && pages.length === 0 ? (
                 <div className="px-6 py-12 text-center text-sm text-white/50">
@@ -376,6 +420,7 @@ export function LongStripViewer({
                         imageUrl={pages[p - 1]}
                         className="w-full"
                         fit="width"
+                        cropAxis="horizontal"
                         seamless={pageGap === 0}
                         onReady={() => onPageReady?.(chapterNum, p)}
                       />

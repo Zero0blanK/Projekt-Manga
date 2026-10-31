@@ -3,6 +3,8 @@ import { HTTPSuccessResponse } from '../utils/responseHandlers.js';
 import mangaService from '../services/manga.service.js';
 import trackerService from '../services/tracker.service.js';
 import migrationService from '../services/migration.service.js';
+import mangaOverrideService from '../services/mangaOverride.service.js';
+import mangaLinkRepository from '../repositories/mangaLink.repository.js';
 import type { TrackerService } from '@projekt-manga/types';
 import type {
   GetMangaQuery,
@@ -10,6 +12,10 @@ import type {
   UpdateLibraryMembershipBody,
   LinkTrackerBody,
   MigrateMangaBody,
+  UpdateMangaOverrideBody,
+  UploadMangaCoverBody,
+  CreateMangaLinkBody,
+  ReorderMangaLinksBody,
 } from '@projekt-manga/schemas';
 
 const getManga = async (req: Request, res: Response, next: NextFunction) => {
@@ -187,7 +193,137 @@ const migrateManga = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
+/** Local edits are per identity like the rest of the overlay: an account edits its own
+ * row, anonymous use the shared one. */
+// Linked sources: other sources' copies of a title, tried when it lacks a chapter or is
+// down. Per identity like overrides, so anonymous use links its own library.
+const getLinks = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { manga_id } = req.params as { manga_id: string };
+    const group = await mangaLinkRepository.groupFor(manga_id, req.user?.id ?? null);
+    return HTTPSuccessResponse(res, 200, 'Linked sources', group);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const getAllLinks = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const groups = await mangaLinkRepository.listAll(req.user?.id ?? null);
+    return HTTPSuccessResponse(res, 200, 'Linked sources', groups);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const createLink = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { manga_id } = req.params as { manga_id: string };
+    const { linked_manga_id } = req.validated as CreateMangaLinkBody;
+    const user_id = req.user?.id ?? null;
+    await mangaLinkRepository.create(manga_id, linked_manga_id, user_id);
+    return HTTPSuccessResponse(
+      res,
+      201,
+      'Source linked',
+      await mangaLinkRepository.groupFor(manga_id, user_id),
+    );
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const reorderLinks = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { manga_id } = req.params as { manga_id: string };
+    const { link_ids } = req.validated as ReorderMangaLinksBody;
+    const user_id = req.user?.id ?? null;
+    await mangaLinkRepository.reorder(manga_id, link_ids, user_id);
+    return HTTPSuccessResponse(
+      res,
+      200,
+      'Order saved',
+      await mangaLinkRepository.groupFor(manga_id, user_id),
+    );
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const removeLink = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { manga_id, link_id } = req.params as { manga_id: string; link_id: string };
+    const user_id = req.user?.id ?? null;
+    await mangaLinkRepository.remove(manga_id, link_id, user_id);
+    return HTTPSuccessResponse(
+      res,
+      200,
+      'Source unlinked',
+      await mangaLinkRepository.groupFor(manga_id, user_id),
+    );
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const updateOverride = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { manga_id } = req.params as { manga_id: string };
+    const override = await mangaOverrideService.updateOverride(
+      manga_id,
+      req.validated as UpdateMangaOverrideBody,
+      req.user?.id,
+    );
+    return HTTPSuccessResponse(res, 200, 'Manga edits saved', override);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const resetOverride = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { manga_id } = req.params as { manga_id: string };
+    await mangaOverrideService.resetOverride(manga_id, req.user?.id);
+    return HTTPSuccessResponse(res, 200, 'Manga reset to source', null);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const uploadCover = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { manga_id } = req.params as { manga_id: string };
+    const override = await mangaOverrideService.uploadCover(
+      manga_id,
+      req.validated as UploadMangaCoverBody,
+      req.user?.id,
+    );
+    return HTTPSuccessResponse(res, 200, 'Cover saved', override);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const removeCover = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { manga_id } = req.params as { manga_id: string };
+    const override = await mangaOverrideService.removeCover(manga_id, req.user?.id);
+    return HTTPSuccessResponse(res, 200, 'Cover reset to source', override);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const mangaController = {
+  getLinks,
+  getAllLinks,
+  createLink,
+  reorderLinks,
+  removeLink,
+  updateOverride,
+  resetOverride,
+  uploadCover,
+  removeCover,
   migrateManga,
   getManga,
   getMangaById,

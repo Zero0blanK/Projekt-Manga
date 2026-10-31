@@ -14,8 +14,40 @@ export interface Manga {
   thumbnail_url: string;
   /** Present on server responses when a private cover has been cached. */
   cache?: { sha256_url: string } | null;
+  /** This reader's own edits, already applied to the fields above; null when there are
+   * none. Absent on responses that do not merge edits (desktop's local database). */
+  override?: MangaOverride | null;
   created_at: string;
   updated_at: string;
+}
+
+/** A reader's local edit to a title. A null field shows the source's value. */
+export interface MangaOverride {
+  title: string | null;
+  author: string | null;
+  description: string | null;
+  status: string | null;
+  /** A custom cover replaces the source's at /cache/thumbnail/:id. */
+  has_cover: boolean;
+  updated_at: string;
+  /** The catalog values underneath the edits. */
+  original: {
+    title: string;
+    author: string;
+    description: string | null;
+    status: string | null;
+  };
+}
+
+/** What the edit endpoints return: the stored edit, or null once nothing is left of it. */
+export type MangaOverrideRecord = Omit<MangaOverride, 'original'> & { manga_id: string };
+
+/** Omit a field to leave it; null clears it back to the source's value. */
+export interface UpdateMangaOverridePayload {
+  title?: string | null;
+  author?: string | null;
+  description?: string | null;
+  status?: string | null;
 }
 
 export interface MangaDetailSummary {
@@ -37,8 +69,14 @@ export interface MangaListItem extends Manga {
   manga_detail?: MangaDetailSummary | null;
 }
 
+/** A stored chapter. `id` is the app's own id for it: reads (progress, downloaded pages,
+ * reader links) use it. Writes and anything sent to a source use `source_chapter_key`, the
+ * source's own id for the chapter, which only names it within `source` + `manga_slug`. */
 export interface MangaChapterRecord {
   id: string;
+  source: string;
+  manga_slug: string;
+  source_chapter_key: string;
   manga_id: string | null;
   url: string;
   name: string | null;
@@ -228,4 +266,83 @@ export const getMangaByCategoryId = (
   request<MangaListItem[]>(`/manga/category/${encodeURIComponent(categoryId)}`, {
     query: { sortBy: options.sortBy, sortOrder: options.sortOrder },
     signal,
+  });
+
+/** Saves edits to a title for this reader only; the shared catalog is untouched. */
+export const updateMangaOverride = (mangaId: string, payload: UpdateMangaOverridePayload) =>
+  request<MangaOverrideRecord | null>(`/manga/${encodeURIComponent(mangaId)}/override`, {
+    method: 'PATCH',
+    body: payload,
+  });
+
+/** "Reset to source": drops every edit to the title, the custom cover included. */
+export const resetMangaOverride = (mangaId: string) =>
+  request<null>(`/manga/${encodeURIComponent(mangaId)}/override`, { method: 'DELETE' });
+
+const toBase64 = async (file: Blob) => {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  // Chunked: spreading a multi-megabyte array into one call overflows the stack.
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+};
+
+/** Uploads a custom cover (JPEG, PNG, GIF, WebP or AVIF, at most 5 MB). It is sent as
+ * base64 in JSON, the only body type the server accepts for a write. */
+export const uploadMangaCover = async (mangaId: string, file: Blob) =>
+  request<MangaOverrideRecord | null>(`/manga/${encodeURIComponent(mangaId)}/override/cover`, {
+    method: 'POST',
+    body: { mime: file.type, data: await toBase64(file) },
+    timeoutMs: 120_000,
+  });
+
+/** Goes back to the source's cover, keeping any other edits. */
+export const removeMangaCover = (mangaId: string) =>
+  request<MangaOverrideRecord | null>(`/manga/${encodeURIComponent(mangaId)}/override/cover`, {
+    method: 'DELETE',
+  });
+
+/** Another source's copy of a title, as linked sources list it. */
+export interface LinkedTitle {
+  id: string;
+  title: string;
+  author: string;
+  slug: string;
+  source: string;
+  thumbnail_url: string;
+}
+
+/** A title's group of sources: the library entry (`primary_id`) and the linked titles, in
+ * the order they are tried. Asking with a linked title gives the same group. */
+export interface MangaLinkGroup {
+  primary_id: string;
+  links: Array<{ id: string; priority: number; linked: LinkedTitle }>;
+}
+
+const linksPath = (mangaId: string) => `/manga/${encodeURIComponent(mangaId)}/links`;
+
+export const getMangaLinks = (mangaId: string, signal?: AbortSignal) =>
+  request<MangaLinkGroup>(linksPath(mangaId), { signal });
+
+/** Every group of this identity, for library updates (linked titles are checked too). */
+export const getAllMangaLinks = (signal?: AbortSignal) =>
+  request<Array<{ primary_id: string; linked: LinkedTitle[] }>>('/manga/links/all', { signal });
+
+export const linkMangaSource = (mangaId: string, linkedMangaId: string) =>
+  request<MangaLinkGroup>(linksPath(mangaId), {
+    method: 'POST',
+    body: { linked_manga_id: linkedMangaId },
+  });
+
+export const reorderMangaLinks = (mangaId: string, linkIds: string[]) =>
+  request<MangaLinkGroup>(`${linksPath(mangaId)}/order`, {
+    method: 'PUT',
+    body: { link_ids: linkIds },
+  });
+
+export const unlinkMangaSource = (mangaId: string, linkId: string) =>
+  request<MangaLinkGroup>(`${linksPath(mangaId)}/${encodeURIComponent(linkId)}`, {
+    method: 'DELETE',
   });

@@ -9,12 +9,15 @@ import type {
 
 const markChapterAsRead = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { manga_slug, chapter_id } = req.params as { manga_slug: string; chapter_id: string };
+    const { manga_slug, source_chapter_key } = req.params as {
+      manga_slug: string;
+      source_chapter_key: string;
+    };
     const chapter_meta = req.validated as ChapterMetaBody;
 
     const chapter = await chapterService.markChapterAsRead(
       manga_slug,
-      chapter_id,
+      source_chapter_key,
       chapter_meta,
       req.user?.id,
     );
@@ -26,12 +29,15 @@ const markChapterAsRead = async (req: Request, res: Response, next: NextFunction
 
 const markChapterAsUnread = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { manga_slug, chapter_id } = req.params as { manga_slug: string; chapter_id: string };
+    const { manga_slug, source_chapter_key } = req.params as {
+      manga_slug: string;
+      source_chapter_key: string;
+    };
     const chapter_meta = req.validated as ChapterMetaBody;
 
     const chapter = await chapterService.markChapterAsUnread(
       manga_slug,
-      chapter_id,
+      source_chapter_key,
       chapter_meta,
       req.user?.id,
     );
@@ -43,9 +49,9 @@ const markChapterAsUnread = async (req: Request, res: Response, next: NextFuncti
 
 const markChapterByLastPage = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { manga_slug, chapter_id, last_page_read } = req.params as {
+    const { manga_slug, source_chapter_key, last_page_read } = req.params as {
       manga_slug: string;
-      chapter_id: string;
+      source_chapter_key: string;
       last_page_read: string;
     };
 
@@ -57,7 +63,7 @@ const markChapterByLastPage = async (req: Request, res: Response, next: NextFunc
 
     const chapter = await chapterService.markChapterByLastPage(
       manga_slug,
-      chapter_id,
+      source_chapter_key,
       lastPageRead,
       chapter_meta,
       req.user?.id,

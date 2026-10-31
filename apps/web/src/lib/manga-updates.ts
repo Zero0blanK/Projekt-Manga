@@ -98,14 +98,17 @@ export async function checkMangaUpdates(
       return found;
     }
     const found = result.newChapters ?? 0;
+    // A chapter relinked to a new source URL, renamed or dropped changes the list without
+    // being "new", so it re-reads too.
+    const changed = result.changedChapters ?? 0;
     set(manga.id, {
       checking: false,
       checkedAt: Date.now(),
       found,
       error: false,
-      // Only bump when something actually arrived; a no-op check shouldn't cost the
+      // Only bump when something actually changed; a no-op check shouldn't cost the
       // chapter list a re-read.
-      version: get(manga.id).version + (found > 0 ? 1 : 0),
+      version: get(manga.id).version + (found > 0 || changed > 0 ? 1 : 0),
     });
     if (found > 0) invalidateRecentChapters();
     return found;

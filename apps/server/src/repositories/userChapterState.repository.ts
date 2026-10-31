@@ -64,8 +64,10 @@ const markManyRead = async (user_id: string, chapter_ids: string[]): Promise<voi
   });
 };
 
+/** Each row names its chapter by source key, the way devices push it: their own rows for
+ * the same chapter have their own ids. */
 const getChangedSince = async (user_id: string, since: Date, limit?: number, afterId?: string) => {
-  return await prisma.user_chapter_state.findMany({
+  const rows = await prisma.user_chapter_state.findMany({
     where: {
       user_id,
       ...(afterId
@@ -74,7 +76,9 @@ const getChangedSince = async (user_id: string, since: Date, limit?: number, aft
     },
     orderBy: [{ updated_at: 'asc' }, { id: 'asc' }],
     ...(limit !== undefined ? { take: limit } : {}),
+    include: { chapter: { select: { source: true, manga_slug: true, source_chapter_key: true } } },
   });
+  return rows.map(({ chapter, ...row }) => ({ ...row, ...chapter }));
 };
 
 /** The one merge path with no "discard the stale side" branch: is_read/last_page_read

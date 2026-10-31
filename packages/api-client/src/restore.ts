@@ -14,8 +14,6 @@ export type RestorePreview = {
   importedTitles: number;
   catalogRowsUpdated: number;
   catalogUpdateExamples: string[];
-  chapterIdentityConflicts: number;
-  chapterIdentityConflictExamples: string[];
   retainedHistory: number;
   addedHistory: number;
 };

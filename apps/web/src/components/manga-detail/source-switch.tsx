@@ -8,17 +8,14 @@ import {
   getMangaDetailsById,
   getSourceMangaDetails,
   searchSourceMangaPage,
-  markChapterAsRead,
-  setMangaInLibrary,
-  getAllDownloads,
-  cancelDownload,
   type PublicUser,
 } from '@projekt-manga/api-client';
 import type { MangaDetails, Mangas } from '@projekt-manga/types';
 import type { Manga } from '@/lib/manga-data';
-import { useLibraryState, useMangaLibrary, useSources, libraryActions } from '@/lib/library-store';
+import { useLibraryState, useMangaLibrary, useSources } from '@/lib/library-store';
 import { addSourceMangaToLibrary } from '@/lib/discover-actions';
-import { actions, getAppState } from '@/lib/app-store';
+import { linkMangaSource } from '@projekt-manga/api-client';
+import { toast } from '@/hooks/use-toast';
 import { useCurrentUser } from '@/lib/session-resource';
 import { queryClient, queryKeys } from '@/lib/query-client';
 import { useInstalledExtensions } from '@/lib/extensions-store';
@@ -30,7 +27,7 @@ import {
   takeMigrationSearch,
   migrationReadTargets,
 } from '@/lib/migration-state';
-import { refreshDownloads } from '@/components/downloads/row-data';
+import { migrateTitle, newMigrationCheckpoint } from '@/lib/migrate-title';
 import { setPreviousLocation } from '@/lib/nav-history';
 import {
   MigrationTitleSummary,
@@ -49,15 +46,6 @@ const emptySearch: MigrationSearchStatus = {
   settled: [],
   failed: [],
 };
-const newCheckpoint = () => ({
-  membership: false,
-  shelf: false,
-  bookmark: false,
-  categories: false,
-  downloads: false,
-  removed: false,
-  read: new Set<string>(),
-});
 
 export function SourceSwitch({ manga }: { manga: Manga }) {
   // Styled like the action bar's other icon buttons rather than with the generic shadcn
@@ -112,8 +100,7 @@ export function SourceMigration({ manga }: { manga: Manga }) {
   const [transfer, setTransfer] = useState<MigrationTransferStatus>({ state: 'idle' });
   const request = useRef<AbortController | null>(null);
   const generation = useRef(0);
-  const targetId = useRef<string | null>(null);
-  const checkpoint = useRef(newCheckpoint());
+  const checkpoint = useRef(newMigrationCheckpoint());
   const saving = useRef(false);
   const matchesScroll = useRef(0);
   const stageRoot = useRef<HTMLDivElement>(null);
@@ -130,8 +117,7 @@ export function SourceMigration({ manga }: { manga: Manga }) {
     setOriginalReadCount(0);
     setPreviewStatus('idle');
     setTransfer({ state: 'idle' });
-    targetId.current = null;
-    checkpoint.current = newCheckpoint();
+    checkpoint.current = newMigrationCheckpoint();
   };
   useEffect(
     () => () => {
@@ -367,6 +353,35 @@ export function SourceMigration({ manga }: { manga: Manga }) {
       if (current()) setPreviewStatus('error');
     }
   };
+  // "Link as another source": the match becomes one more source of this title. It is
+  // created outside the library (unless it is already there) and nothing is moved.
+  const [linking, setLinking] = useState(false);
+  const linkInstead = async () => {
+    if (!details || !selected || previewStatus !== 'ready' || linking || !isCurrent()) return;
+    setLinking(true);
+    try {
+      const existing = library.find(
+        (entry) =>
+          entry.source === selected.source &&
+          (entry.slug === details.slug || entry.slug === details.id),
+      );
+      const id =
+        existing?.id ?? (await addSourceMangaToLibrary(selected.source, details, details, false));
+      await linkMangaSource(manga.id, id);
+      toast({ description: `${details.title} is now another source of this title.` });
+      router.push(`/manga/${encodeURIComponent(manga.id)}`);
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        description:
+          error instanceof Error && error.message
+            ? `Couldn't link it: ${error.message}`
+            : "Couldn't link this source.",
+      });
+    } finally {
+      setLinking(false);
+    }
+  };
   const migrate = async () => {
     if (
       !details ||
@@ -381,95 +396,32 @@ export function SourceMigration({ manga }: { manga: Manga }) {
     const version = generation.current;
     const current = () => generation.current === version && isCurrent();
     saving.current = true;
-    setTransfer({ state: 'saving', label: 'Preparing replacement…' });
-    const done = checkpoint.current;
     try {
-      const existing = library.find(
-        (entry) =>
-          entry.source === selected.source &&
-          (entry.slug === details.slug || entry.slug === details.id),
-      );
-      const id =
-        targetId.current ??
-        existing?.id ??
-        (await addSourceMangaToLibrary(selected.source, details, details, false));
-      if (!current()) return;
-      targetId.current = id;
-      if (!done.membership) {
-        await setMangaInLibrary(id, true);
-        if (!current()) return;
-        done.membership = true;
-      }
-      setTransfer({ state: 'saving', label: 'Transferring library settings…' });
-      if (!done.shelf && appliedOptions.shelf && shelf[manga.id]) {
-        await libraryActions.setShelf(id, shelf[manga.id]);
-        if (!current()) return;
-        done.shelf = true;
-      }
-      if (!done.bookmark && appliedOptions.bookmark && bookmarks.includes(manga.id)) {
-        await libraryActions.setBookmark(id, true);
-        if (!current()) return;
-        done.bookmark = true;
-      }
-      const failures: string[] = [];
-      const pending = details.chapters.filter(
-        (chapter) => readTargets.has(chapter.id) && !done.read.has(chapter.id),
-      );
-      for (const [index, replacement] of pending.entries()) {
-        if (!current()) return;
-        setTransfer({
-          state: 'saving',
-          label: `Transferring progress ${index + 1} of ${pending.length}…`,
-        });
-        try {
-          await markChapterAsRead(details.slug || details.id, replacement.id, {
-            ...replacement,
-            source: selected.source,
-          });
-          if (!current()) return;
-          done.read.add(replacement.id);
-        } catch {
-          if (!current()) return;
-          failures.push(replacement.id);
-        }
-      }
-      if (!current()) return;
-      if (!done.categories && appliedOptions.categories) {
-        for (const [category, members] of Object.entries(getAppState().categoryMembers))
-          if (members.includes(manga.id) && !members.includes(id))
-            actions.toggleCategoryMember(category, id);
-        done.categories = true;
-      }
-      if (failures.length) {
+      const result = await migrateTitle({
+        originalId: manga.id,
+        sourceId: selected.source,
+        details,
+        readTargets,
+        options: appliedOptions,
+        library,
+        shelf,
+        bookmarks,
+        checkpoint: checkpoint.current,
+        current,
+        onProgress: (label) => setTransfer({ state: 'saving', label }),
+      });
+      if (result.state === 'stopped') return;
+      if (result.state === 'partial') {
         setTransfer({
           state: 'partial',
-          failed: failures,
-          message: `${failures.length} chapter transfers failed. The original remains in your library. Retry to finish.`,
+          failed: result.failed,
+          message: `${result.failed.length} chapter transfers failed. The original remains in your library. Retry to finish.`,
         });
         void refresh();
         return;
       }
-      if (!done.downloads) {
-        setTransfer({ state: 'saving', label: 'Removing original downloads…' });
-        const downloads = await getAllDownloads();
-        if (!current()) return;
-        for (const download of downloads.filter((entry) => entry.manga_id === manga.id)) {
-          if (!current()) return;
-          await cancelDownload(download.id);
-          if (!current()) return;
-        }
-        done.downloads = true;
-        refreshDownloads();
-      }
-      if (!current()) return;
-      if (!done.removed) {
-        setTransfer({ state: 'saving', label: 'Removing original from library…' });
-        await setMangaInLibrary(manga.id, false);
-        if (!current()) return;
-        done.removed = true;
-      }
       void refresh();
-      setTransfer({ state: 'success', targetId: id });
+      setTransfer({ state: 'success', targetId: result.targetId });
     } catch {
       if (current())
         setTransfer({
@@ -598,6 +550,8 @@ export function SourceMigration({ manga }: { manga: Manga }) {
           onEdit={edit}
           onRetryPreview={() => void preview(selected, true)}
           onMigrate={() => void migrate()}
+          onLink={() => void linkInstead()}
+          linking={linking}
         />
       )}
     </div>

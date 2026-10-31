@@ -5,6 +5,7 @@ const { searchSourceMangaPage } = vi.hoisted(() => ({ searchSourceMangaPage: vi.
 vi.mock('@projekt-manga/api-client', () => ({ searchSourceMangaPage }));
 vi.mock('@/lib/scroll', () => ({ useScrollBehavior: () => 'auto' }));
 vi.mock('@/lib/library-store', () => ({
+  useMangaLibrary: () => ({ manga: [], loading: false }),
   useSourceFilters: () => ({ filters: [] }),
   useSourceCapabilities: () => ({ capabilities }),
 }));

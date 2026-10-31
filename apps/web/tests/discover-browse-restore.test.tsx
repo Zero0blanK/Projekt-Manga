@@ -35,6 +35,7 @@ vi.mock('@/lib/browse-state', () => ({
   saveBrowseSnapshot,
 }));
 vi.mock('@/lib/library-store', () => ({
+  useMangaLibrary: () => ({ manga: [], loading: false }),
   useSources: () => ({
     sources: [
       { id: 'source-a', name: 'A', lang: 'en', base_url: 'https://a.example', isNSFW: false },

@@ -193,7 +193,7 @@ export function DiscoverPageClient() {
                         {languageSources.length}
                       </span>
                     </h2>
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-3">
                       {languageSources.map((source) => (
                         <InstalledSourceCard
                           key={source.id}

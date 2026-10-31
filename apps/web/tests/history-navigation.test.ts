@@ -4,7 +4,10 @@ import { historyResumeHref, historyTitleHref } from '@/lib/history-navigation';
 const sourceRead = {
   source: 'source-a',
   manga_slug: 'a title/with spaces',
-  chapter_id: 'chapter/12',
+  // A row id of this device's, which the source reader cannot resolve; the source's key
+  // is what it resumes by.
+  chapter_id: 'row-12',
+  source_chapter_key: 'chapter/12',
   chapter_number: 0,
   last_page_read: 7,
 };
@@ -21,7 +24,8 @@ describe('history navigation', () => {
 
   it('keeps a library title on the library reader', () => {
     const read = { ...sourceRead, manga_id: 'manga-1', chapter_number: 12 };
-    expect(historyResumeHref(read)).toBe('/reader/manga-1?ch=12&chapterId=chapter%2F12&page=7');
+    // The library reader is addressed by row id.
+    expect(historyResumeHref(read)).toBe('/reader/manga-1?ch=12&chapterId=row-12&page=7');
     expect(historyTitleHref(read)).toBe('/manga/manga-1');
   });
 
@@ -42,7 +46,12 @@ describe('history navigation', () => {
 
   it('falls back to the source reader when legacy history has no chapter metadata', () => {
     expect(
-      historyResumeHref({ ...sourceRead, chapter_id: undefined, chapter_number: undefined }),
+      historyResumeHref({
+        ...sourceRead,
+        chapter_id: undefined,
+        source_chapter_key: undefined,
+        chapter_number: undefined,
+      }),
     ).toBe('/discover/preview/source-a/a%20title%2Fwith%20spaces/read');
   });
 });

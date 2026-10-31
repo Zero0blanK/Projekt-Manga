@@ -5,6 +5,25 @@ const connection = require('../dist/main/db/connection.js');
 const authCache = require('../dist/main/auth-cache.js');
 const { runMigrations } = require('../dist/main/db/migrate.js');
 
+/** A chapter of source-a/slug-1 as the server sends it: row id plus the source's key. */
+const serverChapter = (id, chapter_number, extra = {}) => ({
+  id,
+  source: 'source-a',
+  manga_slug: 'slug-1',
+  source_chapter_key: id,
+  manga_id: 'manga-1',
+  chapter_number,
+  ...extra,
+});
+
+/** How the renderer names a chapter of source-a/slug-1. */
+const ref = (key, extra = {}) => ({
+  source: 'source-a',
+  manga_slug: 'slug-1',
+  source_chapter_key: key,
+  ...extra,
+});
+
 async function withStore(run) {
   const db = new DatabaseSync(':memory:');
   const originalGetDb = connection.getDb;
@@ -31,13 +50,13 @@ test('desktop progress fills a missing chapter total and marking unread clears t
       title: 'A title',
       source: 'source-a',
     });
-    store.upsertChapter({ id: 'chapter-3', manga_id: 'manga-1', chapter_number: 3 });
+    store.upsertChapter(serverChapter('chapter-3', 3));
 
-    store.updateChapterProgress('chapter-3', 7, { page_count: 10 });
+    store.updateChapterProgress(ref('chapter-3', { page_count: 10 }), 7);
     assert.equal(store.getMangaDetails('manga-1').chapters[0].last_page_read, 7);
     assert.equal(store.getMangaDetails('manga-1').chapters[0].page_count, 10);
 
-    store.markChapterRead('chapter-3', false);
+    store.markChapterRead(ref('chapter-3'), false);
     assert.equal(store.getMangaDetails('manga-1').chapters[0].last_page_read, 0);
   });
 });
@@ -46,14 +65,19 @@ test('syncing an added title links source-only reading history in the desktop ca
   const originalFetch = globalThis.fetch;
   try {
     await withStore(async (store, db) => {
-      db.prepare(`INSERT INTO chapter (id, chapter_number, updated_at) VALUES (?, 0, ?)`).run(
-        'chapter-3',
-        new Date().toISOString(),
-      );
+      // Read from the source before the title was added: a local row under a local id.
+      db.prepare(
+        `INSERT INTO chapter (id, source, manga_slug, source_chapter_key, chapter_number, updated_at)
+         VALUES (?, 'source-a', 'slug-1', 'chapter-3', 0, ?)`,
+      ).run('local-3', new Date().toISOString());
       db.prepare(
         `INSERT INTO history (id, source, manga_slug, chapter_id, read_at, last_read)
          VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run('history-1', 'source-a', 'slug-1', 'chapter-3', '2026-01-01', '2026-01-01');
+      ).run('history-1', 'source-a', 'slug-1', 'local-3', '2026-01-01', '2026-01-01');
+      db.prepare(
+        `INSERT INTO chapter_state (chapter_id, is_read, last_page_read, updated_at)
+         VALUES ('local-3', 0, 4, '2026-01-01')`,
+      ).run();
       globalThis.fetch = async () =>
         new Response(
           JSON.stringify({
@@ -62,7 +86,7 @@ test('syncing an added title links source-only reading history in the desktop ca
               slug: 'slug-1',
               title: 'A title',
               source: 'source-a',
-              chapters: [{ id: 'chapter-3', chapter_number: 3, page_count: 10 }],
+              chapters: [serverChapter('server-row-3', 3, { source_chapter_key: 'chapter-3' })],
             },
           }),
         );
@@ -71,6 +95,15 @@ test('syncing an added title links source-only reading history in the desktop ca
         await store.syncMangaFromServer('http://127.0.0.1:4000/api', 'manga-1', null),
         true,
       );
+      // The local row was the same chapter: it takes the server's id, keeping its
+      // progress and history, instead of sitting beside it as a duplicate.
+      const chapters = store.getMangaDetails('manga-1').chapters;
+      assert.deepEqual(
+        chapters.map((c) => [c.id, c.source_chapter_key, c.last_page_read]),
+        [['server-row-3', 'chapter-3', 4]],
+      );
+      assert.equal(store.listHistory()[0].chapter_id, 'server-row-3');
+      assert.equal(store.listHistory()[0].source_chapter_key, 'chapter-3');
       assert.equal(store.listHistory()[0].manga_id, 'manga-1');
       assert.equal(store.listHistory()[0].in_library, true);
     });
@@ -84,14 +117,14 @@ test('merge reconciliation keeps local progress while replace discards it', asyn
   try {
     await withStore(async (store) => {
       store.upsertManga({ id: 'manga-1', slug: 'slug-1', title: 'Local', source: 'source-a' });
-      store.upsertChapter({ id: 'chapter-1', manga_id: 'manga-1', chapter_number: 1 });
-      store.updateChapterProgress('chapter-1', 8);
+      store.upsertChapter(serverChapter('chapter-1', 1));
+      store.updateChapterProgress(ref('chapter-1'), 8);
       const details = {
         id: 'manga-1',
         slug: 'slug-1',
         title: 'Server',
         source: 'source-a',
-        chapters: [{ id: 'chapter-1', chapter_number: 1, last_page_read: 2 }],
+        chapters: [serverChapter('chapter-1', 1, { last_page_read: 2 })],
       };
       globalThis.fetch = async (url) => {
         const path = new URL(url).pathname;
@@ -127,8 +160,8 @@ test('a stale desktop generation reconciles before it can push offline progress'
         cached_at: new Date().toISOString(),
       });
       store.upsertManga({ id: 'manga-1', slug: 'slug-1', title: 'Old', source: 'source-a' });
-      store.upsertChapter({ id: 'chapter-1', manga_id: 'manga-1', chapter_number: 1 });
-      store.updateChapterProgress('chapter-1', 8);
+      store.upsertChapter(serverChapter('chapter-1', 1));
+      store.updateChapterProgress(ref('chapter-1'), 8);
       store.setSyncGeneration(0);
       let pushed = false;
       globalThis.fetch = async (url, init) => {
@@ -213,8 +246,8 @@ test('an interrupted or partially rejected push is retried without advancing its
         cached_at: new Date().toISOString(),
       });
       store.upsertManga({ id: 'manga-1', slug: 'slug-1', title: 'A title', source: 'source-a' });
-      store.upsertChapter({ id: 'chapter-1', manga_id: 'manga-1', chapter_number: 1 });
-      store.updateChapterProgress('chapter-1', 6);
+      store.upsertChapter(serverChapter('chapter-1', 1));
+      store.updateChapterProgress(ref('chapter-1'), 6);
       store.setSyncGeneration(0);
 
       let failure = 'network';
@@ -282,7 +315,15 @@ test('an interrupted or partially rejected push is retried without advancing its
       assert.equal(pushBodies.length, 3);
       for (const body of pushBodies) {
         assert.equal(body.chapter_state.length, 1);
-        assert.equal(body.chapter_state[0].chapter_id, 'chapter-1');
+        assert.deepEqual(
+          [
+            body.chapter_state[0].source,
+            body.chapter_state[0].manga_slug,
+            body.chapter_state[0].source_chapter_key,
+          ],
+          ['source-a', 'slug-1', 'chapter-1'],
+        );
+        assert.equal(body.chapter_state[0].chapter_id, undefined);
         assert.equal(body.chapter_state[0].last_page_read, 6);
       }
       assert.equal(
@@ -293,4 +334,148 @@ test('an interrupted or partially rejected push is retried without advancing its
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('a chapter the server relinked arrives as a new key on the same row', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    await withStore(async (store, db) => {
+      store.upsertManga({ id: 'manga-1', slug: 'slug-1', title: 'A title', source: 'source-a' });
+      store.upsertChapter(serverChapter('row-5', 5, { source_chapter_key: 'old-5' }));
+      store.upsertChapter(serverChapter('gone-6', 6));
+      store.upsertChapter(serverChapter('kept-7', 7));
+      // Not yet pushed: the server never saw this progress.
+      store.updateChapterProgress(ref('old-5'), 9);
+      store.updateChapterProgress(ref('kept-7'), 2);
+      db.prepare(
+        `INSERT INTO history (id, source, manga_slug, chapter_id, read_at, last_read)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run('history-1', 'source-a', 'slug-1', 'row-5', '2026-01-01', '2026-01-01');
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              id: 'manga-1',
+              slug: 'slug-1',
+              title: 'A title',
+              source: 'source-a',
+              chapters: [serverChapter('row-5', 5, { source_chapter_key: 'new-5' })],
+            },
+          }),
+        );
+
+      assert.equal(
+        await store.syncMangaFromServer('http://127.0.0.1:4000/api', 'manga-1', null),
+        true,
+      );
+      const chapters = store.getMangaDetails('manga-1').chapters;
+      // gone-6 had nothing hanging off it; kept-7 has unpushed progress.
+      assert.deepEqual(chapters.map((c) => c.id).sort(), ['kept-7', 'row-5']);
+      const relinked = chapters.find((c) => c.id === 'row-5');
+      assert.equal(relinked.source_chapter_key, 'new-5');
+      assert.equal(relinked.last_page_read, 9);
+      assert.equal(store.listHistory()[0].chapter_id, 'row-5');
+      assert.equal(store.listHistory()[0].source_chapter_key, 'new-5');
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('folding a local stub into a chapter that has history leaves one live history row', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    await withStore(async (store, db) => {
+      store.upsertManga({ id: 'manga-1', slug: 'slug-1', title: 'A title', source: 'source-a' });
+      store.upsertChapter(serverChapter('row-5', 5, { source_chapter_key: 'old-5' }));
+      // Read here under the source's new key before the relink reached this device.
+      db.prepare(
+        `INSERT INTO chapter (id, source, manga_slug, source_chapter_key, chapter_number, updated_at)
+         VALUES ('stub-5', 'source-a', 'slug-1', 'new-5', 0, ?)`,
+      ).run(new Date().toISOString());
+      const insertHistory = db.prepare(
+        `INSERT INTO history (id, source, manga_slug, chapter_id, read_at, last_read, pages_read, time_read)
+         VALUES (?, 'source-a', 'slug-1', ?, ?, ?, ?, ?)`,
+      );
+      insertHistory.run('history-kept', 'row-5', '2026-01-01', '2026-01-01', 4, 1000);
+      insertHistory.run('history-stub', 'stub-5', '2026-02-01', '2026-02-01', 9, 500);
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              id: 'manga-1',
+              slug: 'slug-1',
+              title: 'A title',
+              source: 'source-a',
+              chapters: [serverChapter('row-5', 5, { source_chapter_key: 'new-5' })],
+            },
+          }),
+        );
+
+      assert.equal(
+        await store.syncMangaFromServer('http://127.0.0.1:4000/api', 'manga-1', null),
+        true,
+      );
+      const live = store.listHistory();
+      assert.deepEqual(
+        live.map((entry) => [entry.id, entry.chapter_id]),
+        [['history-kept', 'row-5']],
+      );
+      const kept = db.prepare(`SELECT * FROM history WHERE id = 'history-kept'`).get();
+      assert.equal(kept.last_read, '2026-02-01');
+      assert.equal(kept.pages_read, 9);
+      assert.equal(kept.time_read, 1500);
+      // The stub's row stays as a tombstone, so the next push removes it everywhere.
+      const tombstone = db.prepare(`SELECT * FROM history WHERE id = 'history-stub'`).get();
+      assert.ok(tombstone.deleted_at);
+      assert.equal(tombstone.chapter_id, 'row-5');
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('the same source key under two titles stays two chapters', async () => {
+  await withStore((store) => {
+    store.markChapterRead(ref('chapter-1'), true);
+    store.markChapterRead(ref('chapter-1', { manga_slug: 'other-title' }), false);
+    store.updateChapterProgress(ref('chapter-1', { manga_slug: 'other-title' }), 3);
+
+    const pending = store.getPendingChanges().chapter_state;
+    assert.deepEqual(
+      pending
+        .map((row) => [row.manga_slug, row.source_chapter_key, row.is_read, row.last_page_read])
+        .sort(),
+      [
+        ['other-title', 'chapter-1', false, 3],
+        ['slug-1', 'chapter-1', true, 0],
+      ],
+    );
+  });
+});
+
+test('a pulled state for a chapter this device never stored stands up a row by its key', async () => {
+  await withStore((store) => {
+    const result = store.applyPulledChanges({
+      server_time: new Date().toISOString(),
+      library: [],
+      manga_state: [],
+      chapter_state: [
+        {
+          ...ref('chapter-9'),
+          is_read: true,
+          is_bookmark: false,
+          last_page_read: 0,
+          updated_at: '2026-02-01T00:00:00.000Z',
+        },
+      ],
+      manga_category: [],
+      history: [],
+      categories: [],
+    });
+
+    assert.equal(result.skippedCount, 0);
+    store.markChapterRead(ref('chapter-9'), false);
+    assert.equal(store.getPendingChanges().chapter_state[0].source_chapter_key, 'chapter-9');
+  });
 });

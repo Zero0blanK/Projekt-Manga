@@ -12,9 +12,12 @@ import {
 } from '@/lib/library-store';
 import { toDisplaySource, type DisplaySource } from '@/lib/manga-data';
 import { SourceResultCard } from '@/components/discover/popular-section';
+import { useVisibleSourceResults } from '@/lib/library-titles';
 import { readBrowseSnapshot, saveBrowseSnapshot, type BrowseSnapshot } from '@/lib/browse-state';
 import { ApiError } from '@projekt-manga/api-client';
 import { FilterPanel } from '@/components/discover/filter-panel';
+import { SourceChallengeNotice } from '@/components/discover/source-challenge-notice';
+import { isChallengeRequired } from '@/lib/source-browser';
 import { countActiveFilters, type FilterValues } from '@/lib/filter-values';
 import {
   DropdownMenu,
@@ -213,6 +216,9 @@ export function DiscoverBrowsePage({
     restoreInitial,
     query,
   );
+  // Only what is rendered is filtered: paging, the title count and scroll restore all
+  // keep working on the full source list.
+  const { visible: visibleItems, hidden: hiddenCount } = useVisibleSourceResults(items);
 
   // Tracked continuously rather than read at unmount: the router scrolls back to the top
   // as part of navigating away, so by the time the cleanup runs window.scrollY is already
@@ -488,6 +494,12 @@ export function DiscoverBrowsePage({
             This source does not support latest listings. Browse its popular titles instead.
           </p>
         )}
+        {hiddenCount > 0 && (
+          <p role="status" className="mb-4 text-xs text-muted-foreground">
+            {hiddenCount === 1 ? '1 title' : `${hiddenCount} titles`} already in your library{' '}
+            {hiddenCount === 1 ? 'is' : 'are'} hidden.
+          </p>
+        )}
         {(loading || capabilitiesLoading) && items.length === 0 ? (
           <MangaGridSkeleton />
         ) : (
@@ -495,7 +507,7 @@ export function DiscoverBrowsePage({
           // the grid otherwise reveals large lists in chunks, and a page only one chunk
           // tall can't scroll back down to where they were.
           <MangaGrid revealAtLeast={restorable ? restorable.items.length : 0}>
-            {items.map((m, i) => (
+            {visibleItems.map((m, i) => (
               <div key={`${m.source}-${m.id}`} className="relative">
                 {/* Rank badges only make sense on an unfiltered, unsearched ranking. */}
                 {showRankBadges && i < 3 && !query && !sortValue && activeFilterCount === 0 && (
@@ -519,6 +531,13 @@ export function DiscoverBrowsePage({
                 ? error.message
                 : 'Something went wrong loading titles from this source.'}
             </p>
+            {isChallengeRequired(error) && active && (
+              <SourceChallengeNotice
+                sourceId={active.id}
+                sourceName={active.name}
+                onPassed={retry}
+              />
+            )}
             <button
               onClick={retry}
               className="mt-4 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"

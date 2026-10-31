@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { authorLine, type Manga } from '@/lib/manga-data';
 import { Cover, GRID_COVER_SIZES } from '@/components/cover';
 import { useSetting } from '@/lib/app-store';
@@ -81,14 +82,23 @@ export function MangaCard({
   selectionMode = false,
   onSelect,
   onOpenActions,
+  compact = false,
 }: {
   manga: Manga;
   selected?: boolean;
   selectionMode?: boolean;
   onSelect?: () => void;
   onOpenActions?: () => void;
+  /** The compact grid: the title sits on the cover instead of below it. */
+  compact?: boolean;
 }) {
   const hold = useHoldToSelect({ onSelect: () => onSelect?.(), disabled: !onSelect });
+  const router = useRouter();
+  // A title with a chapter under way offers to continue it straight from the cover.
+  const resumeHref =
+    manga.currentChapter !== undefined
+      ? `/reader/${manga.id}?ch=${manga.currentChapter}${manga.currentPage ? `&page=${manga.currentPage}` : ''}`
+      : null;
   return (
     <Link
       {...hold}
@@ -127,17 +137,40 @@ export function MangaCard({
         )}
         <div className="pointer-events-none absolute inset-0 rounded-xl ring-1 ring-white/5 transition group-hover:ring-primary/50 group-focus-visible:ring-2 group-focus-visible:ring-primary" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
-          <div className="flex items-center gap-2 rounded-full bg-background/85 px-3 py-1.5 text-xs font-medium text-foreground backdrop-blur">
-            <BookOpen className="h-3.5 w-3.5" /> Read
-          </div>
+          {resumeHref && !selectionMode ? (
+            // Not a link of its own (no link inside a link): a click here opens the reader,
+            // a click anywhere else on the card the title page.
+            <span
+              data-continue-reading
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                router.push(resumeHref);
+              }}
+              className="flex cursor-pointer items-center gap-2 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow"
+            >
+              <BookOpen className="h-3.5 w-3.5" /> Continue · Ch {manga.currentChapter}
+            </span>
+          ) : (
+            <div className="flex items-center gap-2 rounded-full bg-background/85 px-3 py-1.5 text-xs font-medium text-foreground backdrop-blur">
+              <BookOpen className="h-3.5 w-3.5" /> Read
+            </div>
+          )}
         </div>
+        {compact && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 rounded-b-xl bg-linear-to-t from-black/85 via-black/50 to-transparent px-2.5 pb-2 pt-8">
+            <h3 className="line-clamp-2 text-xs font-semibold text-white">{manga.title}</h3>
+          </div>
+        )}
       </div>
-      <div className="px-0.5">
-        <h3 className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-primary">
-          {manga.title}
-        </h3>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">{authorLine(manga)}</p>
-      </div>
+      {!compact && (
+        <div className="px-0.5">
+          <h3 className="line-clamp-2 text-sm font-semibold text-foreground group-hover:text-primary">
+            {manga.title}
+          </h3>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">{authorLine(manga)}</p>
+        </div>
+      )}
     </Link>
   );
 }

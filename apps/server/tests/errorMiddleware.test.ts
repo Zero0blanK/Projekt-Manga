@@ -37,4 +37,25 @@ describe('errorHandler', () => {
       log.mockRestore();
     }
   });
+
+  it('reports a Node network error code as an internal error, not a database one', () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const response = {
+      headersSent: false,
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    } as unknown as Response;
+    try {
+      errorHandler(
+        Object.assign(new Error('write EPROTO'), { code: 'EPROTO' }),
+        {} as Request,
+        response,
+        vi.fn<NextFunction>(),
+      );
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('"code":"INTERNAL_ERROR"'));
+      expect(response.status).toHaveBeenCalledWith(500);
+    } finally {
+      log.mockRestore();
+    }
+  });
 });

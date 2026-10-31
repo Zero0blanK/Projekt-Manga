@@ -1,0 +1,40 @@
+{
+  "_note": "Shaped after Komga's documented REST responses (komga.org, /api/v1 and /api/v2); trimmed, not a live capture.",
+  "me": { "id": "0ABCUSER", "email": "reader@example.com", "roles": ["USER"] },
+  "search": {
+    "content": [
+      {
+        "id": "0SERIES1",
+        "name": "berserk-folder",
+        "booksCount": 41,
+        "metadata": { "title": "Berserk" }
+      },
+      { "id": "0SERIES2", "name": "Untitled", "metadata": { "title": "" } }
+    ],
+    "totalElements": 2
+  },
+  "progressPartial": {
+    "booksCount": 41,
+    "booksReadCount": 12,
+    "booksUnreadCount": 28,
+    "booksInProgressCount": 1,
+    "lastReadContinuousNumberSort": 12.0,
+    "maxNumberSort": 41.0
+  },
+  "progressDone": {
+    "booksCount": 3,
+    "booksReadCount": 3,
+    "booksUnreadCount": 0,
+    "booksInProgressCount": 0,
+    "lastReadContinuousNumberSort": 3.0,
+    "maxNumberSort": 3.0
+  },
+  "progressNone": {
+    "booksCount": 3,
+    "booksReadCount": 0,
+    "booksUnreadCount": 3,
+    "booksInProgressCount": 0,
+    "lastReadContinuousNumberSort": 0.0,
+    "maxNumberSort": 3.0
+  }
+}

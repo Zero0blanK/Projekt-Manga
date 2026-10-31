@@ -20,6 +20,8 @@ vi.mock('@projekt-manga/api-client', () => ({ setMangaInLibrary: fixture.remove 
 vi.mock('@/lib/library-store', () => ({
   libraryActions: { setBookmark: fixture.bookmark, setShelf: fixture.shelf },
   useLibraryState: () => ({ bookmarks: [] }),
+  // Membership changes go through the store, which calls the API.
+  setTitleInLibrary: (id: string, inLibrary: boolean) => fixture.remove(id, inLibrary),
 }));
 vi.mock('@/hooks/use-toast', () => ({ toast: fixture.toast }));
 vi.mock('@/lib/session-resource', () => ({

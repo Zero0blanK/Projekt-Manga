@@ -14,6 +14,7 @@ import { useNumberSetting, useSetting } from '@/lib/app-store';
 import { useMangaLibrary } from '@/lib/library-store';
 import { showWindowNotification } from '@/lib/window-notification';
 import { toast } from '@/hooks/use-toast';
+import { AlertChannels } from '@/components/settings/alert-channels';
 
 type PermissionState = NotificationPermission | 'unsupported';
 const TIME_OPTIONS = Array.from({ length: 48 }, (_, index) => {
@@ -93,13 +94,10 @@ export function NotificationsPanel() {
   return (
     <div className="space-y-6">
       <Panel title="Notifications" subtitle="What the app tells you about">
-        <Field
-          label="New chapter alerts"
-          hint="Shows the dot on the bell and lists chapters found by a library update"
-        >
+        <Field label="New chapter alerts" hint="Bell dot and list of new chapters">
           <Toggle settingKey="notifyNewChapter" defaultOn />
         </Field>
-        <Field label="Update errors" hint="Surface sources that failed during a library update">
+        <Field label="Update errors" hint="Sources that failed during an update">
           <Toggle settingKey="notifyUpdateErrors" defaultOn />
         </Field>
         <Field label="Download finished" hint="A toast when a chapter finishes downloading">
@@ -151,6 +149,13 @@ export function NotificationsPanel() {
       </Panel>
 
       <Panel
+        title="Outside the app"
+        subtitle="New-chapter alerts to your phone or chat: ntfy, Discord, Telegram or a webhook"
+      >
+        <AlertChannels />
+      </Panel>
+
+      <Panel
         title="Source alerts and cadence"
         subtitle="Choose source notifications and an optional minimum automatic check interval"
       >
@@ -166,7 +171,7 @@ export function NotificationsPanel() {
               </Field>
               <Field
                 label={`${source} automatic check minimum`}
-                hint="The effective interval is the longer of this value and the global check interval. Manual checks are unaffected."
+                hint="Uses the longer of this and the global interval"
                 nested
               >
                 <NumberSelect
@@ -185,13 +190,13 @@ export function NotificationsPanel() {
         <Group label="Automatic updates" />
         <Field
           label="Check for new chapters automatically"
-          hint="Runs while Projekt Manga is open or minimized to the tray; quitting the app pauses checks. The default cadence is every 12 hours."
+          hint="Runs while the app is open or in the tray"
         >
           <Toggle settingKey="automaticLibraryUpdates" defaultOn />
         </Field>
         <Field
           label="Check interval"
-          hint="A longer interval reduces requests to source websites"
+          hint="Longer intervals send fewer requests to sources"
           nested
           disabled={!automaticUpdates}
         >
@@ -204,7 +209,7 @@ export function NotificationsPanel() {
         </Field>
         <Field
           label="Current cadence"
-          hint="Changing the interval applies after the next completed check"
+          hint="Takes effect after the next check"
           nested
           disabled={!automaticUpdates}
         >

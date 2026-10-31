@@ -1,11 +1,29 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TapZonesHint } from '@/components/reader/tap-zones-hint';
 import { ChevronLeft, ChevronRight, ArrowRight, ArrowLeft } from 'lucide-react';
 import { MangaPage } from '@/components/reader/manga-page';
 import { useSetting } from '@/lib/app-store';
+import {
+  READER_ROTATE_WIDE,
+  READER_SPLIT_WIDE,
+  READER_SWAP_SPREAD,
+  buildReaderUnits,
+  isTallPage,
+  isWidePage,
+} from '@/lib/page-image';
 import { useScrollBehavior } from '@/lib/scroll';
+import { READER_ZONE_LAYOUT, zoneAt } from '@/lib/click-zones';
+import {
+  DOUBLE_CLICK_WINDOW_MS,
+  READER_DOUBLE_CLICK_ZOOM,
+  READER_WHEEL_ACTION,
+} from '@/lib/reader-keys';
+import { DOUBLE_CLICK_ZOOM, ZOOM_STEP, clampZoom } from '@/lib/reader-zoom';
+import { useReaderInput } from '@/components/reader/use-reader-input';
+import { READER_GUIDED_VIEW } from '@/lib/panel-detect';
+import type { ViewRect } from '@/lib/page-image';
 import type { Manga } from '@/lib/manga-data';
 
 /**
@@ -29,6 +47,7 @@ export function PagedViewer({
   prevChapterNumber,
   onRequestPrevChapter,
   zoom = 1,
+  onZoomChange,
   offsetFirstPage = false,
   readingDirection = 'Right to left',
   onPageReady,
@@ -39,6 +58,7 @@ export function PagedViewer({
   onVisiblePage,
   autoAdvanceSecondsLeft = null,
   onCancelAutoAdvance,
+  onLooksLikeWebtoon,
 }: {
   manga: Manga;
   totalPages: number;
@@ -56,6 +76,8 @@ export function PagedViewer({
   prevChapterNumber: number;
   onRequestPrevChapter: () => void;
   zoom?: number;
+  /** Lets the wheel and double-click zoom. Without it they leave zoom alone. */
+  onZoomChange?: (zoom: number) => void;
   /** Settings > Reader > Offset first page — see `units` below. */
   offsetFirstPage?: boolean;
   readingDirection?: string;
@@ -68,11 +90,26 @@ export function PagedViewer({
   /** Seconds until the reader moves on by itself (Settings › Reader › auto-advance). */
   autoAdvanceSecondsLeft?: number | null;
   onCancelAutoAdvance?: () => void;
+  /** Called once when most of the first pages are far taller than wide: a webtoon being
+   * read page by page, better read in the long strip. */
+  onLooksLikeWebtoon?: () => void;
 }) {
   const globalZoomBehavior = useSetting('zoomBehavior', 'Smart') as string;
   const zoomBehavior = fitOverride ?? globalZoomBehavior;
   const rtl = readingDirection === 'Right to left';
   const scrollBehavior = useScrollBehavior();
+  const zoneLayout = useSetting(READER_ZONE_LAYOUT, 'Thirds') as string;
+  const wheelAction = useSetting(READER_WHEEL_ACTION, 'Turn page') as string;
+  const doubleClickZoom = (useSetting(READER_DOUBLE_CLICK_ZOOM, true) as boolean) && !!onZoomChange;
+  // Where a zoom is anchored (the cursor, for double-click and Ctrl+wheel) and how far
+  // the zoomed page has been dragged; both go back to the centre once zoom is reset.
+  const [zoomOrigin, setZoomOrigin] = useState<{ x: number; y: number } | null>(null);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  useEffect(() => {
+    if (zoom !== 1) return;
+    setZoomOrigin(null);
+    setPan({ x: 0, y: 0 });
+  }, [zoom]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const unitRefs = useRef<Array<HTMLDivElement | null>>([]);
@@ -80,27 +117,44 @@ export function PagedViewer({
   const prevPanelRef = useRef<HTMLDivElement | null>(null);
   const readyPages = useRef(new Map<number, string>());
   const visibleUnit = useRef(0);
+  // The half of a split page last seen on screen. Indices shift when another page turns
+  // out to be a double page, so the jump below finds the same half by page and side.
+  const visibleHalf = useRef<{ page: number; half?: 'left' | 'right' } | null>(null);
   // Tracks what we last scrolled to *and* how many units existed at the time — totalPages
   // corrects itself from a "1 page" fallback to the real count once chapter metadata
   // loads, which rebuilds `units` from under a stale scroll position even though `page`
   // itself didn't change, so page alone isn't enough to tell "already there" from "the
   // unit we're sitting on no longer means what it used to".
-  const lastJump = useRef<{ page: number; totalPages: number } | null>(null);
+  const lastJump = useRef<{ page: number; totalPages: number; unitCount: number } | null>(null);
+  const splitWide = useSetting(READER_SPLIT_WIDE, false) as boolean;
+  const rotateWide = useSetting(READER_ROTATE_WIDE, false) as boolean;
+  const swapSpread = useSetting(READER_SWAP_SPREAD, false) as boolean;
+  // Guided view: one panel at a time, single-page mode only. Panels are found per page as
+  // it loads; a page without them is shown whole.
+  const guided = (useSetting(READER_GUIDED_VIEW, false) as boolean) && pagesPerView === 1;
+  const [panels, setPanels] = useState<ReadonlyMap<number, ViewRect[]>>(() => new Map());
+  const [panelStep, setPanelStep] = useState({ page: 0, index: 0 });
+  // Page shapes seen so far, for spotting a webtoon read page by page.
+  const shapes = useRef({ tall: 0, seen: 0, reported: false });
+  // Image URLs found to be double pages once they loaded. Kept by URL so another
+  // chapter's pages never inherit this one's.
+  const [wideUrls, setWideUrls] = useState<ReadonlySet<string>>(() => new Set());
+  const widePages = new Set<number>();
+  pageUrls.forEach((url, i) => url && wideUrls.has(url) && widePages.add(i + 1));
 
-  // Groups of pages shown together. In two-page mode "offset first page" puts page 1 on
-  // its own so every later spread pairs the way the artist drew it (a cover counts as one
-  // sheet, so without the offset every spread afterwards is split down the middle).
-  const units: number[][] = [];
-  let cursor = 1;
-  if (pagesPerView === 2 && offsetFirstPage && totalPages >= 1) {
-    units.push([1]);
-    cursor = 2;
-  }
-  for (let p = cursor; p <= totalPages; p += pagesPerView) {
-    const unit: number[] = [];
-    for (let i = 0; i < pagesPerView && p + i <= totalPages; i++) unit.push(p + i);
-    units.push(unit);
-  }
+  // Groups of pages shown together (see buildReaderUnits): spreads in two-page mode, and
+  // the halves of a split double page. `units` holds just the source page numbers, which
+  // is all that position reporting needs.
+  const readerUnits = buildReaderUnits({
+    totalPages,
+    pagesPerView,
+    offsetFirstPage,
+    widePages,
+    splitWide,
+    rotateWide,
+    rtl,
+  });
+  const units = readerUnits.map((unit) => unit.pages);
   // The end-of-chapter panel is announced only while the final spread is showing.
   const atLastSpread = units.length === 0 || units[units.length - 1].includes(page);
 
@@ -113,12 +167,20 @@ export function PagedViewer({
   // and progress-bar jumps). Skipped when it's just our own scroll position being reported
   // back up, so we don't fight the user's scroll.
   useEffect(() => {
-    if (lastJump.current?.page === page && lastJump.current.totalPages === totalPages) return;
-    const unitIndex = units.findIndex((u) => u.includes(page));
+    if (
+      lastJump.current?.page === page &&
+      lastJump.current.totalPages === totalPages &&
+      lastJump.current.unitCount === units.length
+    )
+      return;
+    const sameHalf = visibleHalf.current?.page === page ? visibleHalf.current.half : undefined;
+    const unitIndex = readerUnits.findIndex(
+      (u) => u.pages.includes(page) && (sameHalf === undefined || u.half === sameHalf),
+    );
     const target = unitRefs.current[unitIndex === -1 ? 0 : unitIndex];
     if (target) {
       target.scrollIntoView({ block: 'nearest', inline: 'start' });
-      lastJump.current = { page, totalPages };
+      lastJump.current = { page, totalPages, unitCount: units.length };
       // Only stop muting once we've actually reached the requested page; while
       // totalPages is still the "1 page" placeholder the unit doesn't exist yet.
       if (unitIndex !== -1) {
@@ -128,7 +190,7 @@ export function PagedViewer({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, manga.id, totalPages, offsetFirstPage]);
+  }, [page, manga.id, totalPages, offsetFirstPage, units.length]);
 
   useEffect(() => {
     const root = scrollRef.current;
@@ -145,7 +207,8 @@ export function PagedViewer({
         const unit = units[idx];
         visibleUnit.current = idx;
         if (unit) {
-          lastJump.current = { page: unit[0], totalPages };
+          visibleHalf.current = { page: unit[0], half: readerUnits[idx]?.half };
+          lastJump.current = { page: unit[0], totalPages, unitCount: units.length };
           onVisiblePage?.(unit[0]);
           if (
             unit.every(
@@ -171,22 +234,55 @@ export function PagedViewer({
     return true;
   };
 
-  const currentUnitIndex = Math.max(
-    0,
-    units.findIndex((u) => u.includes(page)),
-  );
+  // The visible unit when it shows the current page: both halves of a split page carry
+  // the same page number, so searching by page alone would always find the first half.
+  const currentUnitIndex = units[visibleUnit.current]?.includes(page)
+    ? visibleUnit.current
+    : Math.max(
+        0,
+        units.findIndex((u) => u.includes(page)),
+      );
 
   // The strip's DOM order always runs 1..N regardless of reading direction (only the
   // left/right placement *within* a two-page spread flips for RTL) — so "advance"
   // unconditionally means the next unit, "retreat" the previous one. At either end it
   // lands on the adjacent chapter panel instead, which the reader then confirms.
+  const currentPage = units[currentUnitIndex]?.[0] ?? 0;
+  // A split half or a page turned on its side is shown as it is, not panel by panel.
+  const wholeUnit = (unit: (typeof readerUnits)[number] | undefined) =>
+    !!unit && !unit.half && !unit.rotate;
+  const pagePanels =
+    guided && wholeUnit(readerUnits[currentUnitIndex]) ? (panels.get(currentPage) ?? []) : [];
+  const panelIndex = panelStep.page === currentPage ? panelStep.index : 0;
   const advance = () => {
-    if (currentUnitIndex < units.length - 1) scrollToEl(unitRefs.current[currentUnitIndex + 1]);
-    else scrollToEl(nextPanelRef.current);
+    if (panelIndex < pagePanels.length - 1) {
+      setPanelStep({ page: currentPage, index: panelIndex + 1 });
+      return;
+    }
+    if (currentUnitIndex < units.length - 1) {
+      setPanelStep({ page: units[currentUnitIndex + 1][0], index: 0 });
+      scrollToEl(unitRefs.current[currentUnitIndex + 1]);
+    } else scrollToEl(nextPanelRef.current);
   };
   const retreat = () => {
-    if (currentUnitIndex > 0) scrollToEl(unitRefs.current[currentUnitIndex - 1]);
-    else scrollToEl(prevPanelRef.current);
+    if (guided && panelIndex > 0) {
+      setPanelStep({ page: currentPage, index: panelIndex - 1 });
+      return;
+    }
+    if (currentUnitIndex > 0) {
+      // Back onto the previous page's last panel, the way it was left.
+      const previous = units[currentUnitIndex - 1][0];
+      const previousPanels = wholeUnit(readerUnits[currentUnitIndex - 1])
+        ? (panels.get(previous)?.length ?? 1)
+        : 1;
+      setPanelStep({ page: previous, index: Math.max(0, previousPanels - 1) });
+      scrollToEl(unitRefs.current[currentUnitIndex - 1]);
+    } else scrollToEl(prevPanelRef.current);
+  };
+  const focusFor = (p: number) => {
+    if (!guided) return null;
+    const list = panels.get(p) ?? [];
+    return list[panelStep.page === p ? panelStep.index : 0] ?? null;
   };
 
   // Physical on-screen buttons sit at fixed left/right edges, so which one advances vs.
@@ -206,32 +302,82 @@ export function PagedViewer({
     } else if (action === 'Controls') onToggleControls?.();
   };
 
-  // See the keydown effect below: the listener is registered once, so it has to reach the
-  // current handlers through a ref rather than closing over the ones it was created with.
+  // The window listeners below are registered once, so they reach the current handlers
+  // through refs rather than closing over the ones they were created with.
   const navRef = useRef({ advance, retreat });
   navRef.current = { advance, retreat };
+  const performTapRef = useRef(performTap);
+  performTapRef.current = performTap;
+  const zoomRef = useRef({ zoom, onZoomChange, wheelAction });
+  zoomRef.current = { zoom, onZoomChange, wheelAction };
 
+  useReaderInput({
+    nextPage: () => navRef.current.advance(),
+    prevPage: () => navRef.current.retreat(),
+    firstPage: () => {
+      scrollToEl(unitRefs.current[0]);
+    },
+    lastPage: () => {
+      scrollToEl(unitRefs.current[units.length - 1]);
+    },
+  });
+
+  /** The point under the cursor in the coordinates of the unit it is over, which is what
+   * `transform-origin` is measured in. */
+  const anchorAt = (target: EventTarget | null, clientX: number, clientY: number) => {
+    const unit =
+      (target instanceof Element && target.closest<HTMLElement>('[data-unit]')) ||
+      scrollRef.current;
+    const box = unit?.getBoundingClientRect();
+    return box ? { x: clientX - box.left, y: clientY - box.top } : null;
+  };
+
+  // Settings › Reader › Mouse wheel. Registered by hand: React's onWheel is passive, and
+  // turning the page needs preventDefault to stop the strip scrolling at the same time.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target instanceof Element ? e.target : null;
-      if (
-        document.querySelector('[role="dialog"]') ||
-        el?.closest('input,textarea,select,button,a,[contenteditable="true"],[role="menu"]')
-      )
+    const el = scrollRef.current;
+    if (!el) return;
+    let lastEvent = 0;
+    let lastTurn = 0;
+    const onWheel = (event: WheelEvent) => {
+      const { zoom: current, onZoomChange: setZoom, wheelAction: mode } = zoomRef.current;
+      // A sideways trackpad swipe scrolls the strip natively.
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      if (event.ctrlKey || mode === 'Zoom') {
+        if (!setZoom) return;
+        event.preventDefault();
+        if (current === 1) setZoomOrigin(anchorAt(event.target, event.clientX, event.clientY));
+        setZoom(clampZoom(current + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP)));
         return;
-      if (e.key === 'ArrowRight' || e.key === ' ') {
-        e.preventDefault();
-        navRef.current.advance();
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        navRef.current.retreat();
       }
+      if (mode !== 'Turn page' || current !== 1) return;
+      event.preventDefault();
+      // One page per wheel gesture: a trackpad fling or a fast spin fires dozens of
+      // events, so only the first of a burst turns the page.
+      const now = performance.now();
+      const burst = now - lastEvent < 150 && now - lastTurn < 600;
+      lastEvent = now;
+      if (burst || Math.abs(event.deltaY) < 4) return;
+      lastTurn = now;
+      if (event.deltaY > 0) navRef.current.advance();
+      else navRef.current.retreat();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // Subscribes once and stays subscribed; the handlers are read from navRef so they are
-    // always current without re-binding a window listener on every render.
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
   }, []);
+
+  // Double-click: a click waits this long for a second one before acting as a tap.
+  const lastClick = useRef<{ x: number; y: number; at: number } | null>(null);
+  const pendingTap = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (pendingTap.current) clearTimeout(pendingTap.current);
+    },
+    [],
+  );
+  const panStart = useRef<{ x: number; y: number; panX: number; panY: number; id: number } | null>(
+    null,
+  );
 
   const widthDriven =
     zoomBehavior === 'Fit width' || (zoomBehavior === 'Smart' && pagesPerView === 1);
@@ -248,7 +394,15 @@ export function PagedViewer({
 
   return (
     <div className="relative flex flex-1 items-center justify-center overflow-hidden">
-      {tapActions && <TapZonesHint tapActions={tapActions} rtl={rtl} />}
+      {tapActions && <TapZonesHint tapActions={tapActions} rtl={rtl} layout={zoneLayout} />}
+      {pagePanels.length > 0 && (
+        <span
+          role="status"
+          className="pointer-events-none absolute left-1/2 top-4 z-30 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-white/80"
+        >
+          Panel {panelIndex + 1} of {pagePanels.length}
+        </span>
+      )}
       <button
         onClick={leftAction}
         aria-label="Previous"
@@ -260,9 +414,9 @@ export function PagedViewer({
       <div
         ref={scrollRef}
         onPointerDown={(event) => {
+          panStart.current = null;
           if (
-            !tapActions ||
-            zoom !== 1 ||
+            (!tapActions && !doubleClickZoom && zoom === 1) ||
             !event.isPrimary ||
             event.button !== 0 ||
             (event.target as HTMLElement).closest('button,a,input,textarea,select,[role="dialog"]')
@@ -271,33 +425,72 @@ export function PagedViewer({
             return;
           }
           pointer.current = { x: event.clientX, y: event.clientY, id: event.pointerId };
+          // A zoomed page is dragged around instead of tapped.
+          if (zoom !== 1) {
+            panStart.current = { ...pointer.current, panX: pan.x, panY: pan.y };
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+          }
+        }}
+        onPointerMove={(event) => {
+          const start = panStart.current;
+          if (!start || start.id !== event.pointerId) return;
+          setPan({
+            x: start.panX + event.clientX - start.x,
+            y: start.panY + event.clientY - start.y,
+          });
         }}
         onPointerCancel={() => {
           pointer.current = null;
+          panStart.current = null;
         }}
         onPointerUp={(event) => {
           const start = pointer.current;
           pointer.current = null;
+          panStart.current = null;
           if (
             !start ||
             start.id !== event.pointerId ||
-            !tapActions ||
             Math.hypot(start.x - event.clientX, start.y - event.clientY) > 10 ||
             window.getSelection()?.toString() ||
             document.querySelector('[role="dialog"]')
           )
             return;
+          if (doubleClickZoom && onZoomChange) {
+            const now = performance.now();
+            const previous = lastClick.current;
+            if (
+              previous &&
+              now - previous.at < DOUBLE_CLICK_WINDOW_MS &&
+              Math.hypot(previous.x - event.clientX, previous.y - event.clientY) < 24
+            ) {
+              lastClick.current = null;
+              if (pendingTap.current) clearTimeout(pendingTap.current);
+              pendingTap.current = null;
+              if (zoom === 1) {
+                setZoomOrigin(anchorAt(event.target, event.clientX, event.clientY));
+                onZoomChange(DOUBLE_CLICK_ZOOM);
+              } else onZoomChange(1);
+              return;
+            }
+            lastClick.current = { x: event.clientX, y: event.clientY, at: now };
+          }
+          if (!tapActions || zoom !== 1) return;
           const bounds = event.currentTarget.getBoundingClientRect();
-          const fraction = (event.clientX - bounds.left) / bounds.width;
-          performTap(
-            fraction < 1 / 3
-              ? tapActions.left
-              : fraction > 2 / 3
-                ? tapActions.right
-                : tapActions.center,
+          const zone = zoneAt(
+            (event.clientX - bounds.left) / bounds.width,
+            (event.clientY - bounds.top) / bounds.height,
+            zoneLayout,
           );
+          if (!zone) return;
+          const action = tapActions[zone];
+          if (!doubleClickZoom) return performTap(action);
+          if (pendingTap.current) clearTimeout(pendingTap.current);
+          pendingTap.current = setTimeout(() => {
+            pendingTap.current = null;
+            performTapRef.current(action);
+          }, DOUBLE_CLICK_WINDOW_MS);
         }}
-        className="flex h-full w-full snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className={`flex h-full w-full snap-x snap-mandatory overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${zoom !== 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
       >
         {hasPrevChapter && (
           <div
@@ -315,16 +508,22 @@ export function PagedViewer({
         )}
 
         {units.map((unit, i) => {
-          const ordered = rtl ? [...unit].reverse() : unit;
+          // Right to left puts the first page of a spread on the right; "swap" flips that
+          // for releases whose pages were paired the other way round.
+          const ordered = rtl !== swapSpread ? [...unit].reverse() : unit;
+          const { half, rotate } = readerUnits[i];
           return (
             <div
-              key={unit[0]}
+              key={`${unit[0]}:${half ?? ''}`}
               ref={(el) => {
                 unitRefs.current[i] = el;
               }}
               data-unit={i}
               className="flex h-full w-full shrink-0 snap-start items-center justify-center gap-3"
-              style={{ transform: `scale(${zoom})` }}
+              style={{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: zoomOrigin ? `${zoomOrigin.x}px ${zoomOrigin.y}px` : undefined,
+              }}
             >
               {ordered.map((p) => (
                 <MangaPage
@@ -335,6 +534,27 @@ export function PagedViewer({
                   imageUrl={pageUrls[p - 1]}
                   className={sizeClass}
                   fit={fit}
+                  half={half}
+                  rotate={rotate}
+                  focus={half || rotate ? null : focusFor(p)}
+                  panelsRtl={rtl}
+                  onPanels={
+                    guided && !half && !rotate
+                      ? (found) => setPanels((current) => new Map(current).set(p, found))
+                      : undefined
+                  }
+                  onNaturalSize={(width, height) => {
+                    const seen = shapes.current;
+                    seen.seen += 1;
+                    if (isTallPage(width, height)) seen.tall += 1;
+                    if (!seen.reported && seen.seen >= 3 && seen.tall / seen.seen >= 2 / 3) {
+                      seen.reported = true;
+                      onLooksLikeWebtoon?.();
+                    }
+                    const url = pageUrls[p - 1];
+                    if (url && isWidePage(width, height) && !wideUrls.has(url))
+                      setWideUrls((previous) => new Set(previous).add(url));
+                  }}
                   onReady={() => {
                     readyPages.current.set(p, pageUrls[p - 1]);
                     onPageReady?.(p);

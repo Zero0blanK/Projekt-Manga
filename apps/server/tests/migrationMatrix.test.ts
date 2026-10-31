@@ -66,6 +66,24 @@ function seedRepresentativeLibraryRow(database: DatabaseSync): void {
     );
 }
 
+/** The migration that moved chapter ids into a title-scoped source key. Chapters seeded
+ * before it use the old shape and must come out keyed. */
+const chapterKeyMigration = migrations.findIndex((migration) =>
+  migration.name.endsWith('_chapter_source_key'),
+);
+
+function seedLegacyChapters(database: DatabaseSync): void {
+  const insertChapter = database.prepare(
+    `INSERT INTO chapters (id, manga_id, url, chapter_number, updated_at) VALUES (?, ?, '', 1, ?)`,
+  );
+  insertChapter.run('owned-chapter', 'migration-matrix-manga', '2026-10-11T00:00:00.000Z');
+  insertChapter.run('history-only-chapter', null, '2026-10-11T00:00:00.000Z');
+  insertChapter.run('bare-chapter', null, '2026-10-11T00:00:00.000Z');
+  database
+    .prepare(`INSERT INTO histories (id, source, manga_slug, chapter_id) VALUES (?, ?, ?, ?)`)
+    .run('matrix-history', 'history-source', 'history-slug', 'history-only-chapter');
+}
+
 afterEach(() => {
   if (temporaryDirectory) fs.rmSync(temporaryDirectory, { recursive: true, force: true });
 });
@@ -89,6 +107,8 @@ describe('SQLite migration compatibility matrix', () => {
         applyMigration(database, migration);
       }
       seedRepresentativeLibraryRow(database);
+      const seededChapters = startingBoundary < chapterKeyMigration;
+      if (seededChapters) seedLegacyChapters(database);
       database.close();
 
       const upgraded = openDatabase(databasePath);
@@ -109,6 +129,33 @@ describe('SQLite migration compatibility matrix', () => {
         title: 'Migration matrix fixture',
         source: 'fixture-source',
       });
+      if (seededChapters) {
+        // Ids are kept, so nothing referencing a chapter moved; the old id is the key.
+        expect(
+          upgraded
+            .prepare('SELECT id, source, manga_slug, source_chapter_key FROM chapters ORDER BY id')
+            .all()
+            .map((row) => ({ ...row })),
+          `chapter keys from boundary ${startingBoundary}`,
+        ).toEqual([
+          { id: 'bare-chapter', source: '', manga_slug: '', source_chapter_key: 'bare-chapter' },
+          {
+            id: 'history-only-chapter',
+            source: 'history-source',
+            manga_slug: 'history-slug',
+            source_chapter_key: 'history-only-chapter',
+          },
+          {
+            id: 'owned-chapter',
+            source: 'fixture-source',
+            manga_slug: 'migration-matrix-slug',
+            source_chapter_key: 'owned-chapter',
+          },
+        ]);
+        expect(
+          upgraded.prepare("SELECT chapter_id FROM histories WHERE id = 'matrix-history'").get(),
+        ).toEqual({ chapter_id: 'history-only-chapter' });
+      }
       upgraded.close();
     }
   }, 300_000); // Replays every migration boundary; slow under a full parallel test run, and

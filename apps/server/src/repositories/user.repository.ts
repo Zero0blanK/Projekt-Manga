@@ -9,6 +9,12 @@ const getById = async (id: string) => {
   return await prisma.user.findUnique({ where: { id } });
 };
 
+/** Every account id, for server-side jobs that run per owner (automatic backups). */
+const listIds = async () => {
+  const rows = await prisma.user.findMany({ select: { id: true }, orderBy: { created_at: 'asc' } });
+  return rows.map((row) => row.id);
+};
+
 const create = async (data: { email: string; password_hash: string; display_name?: string }) => {
   return await prisma.user.create({ data });
 };
@@ -49,6 +55,7 @@ const createAndCheckFirstAccount = async (data: {
 const userRepository = {
   getByEmail,
   getById,
+  listIds,
   create,
   deleteById,
   createAndCheckFirstAccount,

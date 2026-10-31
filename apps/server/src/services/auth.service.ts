@@ -15,6 +15,7 @@ import userMangaStateRepository from '../repositories/userMangaState.repository.
 import userChapterStateRepository from '../repositories/userChapterState.repository.js';
 import userMangaCategoryRepository from '../repositories/userMangaCategory.repository.js';
 import { DuplicateResourceError, UnauthorizedError, NotFoundError } from '../utils/customErrors.js';
+import { removeOwnerBackups } from '../utils/backupStore.js';
 import type { RegisterBody, LoginBody } from '@projekt-manga/schemas';
 
 const BCRYPT_COST_FACTOR = 12;
@@ -226,6 +227,10 @@ const deleteAccount = async (user_id: string, password: string) => {
     throw new UnauthorizedError('Incorrect password');
   }
   await userRepository.deleteById(user_id);
+  // The account's automatic backups are its reading history; they go with it.
+  await removeOwnerBackups(user_id).catch((error) =>
+    console.warn('[Backups] Could not remove backups for a deleted account:', error),
+  );
 };
 
 const authService = {

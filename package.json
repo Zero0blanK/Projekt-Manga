@@ -27,7 +27,7 @@
     "test:source-contracts": "node scripts/test-source-contracts.mjs",
     "pretest:source-native": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/extensions",
     "test:source-native": "node scripts/source-native-acceptance.mjs",
-    "presmoke": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client && npm run build --workspace=@projekt-manga/desktop",
+    "presmoke": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client && npm run build --workspace=@projekt-manga/desktop && node apps/web/scripts/copy-ocr-assets.mjs",
     "smoke": "node scripts/smoke.mjs",
     "presmoke:restore-restart": "npm run build --workspace=@projekt-manga/server && npm run build --workspace=@projekt-manga/desktop",
     "smoke:restore-restart": "node scripts/restore-restart-smoke.mjs",

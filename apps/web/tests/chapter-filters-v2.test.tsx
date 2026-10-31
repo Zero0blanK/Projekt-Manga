@@ -31,7 +31,10 @@ const manga = {
   inLibrary: true,
 } as Manga;
 const records = Array.from({ length: 205 }, (_, i) => ({
-  id: `c${i}`,
+  id: `row-${i}`,
+  source: 'source',
+  manga_slug: 'slug',
+  source_chapter_key: `c${i}`,
   chapter_number: i,
   name: `Episode ${i}`,
   is_read: i === 204,
@@ -47,8 +50,8 @@ describe('v2 chapter filters', () => {
     vi.clearAllMocks();
     fixture.chapters.mockResolvedValue(records);
     fixture.downloads.mockResolvedValue([
-      { chapter_id: 'c1', status: 'COMPLETED' },
-      { chapter_id: 'c2', status: 'PENDING' },
+      { chapter_id: 'row-1', source_chapter_key: 'c1', status: 'COMPLETED' },
+      { chapter_id: 'row-2', source_chapter_key: 'c2', status: 'PENDING' },
     ]);
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   });

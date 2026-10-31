@@ -30,6 +30,7 @@ vi.mock('@/components/settings/field-controls', () => ({
       {children}
     </div>
   ),
+  Toggle: () => <button type="button" role="switch" aria-checked={false} />,
 }));
 
 const { ExtensionsPanel } = await import('@/components/settings/extensions-panel');

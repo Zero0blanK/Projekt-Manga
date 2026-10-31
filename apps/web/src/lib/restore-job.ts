@@ -14,6 +14,7 @@ import { toast } from '@/hooks/use-toast';
 import { setState } from './app-store';
 import { queryClient, queryKeys } from './query-client';
 import { profileSettingsForImport, replaceProfileSettings } from './profile-settings';
+import { applyMihonImportExtras, clearMihonImportExtras } from './mihon-backup/extras';
 
 const storageKey = 'projekt-manga-pending-restore';
 const pendingEvents = [
@@ -185,6 +186,7 @@ export async function cancelPendingRestore(): Promise<'cancelled' | 'running'> {
   if (!pending || pending.failed || pending.cancelled) return 'cancelled';
   const job = await cancelReplaceRestore(pending.id, pending.owner);
   if (job.state === 'cancelled') {
+    clearMihonImportExtras(pending.id);
     localStorage.setItem(storageKey, JSON.stringify({ ...pending, cancelled: true }));
     window.dispatchEvent(new Event('projekt-manga-restore-started'));
     return 'cancelled';
@@ -235,6 +237,7 @@ export async function checkPendingRestore(
     return 'cancelled';
   }
   if (job.state === 'failed') {
+    clearMihonImportExtras(pending.id);
     localStorage.setItem(storageKey, JSON.stringify({ ...pending, failed: true }));
     window.dispatchEvent(new Event('projekt-manga-restore-started'));
     toast({ description: 'Restore failed. Your previous library and history were kept.' });
@@ -258,11 +261,16 @@ export async function checkPendingRestore(
   await refreshRestoredLibrary();
   signal?.throwIfAborted();
   clearPendingRestore(pending.id);
+  // A Mihon import's categories and tracker links need the restored titles' ids.
+  const extras = await applyMihonImportExtras(pending.id, owner).catch(() => null);
+  const extrasNote = extras
+    ? ` Added ${extras.categories} categories and ${extras.trackerLinks} tracker links${extras.skippedTrackerLinks > 0 ? ` (${extras.skippedTrackerLinks} skipped: tracker not connected or link refused)` : ''}.`
+    : '';
   const result = job.result;
   toast({
     description: result
-      ? `Restored ${result.restoredManga} titles, ${result.restoredProgress} saved positions, and ${result.restoredHistory} history entries.${pending.skippedDownloads > 0 ? ' Downloaded files were not restored.' : ''}`
-      : 'Backup restored.',
+      ? `Restored ${result.restoredManga} titles, ${result.restoredProgress} saved positions, and ${result.restoredHistory} history entries.${pending.skippedDownloads > 0 ? ' Downloaded files were not restored.' : ''}${extrasNote}`
+      : `Backup restored.${extrasNote}`,
   });
   return 'finished';
 }

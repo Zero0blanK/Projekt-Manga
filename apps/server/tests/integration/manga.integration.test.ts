@@ -3,6 +3,14 @@ import request from 'supertest';
 import app from '../../src/app.js';
 import prisma from '../../src/configs/prisma.config.js';
 
+/** A chapter row's title scope, for fixtures that keep the source's key as the row id
+ * (as every chapter stored before app-owned ids does). */
+const keyOf = (manga: { source: string; slug: string }, source_chapter_key: string) => ({
+  source: manga.source,
+  manga_slug: manga.slug,
+  source_chapter_key,
+});
+
 async function seedManga(
   overrides: Partial<{ id: string; slug: string; title: string; source: string }> = {},
 ) {
@@ -41,7 +49,7 @@ describe('POST /api/manga/add (real DB)', () => {
       source_manga_id: slug,
       title: 'Read Before Add',
       thumbnail_url: 'https://example.com/thumb.jpg',
-      chapter_id: chapterId,
+      source_chapter_key: chapterId,
       pages_read: 3,
     });
     expect(history.status).toBe(201);
@@ -61,8 +69,11 @@ describe('POST /api/manga/add (real DB)', () => {
 
     expect(add.status).toBe(201);
     const mangaId = add.body.data.id as string;
-    expect((await prisma.chapter.findUnique({ where: { id: chapterId } }))?.manga_id).toBe(mangaId);
-    expect((await prisma.history.findFirst({ where: { chapter_id: chapterId } }))?.manga_id).toBe(
+    // One row for the chapter: the placeholder the reads stood up, adopted by its key.
+    const rows = await prisma.chapter.findMany({ where: { source, manga_slug: slug } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ source_chapter_key: chapterId, manga_id: mangaId });
+    expect((await prisma.history.findFirst({ where: { chapter_id: rows[0].id } }))?.manga_id).toBe(
       mangaId,
     );
     const library = await request(app).get('/api/manga');
@@ -130,7 +141,13 @@ describe('POST /api/manga/add (real DB)', () => {
     expect(registration.status).toBe(201);
     const readerId = registration.body.data.user.id as string;
     await prisma.chapter.create({
-      data: { id: 'shared-read-chapter', manga_id: shared.id, url: '', chapter_number: 1 },
+      data: {
+        id: 'shared-read-chapter',
+        ...keyOf(shared, 'shared-read-chapter'),
+        manga_id: shared.id,
+        url: '',
+        chapter_number: 1,
+      },
     });
     await prisma.history.create({
       data: {
@@ -216,9 +233,19 @@ describe('POST /api/manga/add (real DB)', () => {
     const add = await reader.post('/api/manga/add').send({ ...payload, chapters: [chapter] });
     expect(add.status).toBe(201);
     expect(add.body.data.in_library).toBe(true);
-    expect((await prisma.chapter.findUnique({ where: { id: chapter.id } }))?.manga_id).toBe(
-      shadow.body.data.id,
-    );
+    expect(
+      (
+        await prisma.chapter.findUnique({
+          where: {
+            source_manga_slug_source_chapter_key: {
+              source,
+              manga_slug: slug,
+              source_chapter_key: chapter.id,
+            },
+          },
+        })
+      )?.manga_id,
+    ).toBe(shadow.body.data.id);
     const details = await reader.get(`/api/manga/details/${shadow.body.data.id}`);
     expect(details.body.data.in_library).toBe(true);
     expect(details.body.data.chapters[0].last_page_read).toBe(3);
@@ -299,7 +326,13 @@ describe('DELETE /api/manga/:manga_id/delete (real DB, real cascades)', () => {
       },
     });
     await prisma.chapter.create({
-      data: { id: 'ch-untouched', manga_id: untouched.id, url: 'x', chapter_number: 1 },
+      data: {
+        id: 'ch-untouched',
+        ...keyOf(untouched, 'ch-untouched'),
+        manga_id: untouched.id,
+        url: 'x',
+        chapter_number: 1,
+      },
     });
 
     const res = await request(app).delete('/api/manga/does-not-exist/delete');
@@ -316,7 +349,13 @@ describe('DELETE /api/manga/:manga_id/delete (real DB, real cascades)', () => {
       data: { manga_id: manga.id, artist: 'x', description: 'x', genres: 'x', status: 'ONGOING' },
     });
     await prisma.chapter.create({
-      data: { id: 'ch-1', manga_id: manga.id, url: 'x', chapter_number: 1 },
+      data: {
+        id: 'ch-1',
+        ...keyOf(manga, 'ch-1'),
+        manga_id: manga.id,
+        url: 'x',
+        chapter_number: 1,
+      },
     });
 
     const res = await request(app).delete(`/api/manga/${manga.id}/delete`);
@@ -330,7 +369,13 @@ describe('DELETE /api/manga/:manga_id/delete (real DB, real cascades)', () => {
   it('detaches (does not delete) chapters/history that have real read history', async () => {
     const manga = await seedManga({ slug: 'has-history' });
     await prisma.chapter.create({
-      data: { id: 'ch-h1', manga_id: manga.id, url: 'x', chapter_number: 1 },
+      data: {
+        id: 'ch-h1',
+        ...keyOf(manga, 'ch-h1'),
+        manga_id: manga.id,
+        url: 'x',
+        chapter_number: 1,
+      },
     });
     await prisma.history.create({
       data: {
@@ -369,10 +414,24 @@ describe('GET /api/manga (real DB)', () => {
   it('computes chapter_count/unread_count from real rows', async () => {
     const manga = await seedManga({ slug: 'counted' });
     await prisma.chapter.create({
-      data: { id: 'c1', manga_id: manga.id, url: 'x', chapter_number: 1, is_read: true },
+      data: {
+        id: 'c1',
+        ...keyOf(manga, 'c1'),
+        manga_id: manga.id,
+        url: 'x',
+        chapter_number: 1,
+        is_read: true,
+      },
     });
     await prisma.chapter.create({
-      data: { id: 'c2', manga_id: manga.id, url: 'x', chapter_number: 2, is_read: false },
+      data: {
+        id: 'c2',
+        ...keyOf(manga, 'c2'),
+        manga_id: manga.id,
+        url: 'x',
+        chapter_number: 2,
+        is_read: false,
+      },
     });
 
     const res = await request(app).get('/api/manga');

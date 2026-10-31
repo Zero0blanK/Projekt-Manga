@@ -126,9 +126,14 @@ describe('POST /api/manga/add', () => {
   it('fills placeholder chapter metadata when adopting a title without erasing reading progress', async () => {
     prismaMock.manga.findFirst.mockResolvedValueOnce({ ...sampleManga, in_library: false });
     prismaMock.manga.update.mockResolvedValueOnce({ ...sampleManga, in_library: true });
+    prismaMock.manga.findUniqueOrThrow.mockResolvedValueOnce({
+      source: 'mangadex',
+      slug: 'one-piece',
+    });
     prismaMock.chapter.findMany.mockResolvedValueOnce([
       {
-        id: 'chapter-3',
+        id: 'row-3',
+        source_chapter_key: 'chapter-3',
         chapter_number: 0,
         url: '',
         name: '',
@@ -160,8 +165,17 @@ describe('POST /api/manga/add', () => {
       });
 
     expect(res.status).toBe(201);
+    expect(prismaMock.chapter.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          source: 'mangadex',
+          manga_slug: 'one-piece',
+          source_chapter_key: { in: ['chapter-3'] },
+        },
+      }),
+    );
     expect(prismaMock.chapter.update).toHaveBeenCalledWith({
-      where: { id: 'chapter-3' },
+      where: { id: 'row-3' },
       data: expect.objectContaining({
         chapter_number: 3,
         page_count: 20,
@@ -169,7 +183,7 @@ describe('POST /api/manga/add', () => {
       }),
     });
     expect(prismaMock.chapter.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: ['chapter-3'] } },
+      where: { id: { in: ['row-3'] } },
       data: { manga_id: sampleManga.id },
     });
     expect(prismaMock.chapter.update.mock.calls[0][0].data).not.toHaveProperty('last_page_read');

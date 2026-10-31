@@ -25,7 +25,9 @@ export interface SyncPullResult {
   chapter_state: {
     id: string;
     user_id: string;
-    chapter_id: string;
+    source: string;
+    manga_slug: string;
+    source_chapter_key: string;
     is_read: boolean;
     is_bookmark: boolean;
     last_page_read: number;
@@ -46,7 +48,7 @@ export interface SyncPullResult {
     manga_slug: string;
     title: string | null;
     thumbnail_url: string | null;
-    chapter_id: string | null;
+    source_chapter_key: string | null;
     read_at: string;
     last_read: string;
     pages_read: number;

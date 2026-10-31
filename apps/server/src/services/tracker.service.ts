@@ -9,10 +9,21 @@ import trackerLinkRepository from '../repositories/trackerLink.repository.js';
 import chapterRepository from '../repositories/chapter.repository.js';
 import userChapterStateRepository from '../repositories/userChapterState.repository.js';
 import userMangaStateRepository from '../repositories/userMangaState.repository.js';
-import { getTrackerAdapter } from './trackers/index.js';
-import type { TrackerAdapter, TrackerProgress } from './trackers/index.js';
+import { getTrackerAdapter, listTrackerAvailability } from './trackers/index.js';
+import type {
+  TrackerAdapter,
+  TrackerCredentials,
+  TrackerProgress,
+  TrackerTokens,
+} from './trackers/index.js';
 import { encryptToken, decryptToken } from '../utils/tokenCrypto.js';
-import { NotFoundError, RateLimitedError, UnauthorizedError } from '../utils/customErrors.js';
+import {
+  NotFoundError,
+  RateLimitedError,
+  ServiceUnavailableError,
+  UnauthorizedError,
+  ValidationError,
+} from '../utils/customErrors.js';
 
 /**
  * Orchestrates the tracker-agnostic flow (OAuth, linking, progress/status/score
@@ -55,11 +66,60 @@ function consumeState(state: string, user_id: string): string | null {
   return entry.code_verifier;
 }
 
-const getAuthUrl = (user_id: string, tracker: TrackerServiceEnum): string => {
+/** Fails with a safe, specific message before any upstream call for a tracker this
+ * server isn't configured for (missing OAuth app env vars). */
+function getConfiguredAdapter(tracker: TrackerServiceEnum): TrackerAdapter {
   const adapter = getTrackerAdapter(tracker);
+  if (!adapter.isConfigured()) {
+    throw new ServiceUnavailableError(`${adapter.label} isn't set up on this server`);
+  }
+  return adapter;
+}
+
+const getAuthUrl = (user_id: string, tracker: TrackerServiceEnum): string => {
+  const adapter = getConfiguredAdapter(tracker);
+  if (!adapter.getAuthUrl) {
+    throw new ValidationError(`${adapter.label} connects with credentials, not a redirect`);
+  }
   const { state, code_verifier } = issueState(user_id);
   return adapter.getAuthUrl(state, code_verifier);
 };
+
+function saveAccount(user_id: string, tracker: TrackerServiceEnum, tokens: TrackerTokens) {
+  return trackerAccountRepository.upsert(user_id, tracker, {
+    access_token: encryptToken(tokens.access_token),
+    refresh_token: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
+    expires_at: tokens.expires_at,
+    tracker_user_id: tokens.tracker_user_id,
+    tracker_username: tokens.tracker_username,
+  });
+}
+
+/**
+ * Connects a `password` or `api_key` tracker. The submitted credentials only live for the
+ * duration of this call — what's persisted is whatever the adapter returns as its
+ * access token (encrypted), never the raw password. Returns the same safe shape as
+ * getConnectedTrackers.
+ */
+const connectWithCredentials = async (
+  user_id: string,
+  tracker: TrackerServiceEnum,
+  credentials: TrackerCredentials,
+) => {
+  const adapter = getConfiguredAdapter(tracker);
+  if (!adapter.connectWithCredentials) {
+    throw new ValidationError(`${adapter.label} connects through its own sign-in page`);
+  }
+  const tokens = await adapter.connectWithCredentials(credentials);
+  const account = await saveAccount(user_id, tracker, tokens);
+  return {
+    tracker: account.tracker,
+    tracker_username: account.tracker_username,
+    connected_at: account.created_at,
+  };
+};
+
+const getAvailableTrackers = () => listTrackerAvailability();
 
 const handleCallback = async (
   user_id: string,
@@ -71,16 +131,13 @@ const handleCallback = async (
   if (code_verifier === null) {
     throw new UnauthorizedError('Invalid or expired OAuth state');
   }
-  const adapter = getTrackerAdapter(tracker);
+  const adapter = getConfiguredAdapter(tracker);
+  if (!adapter.exchangeCode) {
+    throw new ValidationError(`${adapter.label} connects with credentials, not a redirect`);
+  }
   const tokens = await adapter.exchangeCode(code, code_verifier);
 
-  return await trackerAccountRepository.upsert(user_id, tracker, {
-    access_token: encryptToken(tokens.access_token),
-    refresh_token: tokens.refresh_token ? encryptToken(tokens.refresh_token) : null,
-    expires_at: tokens.expires_at,
-    tracker_user_id: tokens.tracker_user_id,
-    tracker_username: tokens.tracker_username,
-  });
+  return await saveAccount(user_id, tracker, tokens);
 };
 
 const getConnectedTrackers = async (user_id: string) => {
@@ -574,16 +631,16 @@ const syncNowForUser = async (user_id: string): Promise<{ checked: number; updat
 
 const DEFAULT_POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
-/** Starts the periodic external-change poll — a no-op if no tracker is configured at
- * all, so an install that never connects a tracker doesn't spend a timer on empty
- * queries every 30 minutes forever. `.unref()`'d so this timer alone never keeps the
- * process alive past a shutdown signal. */
+/** Starts the periodic external-change poll — a no-op if no tracker is usable at all.
+ * Kitsu, MangaUpdates, Komga and Kavita need no server configuration, so in practice the
+ * timer always runs; an install with no links just spends one cheap query per interval.
+ * `.unref()`'d so this timer alone never keeps the process alive past a shutdown signal. */
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 function initializeTrackerPolling(): void {
   if (pollTimer) {
     return;
   }
-  if (!process.env.ANILIST_CLIENT_ID && !process.env.MAL_CLIENT_ID) {
+  if (!listTrackerAvailability().some((t) => t.available)) {
     return;
   }
   const intervalMs = Number(process.env.TRACKER_POLL_INTERVAL_MS) || DEFAULT_POLL_INTERVAL_MS;
@@ -618,6 +675,8 @@ function initializeTrackerPolling(): void {
 const trackerService = {
   getAuthUrl,
   handleCallback,
+  connectWithCredentials,
+  getAvailableTrackers,
   getConnectedTrackers,
   disconnect,
   searchMedia,

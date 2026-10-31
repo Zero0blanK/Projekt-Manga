@@ -20,13 +20,28 @@ const mangaStateRowSchema = z.object({
   updated_at: z.string().datetime(),
 });
 
-const chapterStateRowSchema = z.object({
-  chapter_id: z.string().min(1),
+/** Chapters are named by the source's key within their title, not by row id: a device can
+ * read a chapter before it has ever pulled that title, and each side keeps its own rows. */
+const chapterRef = {
+  source: z.string().min(1).max(255),
+  manga_slug: z.string().min(1).max(512),
+  source_chapter_key: z.string().min(1).max(512),
+};
+
+const chapterStateFields = {
   is_read: z.boolean(),
   is_bookmark: z.boolean(),
   last_page_read: z.number().int().min(0),
   updated_at: z.string().datetime(),
-});
+};
+
+/** A chapter's state, named by key. Clients from before keys name the chapter by the
+ * server's row id instead (`chapter_id`); the server looks that row up, so an older
+ * desktop's push still applies until it updates. */
+const chapterStateRowSchema = z.union([
+  z.object({ ...chapterRef, ...chapterStateFields }),
+  z.object({ chapter_id: z.string().min(1).max(512), ...chapterStateFields }),
+]);
 
 /** Categories are referenced by name, not id — the pushing device may have created one
  * locally that the server has never seen, so the sync service resolves it via
@@ -46,7 +61,10 @@ const historyRowSchema = z.object({
   source_manga_id: z.string().min(1).nullable().optional(),
   title: z.string().max(255).nullable(),
   thumbnail_url: z.string().nullable(),
-  chapter_id: z.string().min(1).nullable(),
+  // Null for a title-level entry. Older clients send the chapter's row id as
+  // `chapter_id` instead; the server translates it.
+  source_chapter_key: chapterRef.source_chapter_key.nullable().default(null),
+  chapter_id: z.string().min(1).max(512).nullable().optional(),
   read_at: z.string().datetime(),
   last_read: z.string().datetime(),
   pages_read: z.number().int().min(0),

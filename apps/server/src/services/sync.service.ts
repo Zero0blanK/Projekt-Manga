@@ -3,6 +3,8 @@ import userMangaStateRepository from '../repositories/userMangaState.repository.
 import userChapterStateRepository from '../repositories/userChapterState.repository.js';
 import userMangaCategoryRepository from '../repositories/userMangaCategory.repository.js';
 import historyRepository from '../repositories/history.repository.js';
+import chapterRepository from '../repositories/chapter.repository.js';
+import { shareReadState } from './chapter.service.js';
 import categoryRepository from '../repositories/category.repository.js';
 import type { SyncPushBody } from '@projekt-manga/schemas';
 import { ValidationError } from '../utils/customErrors.js';
@@ -292,14 +294,33 @@ const push = async (user_id: string, body: SyncPushBody) =>
 
     const chapter_state = await applyEach(
       body.chapter_state ?? [],
-      (row) => row.chapter_id,
-      (row) =>
-        userChapterStateRepository.mergeIncoming(user_id, row.chapter_id, {
+      (row) => ('chapter_id' in row ? row.chapter_id : row.source_chapter_key),
+      async (row) => {
+        // An older client names the chapter by this server's row id; one it can't find
+        // is reported as failed rather than guessed at.
+        const ref =
+          'chapter_id' in row
+            ? await chapterRepository.refOfRow(row.chapter_id)
+            : {
+                source: row.source,
+                manga_slug: row.manga_slug,
+                source_chapter_key: row.source_chapter_key,
+              };
+        if (!ref) throw new Error('Unknown chapter');
+        // A chapter this server has not stored yet (read on the device before any list
+        // reached it) gets a placeholder, like a direct progress write would.
+        const chapter = await chapterRepository.resolveChapter(ref);
+        await userChapterStateRepository.mergeIncoming(user_id, chapter.id, {
           is_read: row.is_read,
           is_bookmark: row.is_bookmark,
           last_page_read: row.last_page_read,
           updated_at: new Date(row.updated_at),
-        }),
+        });
+        // A chapter read on a linked source, offline: read on the main title as well. Only
+        // reads travel here; an old unread row from another device must not clear one.
+        if (row.is_read)
+          await shareReadState(chapter.manga_id, [chapter.chapter_number], true, user_id);
+      },
     );
 
     const manga_category = await applyEach(
@@ -331,7 +352,7 @@ const push = async (user_id: string, body: SyncPushBody) =>
     const history = await applyEach(
       body.history ?? [],
       (row) => row.id,
-      (row) =>
+      async (row) =>
         historyRepository.applyIncoming(user_id, {
           id: row.id,
           source: row.source,
@@ -340,7 +361,13 @@ const push = async (user_id: string, body: SyncPushBody) =>
           source_manga_id: row.source_manga_id ?? null,
           title: row.title,
           thumbnail_url: row.thumbnail_url,
-          chapter_id: row.chapter_id,
+          source_chapter_key:
+            row.source_chapter_key ??
+            (row.chapter_id
+              ? ((await chapterRepository.keyOfRow(row.chapter_id, row.source, row.manga_slug)) ??
+                // Rows from before app-owned ids were keyed by the source's own id.
+                row.chapter_id)
+              : null),
           read_at: new Date(row.read_at),
           last_read: new Date(row.last_read),
           pages_read: row.pages_read,

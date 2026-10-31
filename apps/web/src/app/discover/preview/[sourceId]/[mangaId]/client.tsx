@@ -98,9 +98,8 @@ function SourcePreviewContent({
    * authority on what has been read; history only adds where someone left off inside a
    * chapter.
    *
-   * Keyed by URL because the two sides do not share an id: `Chapters.id` is the source's
-   * own identifier and `MangaChapterRecord.id` is the database row's, while the URL is
-   * the same string on both (it is what the row was created from).
+   * Keyed by `source_chapter_key`: a source chapter's `id` is the source's own identifier,
+   * which the library row stores under that name (its own `id` is the row's).
    */
   const [libraryChapters, setLibraryChapters] = useState<Map<string, MangaChapterRecord>>(
     new Map(),
@@ -145,10 +144,10 @@ function SourcePreviewContent({
         if (controller.signal.aborted) return;
         const progress = new Map<string, HistoryEntry>();
         for (const row of rows) {
-          if (row.source !== sourceId || row.manga_slug !== details.slug || !row.chapter_id)
-            continue;
-          const previous = progress.get(row.chapter_id);
-          if (!previous || row.last_read > previous.last_read) progress.set(row.chapter_id, row);
+          const key = row.source_chapter_key;
+          if (row.source !== sourceId || row.manga_slug !== details.slug || !key) continue;
+          const previous = progress.get(key);
+          if (!previous || row.last_read > previous.last_read) progress.set(key, row);
         }
         setChapterProgress(progress);
         setHistoryReadIds(
@@ -233,7 +232,7 @@ function SourcePreviewContent({
     getMangaChapters(rowId, details.slug, sourceId, controller.signal)
       .then((records) => {
         if (controller.signal.aborted) return;
-        setLibraryChapters(new Map(records.filter((r) => r.url).map((r) => [r.url, r])));
+        setLibraryChapters(new Map(records.map((r) => [r.source_chapter_key, r])));
       })
       // Deliberately silent: the source listing is still fully usable without the
       // library's read marks, and `progressError` already covers history failing.
@@ -241,9 +240,9 @@ function SourcePreviewContent({
     return () => controller.abort();
   }, [rowId, details.slug, sourceId, progressRetry]);
 
-  /** A source chapter's library row, matched on URL. */
+  /** A source chapter's library row. */
   const libraryChapterFor = useCallback(
-    (chapter: { url: string }) => libraryChapters.get(chapter.url),
+    (chapter: { id: string }) => libraryChapters.get(chapter.id),
     [libraryChapters],
   );
 
@@ -260,7 +259,7 @@ function SourcePreviewContent({
   const readChapterIds = useMemo(() => {
     const ids = new Set(historyReadIds);
     for (const chapter of chapters) {
-      if (libraryChapters.get(chapter.url)?.is_read) ids.add(chapter.id);
+      if (libraryChapters.get(chapter.id)?.is_read) ids.add(chapter.id);
     }
     for (const [id, read] of readOverrides) {
       if (read) ids.add(id);
@@ -280,7 +279,7 @@ function SourcePreviewContent({
     if (libraryChapters.size === 0) return chapterProgress;
     const merged = new Map(chapterProgress);
     for (const chapter of chapters) {
-      const row = libraryChapters.get(chapter.url);
+      const row = libraryChapters.get(chapter.id);
       if (!row) continue;
       const existing = merged.get(chapter.id);
       // Whichever side got further; neither should ever move a reader backwards.
@@ -292,6 +291,7 @@ function SourcePreviewContent({
           source: sourceId,
           manga_slug: details.slug,
           chapter_id: row.id,
+          source_chapter_key: row.source_chapter_key,
           pages_read: 0,
           time_read: 0,
           last_read: row.updated_at ?? '',
@@ -344,8 +344,13 @@ function SourcePreviewContent({
    * menu can work off what's already loaded instead of re-fetching. */
   const chapterRecords: MangaChapterRecord[] = useMemo(
     () =>
+      // `id` stays the source's key here: everything downstream of this list (downloads,
+      // marks) names chapters the way the source does.
       chapters.map((c) => ({
         id: c.id,
+        source: sourceId,
+        manga_slug: details.slug,
+        source_chapter_key: c.id,
         name: c.name || null,
         url: c.url,
         scanlator: c.scanlator ?? null,
@@ -366,7 +371,7 @@ function SourcePreviewContent({
         release_date: c.release_date ?? null,
         created_at: c.release_date ?? '',
       })) as MangaChapterRecord[],
-    [chapters, readChapterIds, chapterProgress, libraryChapterFor],
+    [chapters, readChapterIds, chapterProgress, libraryChapterFor, sourceId, details.slug],
   );
 
   /** The library action bar renders from a `Manga`; before the list refreshes we already

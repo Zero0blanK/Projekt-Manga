@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-const { progress, runLibraryUpdate, refresh } = vi.hoisted(() => ({
+const { progress, runLibraryUpdate, refresh, sendChapterAlert } = vi.hoisted(() => ({
+  sendChapterAlert: vi.fn(async () => ({ sent: 1, skipped: false })),
   progress: { value: null as { done: number; total: number; title: string; found: number } | null },
   runLibraryUpdate: vi.fn(),
   refresh: vi.fn(),
@@ -15,13 +16,21 @@ vi.mock('@/lib/library-store', () => ({
   }),
   useLibraryState: () => ({ shelf: {} }),
 }));
-vi.mock('@/lib/app-store', () => ({ useSetting: (_key: string, fallback: unknown) => fallback }));
+vi.mock('@/lib/app-store', () => ({
+  useSetting: (_key: string, fallback: unknown) => fallback,
+  useAppState: (select: (state: object) => unknown) =>
+    select({ settings: {}, categoryMembers: {} }),
+}));
 vi.mock('@/lib/run-library-update', () => ({
   runLibraryUpdate,
   useLibraryUpdateProgress: () => progress.value,
 }));
-vi.mock('@/lib/library-update', () => ({ entriesInGlobalUpdate: (library: unknown[]) => library }));
+vi.mock('@/lib/library-update', () => ({
+  entriesInGlobalUpdate: (library: unknown[]) => library,
+  useGlobalUpdateRules: () => ({}),
+}));
 vi.mock('@/hooks/use-toast', () => ({ toast: vi.fn() }));
+vi.mock('@projekt-manga/api-client', () => ({ sendChapterAlert }));
 vi.mock('@/lib/window-notification', () => ({ showWindowNotification: vi.fn() }));
 
 const { UpdateLibraryButton } = await import('@/components/library/update-library-button');
@@ -57,5 +66,38 @@ describe('library toolbar icon buttons', () => {
     // Visible progress is LibraryUpdateDial's job; the button renders no bar or caption,
     // so the toolbar does not resize during an update.
     expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
+describe('a library update started by hand', () => {
+  it('sends the outside-the-app alert when it finds chapters', async () => {
+    runLibraryUpdate.mockResolvedValue({
+      found: 3,
+      failed: [],
+      cancelled: false,
+      foundByManga: { one: 3 },
+      foundTitles: { one: 'One' },
+    });
+    const { fireEvent, waitFor } = await import('@testing-library/react');
+    render(<UpdateLibraryButton />);
+    fireEvent.click(screen.getByRole('button', { name: 'Update library' }));
+    await waitFor(() =>
+      expect(sendChapterAlert).toHaveBeenCalledWith({ titles: [{ title: 'One', count: 3 }] }),
+    );
+  });
+
+  it('sends nothing when it finds nothing', async () => {
+    runLibraryUpdate.mockResolvedValue({
+      found: 0,
+      failed: [],
+      cancelled: false,
+      foundByManga: {},
+      foundTitles: {},
+    });
+    const { fireEvent, waitFor } = await import('@testing-library/react');
+    render(<UpdateLibraryButton />);
+    fireEvent.click(screen.getByRole('button', { name: 'Update library' }));
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+    expect(sendChapterAlert).not.toHaveBeenCalled();
   });
 });

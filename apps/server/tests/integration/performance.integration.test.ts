@@ -53,6 +53,9 @@ describe('large-library query baselines (real SQLite)', () => {
     const chapters = titles.flatMap((title, titleIndex) =>
       Array.from({ length: chaptersPerTitle }, (_, chapterIndex) => ({
         id: `perf-chapter-${titleIndex}-${chapterIndex}`,
+        source: title.source,
+        manga_slug: title.slug,
+        source_chapter_key: `perf-chapter-${titleIndex}-${chapterIndex}`,
         manga_id: title.id,
         url: 'https://example.test/chapter',
         name: `Chapter ${chapterIndex + 1}`,
@@ -62,6 +65,9 @@ describe('large-library query baselines (real SQLite)', () => {
     chapters.push(
       ...Array.from({ length: largeTitleExtraChapters }, (_, index) => ({
         id: `perf-long-series-${index}`,
+        source: titles[0].source,
+        manga_slug: titles[0].slug,
+        source_chapter_key: `perf-long-series-${index}`,
         manga_id: titles[0].id,
         url: 'https://example.test/long-series',
         name: `Chapter ${chaptersPerTitle + index + 1}`,

@@ -1,0 +1,49 @@
+{
+  "_note": "Shaped after Shikimori's documented API responses (shikimori.one/api/doc); trimmed, not a live capture.",
+  "token": {
+    "access_token": "shiki-access",
+    "token_type": "Bearer",
+    "expires_in": 86400,
+    "refresh_token": "shiki-refresh",
+    "scope": "user_rates",
+    "created_at": 1730000000
+  },
+  "whoami": { "id": 4242, "nickname": "reader" },
+  "search": [
+    {
+      "id": 2,
+      "name": "Berserk",
+      "russian": "Берсерк",
+      "image": {
+        "original": "/system/mangas/original/2.jpg?1",
+        "preview": "/system/mangas/preview/2.jpg?1"
+      },
+      "kind": "manga"
+    },
+    {
+      "id": 3,
+      "name": "",
+      "russian": "Без обложки",
+      "image": {
+        "original": "/assets/globals/missing_original.jpg",
+        "preview": "/assets/globals/missing_preview.jpg"
+      },
+      "kind": "manga"
+    }
+  ],
+  "rates": [
+    {
+      "id": 31337,
+      "user_id": 4242,
+      "target_id": 2,
+      "target_type": "Manga",
+      "score": 9,
+      "status": "watching",
+      "rewatches": 0,
+      "episodes": 0,
+      "volumes": 10,
+      "chapters": 300,
+      "updated_at": "2026-09-15T08:30:00.000+03:00"
+    }
+  ]
+}

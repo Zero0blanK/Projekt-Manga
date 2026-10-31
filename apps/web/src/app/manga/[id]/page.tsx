@@ -3,7 +3,9 @@ import { notFound } from 'next/navigation';
 import { getRequestManga } from '@/lib/server-manga';
 import { MangaDetailLayout } from '@/components/manga-detail/detail-layout';
 import { MangaActionBar } from '@/components/manga-detail/action-bar';
+import { EditMangaDialog } from '@/components/manga-detail/edit-manga-dialog';
 import { ChapterList } from '@/components/manga-detail/chapter-list';
+import { LinkedSources } from '@/components/manga-detail/linked-sources';
 import { SimilarTitles } from '@/components/manga-detail/similar-titles';
 
 export async function generateMetadata({
@@ -34,8 +36,14 @@ export default async function MangaDetailPage({ params }: { params: Promise<{ id
       manga={manga}
       backHref="/"
       backLabel="library"
-      actions={<MangaActionBar manga={manga} />}
+      actions={
+        <>
+          <MangaActionBar manga={manga} />
+          <EditMangaDialog manga={manga} />
+        </>
+      }
     >
+      <LinkedSources manga={manga} />
       <ChapterList manga={manga} />
       <SimilarTitles manga={manga} />
     </MangaDetailLayout>

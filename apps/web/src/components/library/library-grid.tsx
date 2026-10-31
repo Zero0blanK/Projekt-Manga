@@ -4,9 +4,12 @@ import { MangaGrid } from '@/components/manga-grid';
 import { LibraryListRow } from '@/components/library/library-list-row';
 import { EmptyState, RowList } from '@/components/page-shell';
 import type { Manga } from '@/lib/manga-data';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LibraryTitleContextMenu } from './library-title-context-menu';
 import { useMangaLibrary } from '@/lib/library-store';
+/** List rows mounted at first, and added each time the end comes into view. */
+const CHUNK = 60;
+
 export function LibraryGrid({
   manga,
   view,
@@ -18,52 +21,38 @@ export function LibraryGrid({
   resetKey,
 }: {
   manga: Manga[];
-  view: 'grid' | 'list';
+  view: 'grid' | 'compact' | 'list';
   onShowAll: () => void;
   selected?: string[];
   onSelect?: (id: string) => void;
   onContextOpen?: () => void;
   density?: 'compact' | 'comfortable' | 'spacious';
-  /** Filter/sort/view signature; paging returns to page 1 only when it changes, not on refetch. */
+  /** Filter/sort/view signature; the list goes back to its first rows only when it
+   * changes, not on refetch. */
   resetKey?: string;
 }) {
-  const [page, setPage] = useState(0);
   const { refresh } = useMangaLibrary();
+  // The list view reveals rows as you scroll; the cover grid does the same on its own.
+  const [revealed, setRevealed] = useState(CHUNK);
   const [seenResetKey, setSeenResetKey] = useState(resetKey);
   if (seenResetKey !== resetKey) {
     setSeenResetKey(resetKey);
-    setPage(0);
+    setRevealed(CHUNK);
   }
-  const goToPage = (next: number) => {
-    setPage(next);
-    window.scrollTo({ top: 0 });
-  };
-  const pageCount = Math.max(1, Math.ceil(manga.length / 60)),
-    currentPage = Math.min(page, pageCount - 1);
-  const displayed = manga.slice(currentPage * 60, (currentPage + 1) * 60);
-  const navigation = manga.length > 60 && (
-    <nav aria-label="Library pages" className="my-4 flex items-center justify-center gap-4 text-sm">
-      <button
-        type="button"
-        disabled={currentPage === 0}
-        onClick={() => goToPage(currentPage - 1)}
-        className="rounded border p-2 disabled:opacity-40"
-      >
-        Previous
-      </button>
-      <span>
-        Page {currentPage + 1} of {pageCount}
-      </span>
-      <button
-        type="button"
-        disabled={currentPage === pageCount - 1}
-        onClick={() => goToPage(currentPage + 1)}
-        className="rounded border p-2 disabled:opacity-40"
-      >
-        Next
-      </button>
-    </nav>
-  );
+  const sentinel = useRef<HTMLDivElement | null>(null);
+  const more = view === 'list' && revealed < manga.length;
+  useEffect(() => {
+    const node = sentinel.current;
+    if (!more || !node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) setRevealed((current) => current + CHUNK);
+      },
+      { rootMargin: '600px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [more, revealed]);
   if (!manga.length)
     return (
       <EmptyState>
@@ -83,23 +72,27 @@ export function LibraryGrid({
   return (
     <LibraryTitleContextMenu manga={manga} onOpen={() => onContextOpen?.()} refresh={refresh}>
       <div className="pb-24">
-        {navigation}
-        {view === 'grid' ? (
+        {view !== 'list' ? (
           <MangaGrid
             className={density === 'compact' ? '!gap-3' : density === 'spacious' ? '!gap-8' : ''}
           >
-            {displayed.map((item) => (
-              <MangaCard key={item.id} manga={item} {...selection(item)} />
+            {manga.map((item) => (
+              <MangaCard
+                key={item.id}
+                manga={item}
+                compact={view === 'compact'}
+                {...selection(item)}
+              />
             ))}
           </MangaGrid>
         ) : (
           <RowList>
-            {displayed.map((item) => (
+            {manga.slice(0, revealed).map((item) => (
               <LibraryListRow key={item.id} manga={item} {...selection(item)} />
             ))}
           </RowList>
         )}
-        {navigation}
+        {more && <div ref={sentinel} aria-hidden="true" />}
       </div>
     </LibraryTitleContextMenu>
   );

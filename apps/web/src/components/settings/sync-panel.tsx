@@ -8,15 +8,38 @@ import {
   hasLocalDataBridge,
   type DownloadStats,
 } from '@projekt-manga/api-client';
-import { Panel, Field, Group, Toggle, Select } from '@/components/settings/field-controls';
+import {
+  Panel,
+  Field,
+  Group,
+  Toggle,
+  Select,
+  OptionSelect,
+  NumberSelect,
+} from '@/components/settings/field-controls';
+import {
+  AUTO_DOWNLOAD_NEW,
+  DELETE_AFTER_READ,
+  DOWNLOAD_AHEAD,
+  categoryScope,
+} from '@/lib/auto-downloads';
 import { DownloadFolderField } from '@/components/settings/download-folder-field';
 import { OpenFolderButton } from '@/components/downloads/open-folder-button';
 import { useCurrentUser } from '@/lib/session-resource';
 import { isAborted, reportError } from '@/lib/report-error';
 import { useRestorePending } from '@/lib/restore-job';
 import { runDesktopSync, useDesktopSyncState } from '@/lib/desktop-sync';
-import { useSetting } from '@/lib/app-store';
+import { actions, useAppState, useSetting } from '@/lib/app-store';
+import { UPDATE_SETTING, parseCategoryList } from '@/lib/library-update';
+import { CATEGORY_UPDATE_SETTING, parseCategoryIntervals } from '@/lib/update-schedule';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ChevronDown } from 'lucide-react';
 
 type DesktopInitState = {
   seedStatus: 'idle' | 'running' | 'done' | 'failed';
@@ -55,6 +78,8 @@ function formatBytes(bytes: number): string {
 }
 
 export function SyncPanel() {
+  // Library categories, for "Download new chapters" scoped to one of them.
+  const categoryNames = Object.keys(useAppState((s) => s.categoryMembers)).sort();
   const [stats, setStats] = useState<DownloadStats | null>(null);
   const [limitGb, setLimitGb] = useState('');
   const [savingLimit, setSavingLimit] = useState(false);
@@ -151,10 +176,7 @@ export function SyncPanel() {
               : '—'}
           </span>
         </Field>
-        <Field
-          label="Storage limit"
-          hint="Shared by this device/server. Stops new download writes when reached; lowering it never deletes existing downloads."
-        >
+        <Field label="Storage limit" hint="New downloads stop at this size; nothing is deleted">
           <div className="space-y-2">
             <form
               onSubmit={(event) => {
@@ -208,15 +230,30 @@ export function SyncPanel() {
       </Panel>
 
       <Panel title="Library updates" subtitle="What Update Library checks">
+        <Field label="Skip finished titles" hint="Skip completed and cancelled series">
+          <Toggle settingKey={UPDATE_SETTING.skipCompleted} />
+        </Field>
+        <Field label="Skip titles with unread chapters" hint="Wait until you've caught up">
+          <Toggle settingKey={UPDATE_SETTING.skipUnread} />
+        </Field>
+        <Field label="Skip titles not started" hint="Skip titles you haven't read yet">
+          <Toggle settingKey={UPDATE_SETTING.skipNotStarted} />
+        </Field>
         <Field
-          label="Skip finished titles"
-          hint="Leave out completed and cancelled series — nothing new is coming for them"
+          label="Smart update"
+          hint="Scheduled updates skip titles not expected to release soon"
         >
-          <Toggle settingKey="skipCompletedOnUpdate" />
+          <Toggle settingKey={UPDATE_SETTING.smartUpdate} />
+        </Field>
+        <Field label="Only these categories" hint="None selected checks every category">
+          <CategoryListSetting settingKey={UPDATE_SETTING.includeCategories} />
+        </Field>
+        <Field label="Never these categories" hint="Wins over the list above">
+          <CategoryListSetting settingKey={UPDATE_SETTING.excludeCategories} />
         </Field>
         <Field
           label="Check a title when you reload its page"
-          hint="Reloading a series' page fetches its new chapters. Opening it normally doesn't — use the refresh button on the page for that."
+          hint="Reloading a series page fetches new chapters"
         >
           <Toggle settingKey="checkChaptersOnReload" defaultOn />
         </Field>
@@ -226,11 +263,21 @@ export function SyncPanel() {
         >
           <Toggle settingKey="refreshCoversOnUpdate" />
         </Field>
+        <Group label="Per category" />
+        <Field
+          label="Category check intervals"
+          hint="Scheduled checks for a category's titles. In several categories, the shortest wins; a source's minimum still applies"
+        >
+          <CategoryIntervalSetting />
+        </Field>
+        <Field label="Mute new-chapter alerts" hint="New chapters in these categories stay silent">
+          <CategoryListSetting settingKey={CATEGORY_UPDATE_SETTING.mutedCategories} />
+        </Field>
       </Panel>
 
       <Panel title="Cross-device sync" subtitle="Account sync at work">
         {isDesktop && (
-          <Field label="Local library" hint="The desktop keeps a local copy for offline reading">
+          <Field label="Local library" hint="Kept on this device for offline reading">
             <span role="status" className="text-xs text-muted-foreground">
               {!desktopInit
                 ? 'Checking local library…'
@@ -245,23 +292,17 @@ export function SyncPanel() {
         {!user ? (
           <Field
             label="Cross-device sync"
-            hint="Create an account in the Profile tab to sync your library, progress, and history across devices"
+            hint="Create an account in Profile to sync across devices"
             disabled
           >
             <span className="text-xs text-muted-foreground">Local only</span>
           </Field>
         ) : isDesktop ? (
           <>
-            <Field
-              label="Sync this device"
-              hint="Stop new account sync runs on this desktop. A sync already in progress may finish; local reading and downloads continue to work."
-            >
+            <Field label="Sync this device" hint="Pause account sync on this desktop">
               <Toggle settingKey="desktopSyncEnabled" defaultOn label="Sync this device" />
             </Field>
-            <Field
-              label="Automatic sync"
-              hint="Runs while enabled, active, and online, at the chosen interval"
-            >
+            <Field label="Automatic sync" hint="Syncs at this interval while online">
               <Select
                 settingKey="desktopSyncInterval"
                 options={['Off', '5 minutes', '15 minutes', '30 minutes', '60 minutes']}
@@ -272,10 +313,10 @@ export function SyncPanel() {
               label="Sync with server"
               hint={
                 online === false
-                  ? 'Offline. Local reading and downloads remain available; sync can be retried when online.'
+                  ? 'Offline; reading and downloads still work'
                   : desktopSyncEnabled
-                    ? 'Pushes local changes, then pulls the merged result'
-                    : 'Sync is paused for this device; local reading and downloads remain available'
+                    ? 'Sends local changes, then fetches the result'
+                    : 'Paused on this device'
               }
             >
               <div className="flex items-center gap-3">
@@ -314,27 +355,141 @@ export function SyncPanel() {
             </Field>
           </>
         ) : (
-          <Field
-            label="Cross-device sync"
-            hint="Signed in — your library, progress, and history are read live from your account on every device, nothing to sync in a browser"
-          >
+          <Field label="Cross-device sync" hint="Your account is already live on every device">
             <span className="text-xs text-muted-foreground">Always up to date</span>
           </Field>
         )}
       </Panel>
 
-      <Panel title="Download automation" subtitle="Background download behavior">
+      <Panel title="Download automation" subtitle="Downloads that happen on their own">
         <Group label="Downloads" />
-        {/* TODO: needs the scheduler described in the Notifications panel — nothing runs
-            after a library update to queue new chapters. */}
         <Field
-          label="Auto-download new chapters"
-          hint="No scheduler runs after an update to queue them"
-          disabled
+          label="Download new chapters"
+          hint="Chapters a library update finds, for the titles chosen here"
         >
-          <span className="text-xs text-muted-foreground">Coming soon.</span>
+          <OptionSelect
+            settingKey={AUTO_DOWNLOAD_NEW}
+            defaultValue="off"
+            options={[
+              { value: 'off', label: 'Off' },
+              { value: 'all', label: 'All titles' },
+              ...categoryNames.map((name) => ({ value: categoryScope(name), label: name })),
+            ]}
+          />
+        </Field>
+        <Field label="Download ahead" hint="Chapters after the one you're reading">
+          <NumberSelect
+            settingKey={DOWNLOAD_AHEAD}
+            defaultValue={0}
+            options={[0, 1, 2, 3, 5]}
+            format={(value) => (value === 0 ? 'Off' : `${value} chapter${value === 1 ? '' : 's'}`)}
+          />
+        </Field>
+        <Field label="Delete after reading" hint="Bookmarked chapters are always kept">
+          <OptionSelect
+            settingKey={DELETE_AFTER_READ}
+            defaultValue="off"
+            options={[
+              { value: 'off', label: 'Off' },
+              { value: 'immediately', label: 'Right after reading' },
+              { value: 'afterNext', label: 'After the next chapter' },
+            ]}
+          />
         </Field>
       </Panel>
+    </div>
+  );
+}
+
+/** Picks library categories for an update rule, stored as a JSON list. */
+function CategoryListSetting({ settingKey }: { settingKey: string }) {
+  const categories = useAppState((state) => state.customCategories);
+  const selected = parseCategoryList(useSetting(settingKey, ''));
+  if (categories.length === 0)
+    return <span className="text-xs text-muted-foreground">No categories yet</span>;
+  const toggle = (name: string) => {
+    const next = selected.includes(name)
+      ? selected.filter((item) => item !== name)
+      : [...selected, name];
+    actions.setSetting(settingKey, next.length > 0 ? JSON.stringify(next) : '');
+  };
+  return (
+    <div className="flex max-w-sm flex-wrap justify-end gap-1.5">
+      {categories.map((name) => {
+        const on = selected.includes(name);
+        return (
+          <button
+            key={name}
+            type="button"
+            aria-pressed={on}
+            onClick={() => toggle(name)}
+            className={`rounded-full border px-2.5 py-1 text-xs transition ${
+              on
+                ? 'border-primary/60 bg-primary/15 text-primary'
+                : 'border-border/60 text-muted-foreground hover:bg-accent hover:text-foreground'
+            }`}
+          >
+            {name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const CATEGORY_INTERVAL_OPTIONS = [1, 3, 6, 12, 24, 48, 72, 168];
+
+/** Per-category scheduled-check intervals, stored as a JSON `{ category: hours }` map. */
+function CategoryIntervalSetting() {
+  const categories = useAppState((state) => state.customCategories);
+  const intervals = parseCategoryIntervals(useSetting(CATEGORY_UPDATE_SETTING.intervals, ''));
+  if (categories.length === 0)
+    return <span className="text-xs text-muted-foreground">No categories yet</span>;
+  const choose = (name: string, hours: number | null) => {
+    const next = { ...intervals };
+    if (hours === null) delete next[name];
+    else next[name] = hours;
+    actions.setSetting(
+      CATEGORY_UPDATE_SETTING.intervals,
+      Object.keys(next).length > 0 ? JSON.stringify(next) : '',
+    );
+  };
+  return (
+    <div className="space-y-1.5">
+      {categories.map((name) => {
+        const hours = intervals[name];
+        return (
+          <div key={name} className="flex items-center justify-end gap-3">
+            <span className="truncate text-xs text-muted-foreground">{name}</span>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger
+                aria-label={`${name} check interval`}
+                className="flex h-8 min-w-32 items-center justify-between gap-2 rounded-lg border border-border/60 bg-background px-3 py-1.5 text-xs text-foreground outline-none focus:border-primary/60"
+              >
+                {hours === undefined ? 'Global interval' : `${hours} hours`}
+                <ChevronDown className="h-3.5 w-3.5 opacity-50" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-32">
+                <DropdownMenuItem
+                  onSelect={() => choose(name, null)}
+                  className={`text-xs ${hours === undefined ? 'text-primary' : ''}`}
+                >
+                  Global interval
+                </DropdownMenuItem>
+                {CATEGORY_INTERVAL_OPTIONS.map((option) => (
+                  <DropdownMenuItem
+                    key={option}
+                    onSelect={() => choose(name, option)}
+                    className={`text-xs ${option === hours ? 'text-primary' : ''}`}
+                  >
+                    {option} hours
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        );
+      })}
     </div>
   );
 }

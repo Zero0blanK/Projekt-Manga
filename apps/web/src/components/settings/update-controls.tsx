@@ -145,7 +145,7 @@ export function UpdateControls() {
       <Field
         label="Download automatically"
         nested
-        hint="Off means you choose when to download. Updates still install when you quit."
+        hint="When off, you choose when to download updates"
       >
         <ToggleSwitch
           on={state.autoDownload}

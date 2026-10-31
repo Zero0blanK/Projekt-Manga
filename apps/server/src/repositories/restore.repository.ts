@@ -1,7 +1,12 @@
 import prisma from '../configs/prisma.config.js';
 import { isMangaStatus } from '@projekt-manga/types';
+import { backupChapterKey } from '@projekt-manga/schemas';
 import type { PreviewBackupBody, ReplaceBackupBody } from '@projekt-manga/schemas';
 import type { Prisma } from '@prisma/client';
+import { randomUUID as createId } from 'node:crypto';
+import mangaOverrideRepository from './mangaOverride.repository.js';
+import mangaLinkRepository from './mangaLink.repository.js';
+import { ValidationError } from '../utils/customErrors.js';
 
 const LOOKUP_CHUNK_SIZE = 200;
 const INSERT_CHUNK_SIZE = 50;
@@ -11,7 +16,6 @@ type ExistingRestoreChapter = {
   manga_id: string | null;
   last_page_read: number;
   is_read: boolean;
-  manga: { source: string; slug: string } | null;
 };
 
 function chunks<T>(items: T[], size: number): T[][] {
@@ -26,7 +30,86 @@ function mangaKey(source: string, slug: string): string {
   return `${source}\0${slug}`;
 }
 
-export async function previewBackupConflicts(backup: PreviewBackupBody, userId?: string) {
+/** A chapter as backups name it: the source's key within its title. */
+function chapterKey(source: string, slug: string, key: string): string {
+  return `${source}\0${slug}\0${key}`;
+}
+
+/** Backups written before chapters had their own key carried it as `chapter_id`. */
+function historyChapterKey(row: {
+  source_chapter_key?: string | null;
+  chapter_id?: string | null;
+}): string | null {
+  return row.source_chapter_key ?? row.chapter_id ?? null;
+}
+
+function historyKey(row: { source: string; manga_slug: string }, key: string | null): string {
+  return `${row.source}\0${row.manga_slug}\0${key ?? ''}`;
+}
+
+/** Stored chapters for the given title-scoped keys, in bounded queries. */
+type BackupTitle = ReplaceBackupBody['manga'][number];
+
+/**
+ * A backed-up title as the shared catalog should store it.
+ *
+ * An export reads titles through the details endpoint, which lays the owner's edits over the
+ * catalog, so an edited entry's title/author/description/status are the edited values. Its
+ * `override.original` carries the catalog's own; restoring those keeps an edit out of the
+ * shared row, and the edit itself goes back into manga_overrides afterwards.
+ */
+function catalogEntry<T extends Pick<BackupTitle, 'title' | 'author' | 'description' | 'status'>>(
+  entry: T & { override?: BackupTitle['override'] },
+): T {
+  const original = entry.override?.original;
+  if (!original) return entry;
+  return {
+    ...entry,
+    title: original.title,
+    author: original.author,
+    description: original.description ?? entry.description,
+    status: original.status ?? entry.status,
+  };
+}
+
+async function findChaptersByKey(
+  db: Pick<typeof prisma, 'chapter'>,
+  refs: Array<{ source: string; manga_slug: string; source_chapter_key: string }>,
+) {
+  const byTitle = new Map<string, { source: string; manga_slug: string; keys: string[] }>();
+  for (const ref of refs) {
+    const title = mangaKey(ref.source, ref.manga_slug);
+    const group = byTitle.get(title) ?? {
+      source: ref.source,
+      manga_slug: ref.manga_slug,
+      keys: [],
+    };
+    group.keys.push(ref.source_chapter_key);
+    byTitle.set(title, group);
+  }
+  const found = new Map<string, ExistingRestoreChapter>();
+  for (const { source, manga_slug, keys } of byTitle.values()) {
+    for (const group of chunks([...new Set(keys)], LOOKUP_CHUNK_SIZE)) {
+      const rows = await db.chapter.findMany({
+        where: { source, manga_slug, source_chapter_key: { in: group } },
+        select: {
+          id: true,
+          manga_id: true,
+          last_page_read: true,
+          is_read: true,
+          source_chapter_key: true,
+        },
+      });
+      for (const { source_chapter_key, ...row } of rows) {
+        found.set(chapterKey(source, manga_slug, source_chapter_key), row);
+      }
+    }
+  }
+  return found;
+}
+
+export async function previewBackupConflicts(input: PreviewBackupBody, userId?: string) {
+  const backup = { ...input, manga: input.manga.map(catalogEntry) };
   const identities = new Map(
     backup.manga.map((entry) => [mangaKey(entry.source, entry.slug), entry]),
   );
@@ -136,90 +219,33 @@ export async function previewBackupConflicts(backup: PreviewBackupBody, userId?:
     }
   }
 
-  const expectedChapterOwner = new Map<string, string>();
-  const expectedChapterLabel = new Map<string, string>();
-  const chapterIdentityConflictExamples: string[] = [];
-  let chapterIdentityConflicts = 0;
-  const recordExpectedChapterOwner = (id: string, owner: string, label: string) => {
-    const previousOwner = expectedChapterOwner.get(id);
-    if (previousOwner && previousOwner !== owner) {
-      chapterIdentityConflicts++;
-      if (chapterIdentityConflictExamples.length < 20) chapterIdentityConflictExamples.push(label);
-      return;
-    }
-    expectedChapterOwner.set(id, owner);
-    expectedChapterLabel.set(id, label);
-  };
-  for (const entry of entriesToRestore) {
-    const owner = mangaKey(entry.source, entry.slug);
-    for (const chapter of entry.chapters) {
-      recordExpectedChapterOwner(
-        chapter.id,
-        owner,
-        `${entry.title} (chapter ${chapter.chapter_number})`,
-      );
-    }
-  }
-  for (const row of backup.history) {
-    if (row.chapter_id)
-      recordExpectedChapterOwner(
-        row.chapter_id,
-        mangaKey(row.source, row.manga_slug),
-        `History entry for ${row.title ?? row.manga_slug}`,
-      );
-  }
-
-  const chapterIds = [...expectedChapterOwner.keys()];
-  for (const group of chunks(chapterIds, LOOKUP_CHUNK_SIZE)) {
-    const rows = await prisma.chapter.findMany({
-      where: { id: { in: group } },
-      select: { id: true, manga: { select: { source: true, slug: true } } },
-    });
-    for (const row of rows) {
-      const expectedOwner = expectedChapterOwner.get(row.id);
-      if (
-        !row.manga ||
-        !expectedOwner ||
-        mangaKey(row.manga.source, row.manga.slug) === expectedOwner
-      )
-        continue;
-      chapterIdentityConflicts++;
-      if (chapterIdentityConflictExamples.length < 20) {
-        chapterIdentityConflictExamples.push(expectedChapterLabel.get(row.id) ?? 'Unknown chapter');
-      }
-    }
-  }
-
   const historyKeys = new Set<string>();
   if (backup.mode !== 'replace') {
-    const historyIdentities = [
+    const titles = [
       ...new Map(
         backup.history.map((row) => [
-          `${row.source}\0${row.manga_slug}\0${row.chapter_id ?? ''}`,
-          { source: row.source, manga_slug: row.manga_slug, chapter_id: row.chapter_id ?? null },
+          mangaKey(row.source, row.manga_slug),
+          { source: row.source, manga_slug: row.manga_slug },
         ]),
       ).values(),
     ];
-    for (const group of chunks(historyIdentities, 100)) {
+    for (const group of chunks(titles, 100)) {
       const rows = await prisma.history.findMany({
-        where: {
-          user_id: userId ?? null,
-          deleted_at: null,
-          OR: group.map((identity) => ({
-            source: identity.source,
-            manga_slug: identity.manga_slug,
-            chapter_id: identity.chapter_id,
-          })),
+        where: { user_id: userId ?? null, deleted_at: null, OR: group },
+        select: {
+          source: true,
+          manga_slug: true,
+          chapter: { select: { source_chapter_key: true } },
         },
-        select: { source: true, manga_slug: true, chapter_id: true },
       });
-      for (const row of rows)
-        historyKeys.add(`${row.source}\0${row.manga_slug}\0${row.chapter_id ?? ''}`);
+      for (const row of rows) {
+        historyKeys.add(historyKey(row, row.chapter?.source_chapter_key ?? null));
+      }
     }
   }
   let retainedHistory = 0;
   for (const row of backup.history) {
-    const key = `${row.source}\0${row.manga_slug}\0${row.chapter_id ?? ''}`;
+    const key = historyKey(row, historyChapterKey(row));
     if (historyKeys.has(key)) retainedHistory++;
     historyKeys.add(key);
   }
@@ -230,8 +256,6 @@ export async function previewBackupConflicts(backup: PreviewBackupBody, userId?:
     importedTitles: entriesToRestore.length,
     catalogRowsUpdated: catalogRowsToUpdate.size,
     catalogUpdateExamples: [...catalogRowsToUpdate.values()].slice(0, 20),
-    chapterIdentityConflicts,
-    chapterIdentityConflictExamples,
     retainedHistory,
     addedHistory: backup.history.length - retainedHistory,
   };
@@ -240,11 +264,12 @@ export async function previewBackupConflicts(backup: PreviewBackupBody, userId?:
 /** All account-visible replacement writes share one SQLite transaction. Catalog rows are
  * retained because another account, a download, or a source-only read may reference them. */
 export async function replaceBackup(
-  backup: ReplaceBackupBody,
+  input: ReplaceBackupBody,
   userId?: string,
   jobId?: string,
   onProgress?: (completed: number, total: number, phase: string) => void,
 ) {
+  const backup = { ...input, manga: input.manga.map(catalogEntry) };
   return prisma.$transaction(
     async (tx) => {
       const now = new Date();
@@ -268,6 +293,19 @@ export async function replaceBackup(
           data: { is_read: false, is_bookmark: false, last_page_read: 0 },
         });
         await tx.history.deleteMany({ where: { user_id: null } });
+      }
+      if (replacing) {
+        // A custom cover is a file a backup does not carry, so it survives a replace;
+        // every text edit is replaced by the backup's.
+        await tx.manga_override.updateMany({
+          where: { user_id: userId ?? null },
+          data: { title: null, author: null, description: null, status: null },
+        });
+        await tx.manga_override.deleteMany({
+          where: { user_id: userId ?? null, cover_path: null },
+        });
+        // Linked sources are replaced by the backup's.
+        await tx.manga_link.deleteMany({ where: { user_id: userId ?? null } });
       }
 
       const idMap = new Map<string, string>();
@@ -430,26 +468,21 @@ export async function replaceBackup(
         await tx.manga_detail.createMany({ data: group });
       }
 
-      const chapterIds = [
-        ...new Set([
-          ...backup.manga.flatMap((entry) => entry.chapters.map((chapter) => chapter.id)),
-          ...backup.history.flatMap((row) => (row.chapter_id ? [row.chapter_id] : [])),
-        ]),
-      ];
-      const existingChapterById = new Map<string, ExistingRestoreChapter>();
-      for (const group of chunks(chapterIds, LOOKUP_CHUNK_SIZE)) {
-        const rows = await tx.chapter.findMany({
-          where: { id: { in: group } },
-          select: {
-            id: true,
-            manga_id: true,
-            last_page_read: true,
-            is_read: true,
-            manga: { select: { source: true, slug: true } },
-          },
-        });
-        for (const row of rows) existingChapterById.set(row.id, row);
-      }
+      const existingChapterByKey = await findChaptersByKey(tx, [
+        ...backup.manga.flatMap((entry) =>
+          entry.chapters.map((chapter) => ({
+            source: entry.source,
+            manga_slug: entry.slug,
+            source_chapter_key: backupChapterKey(chapter),
+          })),
+        ),
+        ...backup.history.flatMap((row) => {
+          const key = historyChapterKey(row);
+          return key
+            ? [{ source: row.source, manga_slug: row.manga_slug, source_chapter_key: key }]
+            : [];
+        }),
+      ]);
       const chapterCreateRows: Prisma.chapterCreateManyInput[] = [];
       const userChapterStateRows: Prisma.user_chapter_stateCreateManyInput[] = [];
       let restoredChapterCount = 0;
@@ -521,10 +554,8 @@ export async function replaceBackup(
             page_count: chapter.page_count,
             release_date: releaseDate,
           };
-          const existing = existingChapterById.get(chapter.id);
-          if (existing?.manga_id && existing.manga_id !== manga.id) {
-            throw new Error('Chapter identity conflicts with another title');
-          }
+          const key = chapterKey(entry.source, entry.slug, backupChapterKey(chapter));
+          const existing = existingChapterByKey.get(key);
           const restoredState = !userId
             ? {
                 is_read: chapter.is_read,
@@ -532,36 +563,41 @@ export async function replaceBackup(
                 last_page_read: chapter.last_page_read,
               }
             : {};
+          // Row ids are this server's own: a backup's ids belong to the server or device
+          // that wrote it, so a new row always gets a fresh one.
+          const id = existing?.id ?? createId();
           if (existing) {
             await tx.chapter.update({
-              where: { id: chapter.id },
+              where: { id },
               data: { manga_id: manga.id, ...catalog, ...restoredState },
             });
           } else {
             chapterCreateRows.push({
-              id: chapter.id,
+              id,
+              source: entry.source,
+              manga_slug: entry.slug,
+              source_chapter_key: backupChapterKey(chapter),
               manga_id: manga.id,
               ...catalog,
               ...restoredState,
             });
           }
-          existingChapterById.set(chapter.id, {
-            id: chapter.id,
+          existingChapterByKey.set(key, {
+            id,
             manga_id: manga.id,
             last_page_read: userId ? (existing?.last_page_read ?? 0) : chapter.last_page_read,
             is_read: userId ? (existing?.is_read ?? false) : chapter.is_read,
-            manga: { source: entry.source, slug: entry.slug },
           });
           if (userId && (chapter.is_read || chapter.is_bookmark || chapter.last_page_read > 0)) {
             userChapterStateRows.push({
               user_id: userId,
-              chapter_id: chapter.id,
+              chapter_id: id,
               is_read: chapter.is_read,
               is_bookmark: chapter.is_bookmark,
               last_page_read: chapter.last_page_read,
             });
           }
-          if (chapter.last_page_read > 0) savedPositionIds.add(chapter.id);
+          if (chapter.last_page_read > 0) savedPositionIds.add(id);
           restoredChapterCount += 1;
         }
         reportProgress('Restoring titles');
@@ -615,41 +651,104 @@ export async function replaceBackup(
       for (let index = 0; index < userMangaStateRows.length + mangaLibraryRows.length; index++) {
         reportProgress('Restoring library state');
       }
+      for (const entry of backup.manga) {
+        const edit = entry.override;
+        const mangaId = idMap.get(entry.id);
+        if (!edit || !mangaId) continue;
+        const fields = {
+          title: edit.title,
+          author: edit.author,
+          description: edit.description,
+          status: edit.status && isMangaStatus(edit.status) ? edit.status : null,
+        };
+        // Merging keeps an edit made here since the backup; only unset fields are filled.
+        const current = replacing
+          ? null
+          : await mangaOverrideRepository.find(mangaId, userId ?? null, tx);
+        await mangaOverrideRepository.upsert(
+          mangaId,
+          userId ?? null,
+          current
+            ? {
+                title: current.title ?? fields.title,
+                author: current.author ?? fields.author,
+                description: current.description ?? fields.description,
+                status: current.status ?? fields.status,
+              }
+            : fields,
+          tx,
+        );
+      }
+      // Linked sources, after every title is in place. A linked title the server no longer
+      // has comes back as a catalog row outside the library (its chapters arrive with the
+      // next library update). A link the rules refuse (a chain, a title already linked
+      // elsewhere when merging) is left out rather than failing the restore.
+      for (const entry of backup.manga) {
+        const primaryId = idMap.get(entry.id);
+        if (!primaryId || !entry.links?.length) continue;
+        for (const link of [...entry.links].sort((a, b) => a.priority - b.priority)) {
+          const linked =
+            (await tx.manga.findUnique({
+              where: { source_slug: { source: link.source, slug: link.slug } },
+              select: { id: true },
+            })) ??
+            (await tx.manga.create({
+              data: {
+                source: link.source,
+                slug: link.slug,
+                title: link.title,
+                author: link.author,
+                thumbnail_url: link.thumbnail_url,
+                in_library: false,
+              },
+              select: { id: true },
+            }));
+          try {
+            await mangaLinkRepository.create(primaryId, linked.id, userId ?? null, tx);
+          } catch (error) {
+            if (!(error instanceof ValidationError)) throw error;
+          }
+        }
+      }
       const existingHistory = replacing
         ? new Set<string>()
         : new Set(
             (
               await tx.history.findMany({
                 where: { user_id: userId ?? null, deleted_at: null },
-                select: { source: true, manga_slug: true, chapter_id: true },
+                select: {
+                  source: true,
+                  manga_slug: true,
+                  chapter: { select: { source_chapter_key: true } },
+                },
               })
-            ).map((row) => `${row.source}\0${row.manga_slug}\0${row.chapter_id ?? ''}`),
+            ).map((row) => historyKey(row, row.chapter?.source_chapter_key ?? null)),
           );
       let restoredHistory = 0;
       const historyCreateRows: Prisma.historyCreateManyInput[] = [];
       for (const row of backup.history) {
-        const historyKey = `${row.source}\0${row.manga_slug}\0${row.chapter_id ?? ''}`;
-        if (existingHistory.has(historyKey)) {
+        const sourceChapterKey = historyChapterKey(row);
+        const rowKey = historyKey(row, sourceChapterKey);
+        if (existingHistory.has(rowKey)) {
           reportProgress('Restoring reading history');
           continue;
         }
-        existingHistory.add(historyKey);
+        existingHistory.add(rowKey);
         restoredHistory += 1;
         const mangaId = row.manga_id ? (idMap.get(row.manga_id) ?? null) : null;
-        const chapterId = row.chapter_id ?? null;
-        if (chapterId) {
+        let chapterId: string | null = null;
+        if (sourceChapterKey) {
+          const key = chapterKey(row.source, row.manga_slug, sourceChapterKey);
+          let chapter = existingChapterByKey.get(key) ?? null;
+          chapterId = chapter?.id ?? createId();
           if (row.last_page_read > 0) savedPositionIds.add(chapterId);
-          let chapter = existingChapterById.get(chapterId) ?? null;
-          if (
-            chapter?.manga &&
-            (chapter.manga.source !== row.source || chapter.manga.slug !== row.manga_slug)
-          ) {
-            throw new Error('History chapter identity conflicts with another title');
-          }
           if (!chapter) {
             await tx.chapter.create({
               data: {
                 id: chapterId,
+                source: row.source,
+                manga_slug: row.manga_slug,
+                source_chapter_key: sourceChapterKey,
                 manga_id: mangaId,
                 url: '',
                 name: '',
@@ -657,14 +756,8 @@ export async function replaceBackup(
                 page_count: row.page_count ?? null,
               },
             });
-            chapter = {
-              id: chapterId,
-              manga_id: mangaId,
-              last_page_read: 0,
-              is_read: false,
-              manga: mangaId ? { source: row.source, slug: row.manga_slug } : null,
-            };
-            existingChapterById.set(chapterId, chapter);
+            chapter = { id: chapterId, manga_id: mangaId, last_page_read: 0, is_read: false };
+            existingChapterByKey.set(key, chapter);
           }
           if (row.last_page_read > 0 || row.is_read) {
             if (userId) {
@@ -692,13 +785,11 @@ export async function replaceBackup(
                 where: { id: chapterId },
                 data: { last_page_read: lastPageRead, is_read: isRead },
               });
-              if (chapter) {
-                existingChapterById.set(chapterId, {
-                  ...chapter,
-                  last_page_read: lastPageRead,
-                  is_read: isRead,
-                });
-              }
+              existingChapterByKey.set(key, {
+                ...chapter,
+                last_page_read: lastPageRead,
+                is_read: isRead,
+              });
             }
           }
         }

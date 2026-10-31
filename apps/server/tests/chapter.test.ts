@@ -36,55 +36,91 @@ describe('GET /api/chapter/:manga_slug', () => {
   });
 });
 
-describe('POST /api/chapter/:manga_slug/:chapter_id/mark-read', () => {
-  it('marks an existing chapter as read', async () => {
-    prismaMock.chapter.findUnique.mockResolvedValueOnce({ id: 'ch-1', is_read: false });
+const KEY = {
+  source_manga_slug_source_chapter_key: {
+    source: 'src-a',
+    manga_slug: 'one-piece',
+    source_chapter_key: 'ch-1',
+  },
+};
+
+describe('POST /api/chapter/:manga_slug/:source_chapter_key/mark-read', () => {
+  it('marks the row the source key names, by its own id', async () => {
     prismaMock.manga.findUnique.mockResolvedValueOnce({ id: 'manga-1' });
+    prismaMock.chapter.findUnique.mockResolvedValueOnce({
+      id: 'row-1',
+      manga_id: 'manga-1',
+      chapter_number: 1,
+    });
     prismaMock.chapter.updateMany.mockResolvedValueOnce({ count: 1 });
 
-    const res = await request(app).post('/api/chapter/one-piece/ch-1/mark-read').send({});
+    const res = await request(app)
+      .post('/api/chapter/one-piece/ch-1/mark-read')
+      .send({ source: 'src-a' });
 
     expect(res.status).toBe(200);
+    expect(prismaMock.chapter.findUnique).toHaveBeenCalledWith({ where: KEY });
     expect(prismaMock.chapter.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'ch-1' },
+        where: { id: 'row-1' },
         data: expect.objectContaining({ is_read: true }),
       }),
     );
   });
 
-  it('creates a placeholder chapter first when it does not exist yet', async () => {
-    prismaMock.chapter.findUnique.mockResolvedValueOnce({ id: 'ch-2', is_read: false });
-    prismaMock.manga.findUnique.mockResolvedValueOnce({ id: 'manga-1' });
+  it('creates a placeholder row for a key nothing has stored yet', async () => {
+    prismaMock.manga.findUnique.mockResolvedValueOnce(null);
+    prismaMock.chapter.findUnique.mockResolvedValueOnce(null);
+    prismaMock.chapter.create.mockResolvedValueOnce({ id: 'row-2', manga_id: null });
     prismaMock.chapter.updateMany.mockResolvedValueOnce({ count: 1 });
 
     const res = await request(app)
       .post('/api/chapter/one-piece/ch-2/mark-read')
-      .send({ name: 'Chapter 2', chapter_number: 2 });
+      .send({ source: 'src-a', name: 'Chapter 2', chapter_number: 2 });
 
     expect(res.status).toBe(200);
-    expect(prismaMock.chapter.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: 'ch-2' }, update: {} }),
+    expect(prismaMock.chapter.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        source: 'src-a',
+        manga_slug: 'one-piece',
+        source_chapter_key: 'ch-2',
+        manga_id: null,
+        name: 'Chapter 2',
+        chapter_number: 2,
+      }),
+    });
+    expect(prismaMock.chapter.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'row-2' } }),
     );
+  });
+
+  it('400s when neither the request nor a stored title says which source it is', async () => {
+    prismaMock.manga.findFirst.mockResolvedValueOnce(null);
+
+    const res = await request(app).post('/api/chapter/unknown/ch-1/mark-read').send({});
+
+    expect(res.status).toBe(400);
+    expect(prismaMock.chapter.create).not.toHaveBeenCalled();
   });
 });
 
-describe('POST /api/chapter/:manga_slug/:chapter_id/:last_page_read/mark-by-page', () => {
+describe('POST /api/chapter/:manga_slug/:source_chapter_key/:last_page_read/mark-by-page', () => {
   it('repairs a source-only placeholder chapter number without adding the manga to the library', async () => {
-    prismaMock.chapter.findUnique.mockResolvedValueOnce({
-      id: 'source-chapter',
-      chapter_number: 0,
-      is_read: false,
-    });
     prismaMock.manga.findUnique.mockResolvedValueOnce(null);
+    prismaMock.chapter.findUnique.mockResolvedValueOnce({
+      id: 'row-1',
+      manga_id: null,
+      chapter_number: 0,
+    });
+    prismaMock.chapter.update.mockResolvedValueOnce({ id: 'row-1', manga_id: null });
 
     const res = await request(app)
       .post('/api/chapter/source-title/source-chapter/4/mark-by-page')
-      .send({ chapter_number: 12, page_count: 20 });
+      .send({ source: 'src-a', chapter_number: 12, page_count: 20 });
 
     expect(res.status).toBe(200);
-    expect(prismaMock.chapter.updateMany).toHaveBeenCalledWith({
-      where: { id: 'source-chapter', chapter_number: 0 },
+    expect(prismaMock.chapter.update).toHaveBeenCalledWith({
+      where: { id: 'row-1' },
       data: { chapter_number: 12 },
     });
     expect(prismaMock.manga.create).not.toHaveBeenCalled();
@@ -100,15 +136,24 @@ describe('POST /api/chapter/:manga_slug/:chapter_id/:last_page_read/mark-by-page
   });
 
   it('accepts a numeric last_page_read', async () => {
-    prismaMock.chapter.findUnique.mockResolvedValueOnce({ id: 'ch-1', is_read: false });
     prismaMock.manga.findUnique.mockResolvedValueOnce({ id: 'manga-1' });
+    prismaMock.chapter.findUnique.mockResolvedValueOnce({
+      id: 'row-1',
+      manga_id: 'manga-1',
+      chapter_number: 1,
+    });
     prismaMock.chapter.updateMany.mockResolvedValueOnce({ count: 1 });
 
-    const res = await request(app).post('/api/chapter/one-piece/ch-1/12/mark-by-page').send({});
+    const res = await request(app)
+      .post('/api/chapter/one-piece/ch-1/12/mark-by-page')
+      .send({ source: 'src-a' });
 
     expect(res.status).toBe(200);
     expect(prismaMock.chapter.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ last_page_read: 12 }) }),
+      expect.objectContaining({
+        where: { id: 'row-1' },
+        data: expect.objectContaining({ last_page_read: 12 }),
+      }),
     );
   });
 });

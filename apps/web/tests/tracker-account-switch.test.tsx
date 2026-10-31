@@ -6,6 +6,11 @@ import type { Manga } from '@/lib/manga-data';
 
 let currentUser = { id: 'account-a' };
 const getConnectedTrackers = vi.fn().mockResolvedValue([{ tracker: 'ANILIST' }]);
+const getAvailableTrackers = vi
+  .fn()
+  .mockResolvedValue([
+    { tracker: 'ANILIST', label: 'AniList', auth_kind: 'oauth', available: true },
+  ]);
 const getMangaTrackerLinks = vi
   .fn()
   .mockImplementation(() =>
@@ -16,6 +21,7 @@ vi.mock('@/lib/session-resource', () => ({ useCurrentUser: () => ({ user: curren
 vi.mock('@projekt-manga/api-client', () => ({
   ApiError: class extends Error {},
   getConnectedTrackers: (...args: unknown[]) => getConnectedTrackers(...args),
+  getAvailableTrackers: (...args: unknown[]) => getAvailableTrackers(...args),
   getMangaTrackerLinks: (...args: unknown[]) => getMangaTrackerLinks(...args),
 }));
 
