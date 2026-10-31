@@ -2,7 +2,7 @@ import prisma from '../configs/prisma.config.js';
 import { isMangaStatus } from '@projekt-manga/types';
 import { backupChapterKey } from '@projekt-manga/schemas';
 import type { PreviewBackupBody, ReplaceBackupBody } from '@projekt-manga/schemas';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { randomUUID as createId } from 'node:crypto';
 import mangaOverrideRepository from './mangaOverride.repository.js';
 import mangaLinkRepository from './mangaLink.repository.js';
@@ -10,6 +10,8 @@ import { ValidationError } from '../utils/customErrors.js';
 
 const LOOKUP_CHUNK_SIZE = 200;
 const INSERT_CHUNK_SIZE = 50;
+/** 17 bound values a row, well under SQLite's 32766 per statement. */
+const CHAPTER_INSERT_CHUNK_SIZE = 500;
 
 type ExistingRestoreChapter = {
   id: string;
@@ -24,6 +26,34 @@ function chunks<T>(items: T[], size: number): T[][] {
     result.push(items.slice(offset, offset + size));
   }
   return result;
+}
+
+type RestoredChapterRow = Omit<
+  Prisma.chapterCreateManyInput,
+  'release_date' | 'fetched_at' | 'created_at' | 'updated_at'
+> & { release_date: Date | null };
+
+/**
+ * Inserts restored chapters with parameterised multi-row INSERTs. A backup can hold 50,000
+ * chapters, and `createMany` spends most of a restore's time building its queries; this
+ * writes the same rows (Prisma's defaults, both timestamps now) in a fraction of it.
+ */
+async function insertChapters(tx: Prisma.TransactionClient, rows: RestoredChapterRow[]) {
+  const now = new Date();
+  for (const group of chunks(rows, CHAPTER_INSERT_CHUNK_SIZE)) {
+    const values = group.map(
+      (row) =>
+        Prisma.sql`(${row.id}, ${row.source}, ${row.manga_slug}, ${row.source_chapter_key},
+          ${row.manga_id ?? null}, ${row.url}, ${row.name ?? null}, ${row.scanlator ?? null},
+          ${row.is_read ?? false}, ${row.is_bookmark ?? false}, ${row.chapter_number},
+          ${row.last_page_read ?? 0}, ${row.page_count ?? null}, ${null}, ${row.release_date},
+          ${now}, ${now})`,
+    );
+    await tx.$executeRaw`INSERT INTO "chapters" ("id", "source", "manga_slug",
+      "source_chapter_key", "manga_id", "url", "name", "scanlator", "is_read", "is_bookmark",
+      "chapter_number", "last_page_read", "page_count", "fetched_at", "release_date",
+      "created_at", "updated_at") VALUES ${Prisma.join(values)}`;
+  }
 }
 
 function mangaKey(source: string, slug: string): string {
@@ -483,7 +513,7 @@ export async function replaceBackup(
             : [];
         }),
       ]);
-      const chapterCreateRows: Prisma.chapterCreateManyInput[] = [];
+      const chapterCreateRows: RestoredChapterRow[] = [];
       const userChapterStateRows: Prisma.user_chapter_stateCreateManyInput[] = [];
       let restoredChapterCount = 0;
 
@@ -602,9 +632,7 @@ export async function replaceBackup(
         }
         reportProgress('Restoring titles');
       }
-      for (const group of chunks(chapterCreateRows, INSERT_CHUNK_SIZE)) {
-        await tx.chapter.createMany({ data: group });
-      }
+      await insertChapters(tx, chapterCreateRows);
       for (const group of chunks(userChapterStateRows, INSERT_CHUNK_SIZE)) {
         await tx.user_chapter_state.createMany({ data: group });
       }
