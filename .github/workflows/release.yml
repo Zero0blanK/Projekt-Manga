@@ -72,6 +72,9 @@ jobs:
       - name: Package and upload to a draft release
         run: npm run package --workspace=@projekt-manga/desktop -- --publish always
         env:
+          # The server build runs `prisma generate` again, which needs it set (see the step
+          # above); the installed app sets its own at runtime.
+          DATABASE_URL: file:./data/ci-generate.db
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           # Code signing: unset secrets mean an unsigned build (see docs/releasing.md).
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
