@@ -15,6 +15,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import { builtinModules, createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -131,11 +132,90 @@ if (outputName === undefined) {
   removeWithRetry(STAGING);
 }
 
+// -------------------------------------------------- workspace imports -------------
+/**
+ * The workspace packages the server ships, and which of their built files it loads.
+ *
+ * `extensions` is limited to its `/sandbox` subpath: its root entry pulls in puppeteer and
+ * playwright, which the installer deliberately leaves out (see WORKSPACE_PACKAGES below).
+ */
+const WORKSPACE_SHIPPED = [
+  { name: 'types', dir: path.join(ROOT, 'packages', 'types'), roots: ['dist'] },
+  { name: 'schemas', dir: path.join(ROOT, 'packages', 'schemas'), roots: ['dist'] },
+  { name: 'extensions', dir: path.join(ROOT, 'apps', 'extensions'), roots: ['dist/sandbox'] },
+];
+
+const BUILTINS = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
+
+/** The package name a bare import specifier refers to ("tldts", "@scope/pkg/sub" -> "@scope/pkg"). */
+function packageOf(specifier) {
+  const parts = specifier.split('/');
+  return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+}
+
+/** Every bare specifier imported by the `.js` files under `dir`. Built output only, so a
+ * plain scan of `from '…'`, `import('…')` and `require('…')` is enough. */
+function bareImports(dir) {
+  const found = new Set();
+  const pattern =
+    /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)['"]([^'"./][^'"]*)['"]/gm;
+  for (const entry of fs.readdirSync(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || !/\.(?:m|c)?js$/.test(entry.name)) continue;
+    const text = fs.readFileSync(path.join(entry.parentPath, entry.name), 'utf-8');
+    for (const match of text.matchAll(pattern)) {
+      const specifier = match[1];
+      if (!BUILTINS.has(specifier) && !specifier.startsWith('node:')) found.add(specifier);
+    }
+  }
+  return found;
+}
+
+/**
+ * Third-party packages the shipped workspace code imports, pinned like the server's own.
+ *
+ * The workspace packages are copied in by hand without their dependencies, so a package
+ * only they use (the sandbox's `tldts`) was missing from the installed app and the API
+ * exited with ERR_MODULE_NOT_FOUND on every start. A local or CI build never noticed:
+ * under the monorepo, Node's node_modules walk-up found the hoisted copy.
+ */
+function workspaceRuntimeDependencies() {
+  const dependencies = {};
+  for (const { name, dir, roots } of WORKSPACE_SHIPPED) {
+    const declared =
+      JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf-8')).dependencies ?? {};
+    for (const root of roots) {
+      for (const specifier of bareImports(path.join(dir, root))) {
+        const pkg = packageOf(specifier);
+        if (pkg.startsWith('@projekt-manga/')) continue;
+        if (!(pkg in declared)) {
+          throw new Error(
+            `[stage] @projekt-manga/${name} imports "${pkg}" but does not declare it in its package.json`,
+          );
+        }
+        dependencies[pkg] = installedVersion(dir, pkg) ?? declared[pkg];
+      }
+    }
+  }
+  return dependencies;
+}
+
 // ----------------------------------------------------------------- server ----------
 const serverSrc = path.join(ROOT, 'apps', 'server');
 const serverOut = path.join(STAGING, 'server');
 console.log('[stage] server: package.json + dist + prisma');
-stagePackageJson(serverSrc, serverOut);
+const serverPkg = stagePackageJson(serverSrc, serverOut);
+{
+  const added = Object.entries(workspaceRuntimeDependencies()).filter(
+    ([name]) => !(name in serverPkg.dependencies),
+  );
+  if (added.length > 0) {
+    for (const [name, version] of added) serverPkg.dependencies[name] = version;
+    fs.writeFileSync(path.join(serverOut, 'package.json'), JSON.stringify(serverPkg, null, 2));
+    console.log(
+      `[stage] server: adding workspace runtime dependencies ${added.map(([n, v]) => `${n}@${v}`).join(', ')}`,
+    );
+  }
+}
 copyDir(path.join(serverSrc, 'dist'), path.join(serverOut, 'dist'));
 copyDir(path.join(serverSrc, 'prisma'), path.join(serverOut, 'prisma'));
 // Served by routes/docs.route.ts, which logs an ENOENT at startup without it.
@@ -270,6 +350,57 @@ for (const name of WORKSPACE_PACKAGES) {
   copyDir(dist, path.join(to, 'dist'));
   console.log(`[stage] server: workspace package @projekt-manga/${name}`);
 }
+
+/**
+ * Proves every bare import in the shipped server tree resolves *from inside it*.
+ *
+ * Resolution walks up from the importing file, and the staging directory sits inside the
+ * monorepo, so a missing package can still resolve from the repo's hoisted node_modules.
+ * Any hit outside the staged tree is therefore a failure, not a pass.
+ */
+function verifyStagedImports() {
+  const missing = [];
+  const roots = [
+    { dir: path.join(serverOut, 'dist') },
+    ...WORKSPACE_SHIPPED.flatMap(({ name, roots: subdirs }) =>
+      subdirs.map((sub) => ({
+        dir: path.join(serverScopeDir, name, ...sub.split('/')),
+      })),
+    ),
+  ];
+  for (const { dir } of roots) {
+    const from = createRequire(path.join(dir, 'index.js'));
+    for (const specifier of bareImports(dir)) {
+      const pkg = packageOf(specifier);
+      // The root entry of extensions is loaded lazily and is meant to be absent here.
+      if (pkg === '@projekt-manga/extensions' && specifier === pkg) continue;
+      let resolved = null;
+      try {
+        resolved = from.resolve(`${pkg}/package.json`);
+      } catch {
+        // Packages that do not export ./package.json: look for the directory directly.
+        for (let current = dir; ; current = path.dirname(current)) {
+          const candidate = path.join(current, 'node_modules', ...pkg.split('/'));
+          if (fs.existsSync(candidate)) {
+            resolved = candidate;
+            break;
+          }
+          if (path.dirname(current) === current) break;
+        }
+      }
+      if (!resolved || path.relative(serverOut, resolved).startsWith('..')) {
+        missing.push(`${pkg} (imported under ${path.relative(STAGING, dir)})`);
+      }
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `[stage] the staged server cannot resolve: ${[...new Set(missing)].join(', ')}`,
+    );
+  }
+  console.log('[stage] server: every shipped import resolves inside the staged tree');
+}
+verifyStagedImports();
 
 // ------------------------------------------------------------ node runtime ----------
 // The API child must run on Node >= 25 for the extension sandbox to be enforceable at
