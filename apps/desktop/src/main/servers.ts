@@ -39,6 +39,47 @@ const BIND_HOST = '127.0.0.1';
 let apiProcess: ChildProcess | null = null;
 let webProcess: ChildProcess | null = null;
 
+/** What the diagnostic report says about each supervised child. */
+export interface ServerProcessStatus {
+  started: boolean;
+  running: boolean;
+  /** Seconds since it was spawned, while running. */
+  uptimeSeconds: number | null;
+  exitCode: number | null;
+  exitSignal: string | null;
+  /** Whether its port accepted a connection, and if not, why the wait gave up. */
+  ready: boolean;
+  readyError: string | null;
+  usingBundledNode: boolean;
+}
+
+const emptyStatus = (): ServerProcessStatus => ({
+  started: false,
+  running: false,
+  uptimeSeconds: null,
+  exitCode: null,
+  exitSignal: null,
+  ready: false,
+  readyError: null,
+  usingBundledNode: false,
+});
+
+const processStatus: Record<'api' | 'web', ServerProcessStatus & { startedAt: number }> = {
+  api: { ...emptyStatus(), startedAt: 0 },
+  web: { ...emptyStatus(), startedAt: 0 },
+};
+
+export function getServerStatus(): Record<'api' | 'web', ServerProcessStatus> {
+  const view = (channel: 'api' | 'web'): ServerProcessStatus => {
+    const { startedAt, ...status } = processStatus[channel];
+    return {
+      ...status,
+      uptimeSeconds: status.running ? Math.round((Date.now() - startedAt) / 1000) : null,
+    };
+  };
+  return { api: view('api'), web: view('web') };
+}
+
 /**
  * Asks the OS for an unused port by binding to 0 and reading back what it assigned.
  *
@@ -170,9 +211,20 @@ function spawnNode(
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  processStatus[channel] = {
+    ...emptyStatus(),
+    started: true,
+    running: true,
+    usingBundledNode: useBundled,
+    startedAt: Date.now(),
+  };
   child.stdout?.on('data', (data: Buffer) => appendLog(channel, data.toString()));
   child.stderr?.on('data', (data: Buffer) => appendLog(channel, data.toString()));
+  child.on('error', (error) => {
+    appendLog(channel, `[supervisor] could not start: ${error.message}`);
+  });
   child.on('exit', (code, signal) => {
+    Object.assign(processStatus[channel], { running: false, exitCode: code, exitSignal: signal });
     appendLog(channel, `[supervisor] process exited (code=${code}, signal=${signal})`);
   });
 
@@ -274,9 +326,19 @@ export async function startServers(
 
   // Waited for in parallel: the web server does not need the API to boot, and serialising
   // them would add the API's start-up time to every launch for no benefit.
+  const track = (channel: 'api' | 'web', wait: Promise<void>) =>
+    wait.then(
+      () => {
+        processStatus[channel].ready = true;
+      },
+      (error: unknown) => {
+        processStatus[channel].readyError = error instanceof Error ? error.message : String(error);
+        throw error;
+      },
+    );
   const ready = Promise.all([
-    waitForPort(apiPort, 'API server'),
-    waitForPort(webPort, 'Web server'),
+    track('api', waitForPort(apiPort, 'API server')),
+    track('web', waitForPort(webPort, 'Web server')),
   ]).then(() => undefined);
 
   return { apiPort, webPort, ready };

@@ -13,6 +13,8 @@ const getApiBaseUrl = vi.fn();
 const listInstalledExtensions = vi.fn();
 const getScraperHealth = vi.fn();
 const getRecentServerDiagnostics = vi.fn();
+const getServerRuntimeDiagnostics = vi.fn();
+const getSourceHealth = vi.fn();
 
 vi.mock('@projekt-manga/api-client', () => ({
   getHealth: (...args: unknown[]) => getHealth(...args),
@@ -20,6 +22,9 @@ vi.mock('@projekt-manga/api-client', () => ({
   listInstalledExtensions: (...args: unknown[]) => listInstalledExtensions(...args),
   getScraperHealth: (...args: unknown[]) => getScraperHealth(...args),
   getRecentServerDiagnostics: (...args: unknown[]) => getRecentServerDiagnostics(...args),
+  getServerRuntimeDiagnostics: (...args: unknown[]) => getServerRuntimeDiagnostics(...args),
+  getSourceHealth: (...args: unknown[]) => getSourceHealth(...args),
+  onRequestFailure: () => () => undefined,
 }));
 
 const { buildDiagnosticReport, scrubText, redactUrl } = await import('@/lib/diagnostics');
@@ -57,6 +62,8 @@ beforeEach(() => {
     userAgent: { usingRemoteProfile: true, profileCount: 12 },
   });
   getRecentServerDiagnostics.mockResolvedValue([]);
+  getServerRuntimeDiagnostics.mockRejectedValue(new Error('forbidden'));
+  getSourceHealth.mockResolvedValue([]);
   vi.stubGlobal('window', {} as Window & typeof globalThis);
 });
 
@@ -173,8 +180,22 @@ describe('buildDiagnosticReport', () => {
             arch: 'x64',
             osRelease: '10.0.26200',
             localDbVersion: 4,
-            localDbMigrationOk: true,
+            localDbMigrationOk: false,
+            localDbError: `SQLITE_CANTOPEN ${SECRETS.homePath}`,
             managedServers: true,
+            update: {
+              status: 'error',
+              availableVersion: null,
+              error: `download failed for ${SECRETS.homePath}`,
+              autoDownload: true,
+            },
+            startupErrors: [
+              {
+                at: '2026-11-01T00:00:00.000Z',
+                stage: 'local-cache',
+                message: `Error: TOKEN_ENCRYPTION_KEY=${SECRETS.encryptionKey} at ${SECRETS.homePath}`,
+              },
+            ],
             logs: {
               api: [
                 `injected env: TOKEN_ENCRYPTION_KEY=${SECRETS.encryptionKey}`,

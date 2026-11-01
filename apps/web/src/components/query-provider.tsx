@@ -3,7 +3,9 @@
 import { useEffect, useLayoutEffect, type ReactNode } from 'react';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/query-client';
+import { usePathname } from 'next/navigation';
 import { applyRuntimeApiBaseUrl } from '@/lib/api-config';
+import { installClientDiagnostics, recordPageVisit } from '@/lib/client-diagnostics';
 import {
   isStaticDataQuery,
   persistStaticDataCache,
@@ -14,10 +16,17 @@ import {
 // query in this app is issued from below this provider. An effect would fire after the
 // first render has already kicked queries off against the wrong base URL.
 applyRuntimeApiBaseUrl();
+// Same reason: a request that fails during the first render is the one most worth seeing.
+installClientDiagnostics();
 
 /** Wraps the app in the shared client from lib/query-client. Split into its own file so
  * the root layout stays a Server Component. */
 export function QueryProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  useEffect(() => {
+    if (pathname) recordPageVisit(pathname);
+  }, [pathname]);
+
   // Hydrate after React attaches to the server HTML but before normal effects start query
   // observers. That avoids a server/client markup mismatch while still preventing the
   // first Sources or Extensions screen from issuing a duplicate request.

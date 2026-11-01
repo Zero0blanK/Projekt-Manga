@@ -1,6 +1,7 @@
 import express from 'express';
 import healthController from '../controllers/health.controller.js';
 import { requireAuth } from '../middleware/auth.middleware.js';
+import { requireAdmin } from '../middleware/admin.middleware.js';
 
 const router = express.Router();
 
@@ -12,5 +13,9 @@ router.get('/diagnostics', healthController.getRecentDiagnostics);
 
 // Scraper stats from apps/extensions: proxy health, ban/rate-limit counts, HTML cache hit rate.
 router.get('/scraper', requireAuth, healthController.getScraperHealth);
+
+// Process, migration and row-count facts for the diagnostic report. Host-level, so admin
+// only: loopback (the desktop app) passes, a remote client needs the ADMIN_TOKEN when set.
+router.get('/runtime', requireAdmin, healthController.getRuntimeDiagnostics);
 
 export default router;

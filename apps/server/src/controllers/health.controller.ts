@@ -132,6 +132,103 @@ const getRecentDiagnostics = (_req: Request, res: Response) => {
   );
 };
 
-const healthController = { getLiveness, getReadiness, getScraperHealth, getRecentDiagnostics };
+/** One count for the runtime report, or null when the table can't be read — itself a
+ * signal when the schema is the problem. Fixed SQL only; nothing here takes input. */
+async function countRows(sql: string): Promise<number | null> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ n: bigint | number }>>(sql);
+    return Number(rows[0]?.n ?? 0);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Process and database facts for the diagnostic report, behind requireAdmin like the
+ * other host-level routes. Every field is chosen explicitly: no paths, no environment
+ * values beyond NODE_ENV and which optional features are configured (as booleans).
+ */
+const getRuntimeDiagnostics = async (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const memory = process.memoryUsage();
+  const mb = (bytes: number) => Math.round(bytes / 1024 / 1024);
+
+  let migrations: { applied: number; latest: string | null; failed: number } | null = null;
+  try {
+    const rows = await prisma.$queryRawUnsafe<
+      Array<{ migration_name: string; finished_at: unknown; rolled_back_at: unknown }>
+    >(
+      'SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY started_at',
+    );
+    const applied = rows.filter((row) => row.finished_at && !row.rolled_back_at);
+    migrations = {
+      applied: applied.length,
+      latest: applied.at(-1)?.migration_name ?? null,
+      failed: rows.filter((row) => !row.finished_at && !row.rolled_back_at).length,
+    };
+  } catch {
+    // Reported as null: a missing migrations table is the interesting fact.
+  }
+
+  let downloads: Record<string, number> | null = null;
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ status: string; n: bigint | number }>>(
+      'SELECT status, COUNT(*) AS n FROM downloads GROUP BY status',
+    );
+    downloads = Object.fromEntries(
+      rows
+        .filter((row) => /^[A-Z_]{1,32}$/.test(row.status))
+        .map((row) => [row.status, Number(row.n)]),
+    );
+  } catch {
+    // Same: null says the table could not be read.
+  }
+
+  const [titles, libraryEntries, chapters, categories, users, extensions, repositories] =
+    await Promise.all([
+      countRows('SELECT COUNT(*) AS n FROM mangas'),
+      countRows('SELECT COUNT(*) AS n FROM manga_library'),
+      countRows('SELECT COUNT(*) AS n FROM chapters'),
+      countRows('SELECT COUNT(*) AS n FROM categories'),
+      countRows('SELECT COUNT(*) AS n FROM users'),
+      countRows('SELECT COUNT(*) AS n FROM installed_extensions'),
+      countRows('SELECT COUNT(*) AS n FROM extension_repositories'),
+    ]);
+
+  return HTTPSuccessResponse(res, 200, 'Runtime diagnostics retrieved', {
+    node: process.version,
+    platform: `${process.platform} ${process.arch}`,
+    nodeEnv: process.env.NODE_ENV ?? null,
+    uptimeSeconds: Math.round(process.uptime()),
+    memoryMb: {
+      rss: mb(memory.rss),
+      heapUsed: mb(memory.heapUsed),
+      heapTotal: mb(memory.heapTotal),
+    },
+    features: {
+      adminToken: Boolean(process.env.ADMIN_TOKEN),
+      tokenEncryptionKey: Boolean(process.env.TOKEN_ENCRYPTION_KEY),
+      clientUrl: Boolean(process.env.CLIENT_URL),
+      trustProxy: Boolean(process.env.TRUST_PROXY),
+      // A provider name, not a URL or key; anything else is reported as "other".
+      translate: process.env.TRANSLATE_PROVIDER
+        ? /^[a-z]{1,20}$/i.test(process.env.TRANSLATE_PROVIDER)
+          ? process.env.TRANSLATE_PROVIDER
+          : 'other'
+        : null,
+    },
+    migrations,
+    counts: { titles, libraryEntries, chapters, categories, users, extensions, repositories },
+    downloads,
+  });
+};
+
+const healthController = {
+  getLiveness,
+  getReadiness,
+  getScraperHealth,
+  getRecentDiagnostics,
+  getRuntimeDiagnostics,
+};
 
 export default healthController;

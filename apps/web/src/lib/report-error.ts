@@ -2,6 +2,7 @@
 
 import { ApiError } from '@projekt-manga/api-client';
 import { toast } from '@/hooks/use-toast';
+import { recordClientError } from '@/lib/client-diagnostics';
 
 /**
  * Tells the reader something failed, once, in words they can act on.
@@ -42,6 +43,8 @@ export function reportError(error: unknown, message: string): void {
   // own message), so they add real detail rather than a stack trace.
   const detail = error instanceof ApiError ? error.message : null;
   const description = detail ? `${message} ${detail}` : message;
+
+  recordClientError('reported', description);
 
   const now = Date.now();
   for (const [key, at] of recentlyReported) {

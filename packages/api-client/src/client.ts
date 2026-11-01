@@ -26,6 +26,35 @@ export class ApiError extends Error {
   }
 }
 
+/** A request that failed, as the diagnostic report records it. Carries no body, query
+ * string or header — only what identifies the failure. */
+export interface RequestFailure {
+  at: string;
+  method: string;
+  /** The endpoint path, without its query string. */
+  path: string;
+  status: number;
+  kind: ApiErrorKind;
+  code?: string;
+  /** The server's X-Request-Id, which matches its own diagnostic events. */
+  requestId?: string;
+  durationMs: number;
+  message: string;
+  /** False when the response was not the API's own envelope: a proxy, a crashed API or
+   * an HTML error page answered instead. */
+  fromApi: boolean;
+}
+
+type RequestFailureListener = (failure: RequestFailure) => void;
+
+const failureListeners = new Set<RequestFailureListener>();
+
+/** Subscribes to failed requests (cancelled ones excluded). Returns the unsubscribe. */
+export function onRequestFailure(listener: RequestFailureListener): () => void {
+  failureListeners.add(listener);
+  return () => failureListeners.delete(listener);
+}
+
 export interface ApiClientConfig {
   /** Origin + path prefix for the server API, e.g. "http://localhost:4000/api". */
   baseUrl: string;
@@ -165,6 +194,31 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     timeoutMs = DEFAULT_TIMEOUT_MS,
   } = options;
   const url = buildUrl(path, query);
+  const startedAt = Date.now();
+  const fail = (error: ApiError, response?: Response, fromApi = false): ApiError => {
+    if (error.kind === 'aborted' || failureListeners.size === 0) return error;
+    const failure: RequestFailure = {
+      at: new Date(startedAt).toISOString(),
+      method,
+      path: path.split('?')[0] ?? path,
+      status: error.status,
+      kind: error.kind,
+      durationMs: Date.now() - startedAt,
+      message: error.message,
+      fromApi,
+    };
+    if (error.code) failure.code = error.code;
+    const requestId = response?.headers.get('x-request-id');
+    if (requestId) failure.requestId = requestId;
+    for (const listener of failureListeners) {
+      try {
+        listener(failure);
+      } catch {
+        // A diagnostics listener must never change what the caller sees.
+      }
+    }
+    return error;
+  };
 
   // Sends the session cookie on cross-origin requests (web on :3000, server on :4000 —
   // different origins even on the same machine). Requires the server's CORS config to
@@ -191,25 +245,29 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     // "cancelled" — nobody cancelled it, and the reader needs to know the difference
     // between "I navigated away" and "this source never answered".
     if (error instanceof Error && error.name === 'TimeoutError') {
-      throw new ApiError(
-        'This took too long to respond. The source may be slow or unreachable — try again.',
-        0,
-        'timeout',
+      throw fail(
+        new ApiError(
+          'This took too long to respond. The source may be slow or unreachable — try again.',
+          0,
+          'timeout',
+        ),
       );
     }
     if (error instanceof Error && error.name === 'AbortError') {
       // A caller-cancelled request whose own signal is not aborted was cancelled by our
       // composed deadline instead (some runtimes report the composite as AbortError).
       if (signal?.aborted !== true) {
-        throw new ApiError(
-          'This took too long to respond. The source may be slow or unreachable — try again.',
-          0,
-          'timeout',
+        throw fail(
+          new ApiError(
+            'This took too long to respond. The source may be slow or unreachable — try again.',
+            0,
+            'timeout',
+          ),
         );
       }
       throw new ApiError('Request cancelled', 0, 'aborted');
     }
-    throw new ApiError(describeNetworkFailure(), 0, 'network');
+    throw fail(new ApiError(describeNetworkFailure(), 0, 'network'));
   }
 
   let envelope: ResponseEnvelope<T> | null = null;
@@ -220,11 +278,15 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 
   if (!response.ok || !envelope?.success) {
-    throw new ApiError(
-      envelope?.message || `Request failed with status ${response.status}`,
-      response.status,
-      'http',
-      typeof envelope?.code === 'string' ? envelope.code : undefined,
+    throw fail(
+      new ApiError(
+        envelope?.message || `Request failed with status ${response.status}`,
+        response.status,
+        'http',
+        typeof envelope?.code === 'string' ? envelope.code : undefined,
+      ),
+      response,
+      envelope !== null && typeof envelope === 'object' && 'success' in envelope,
     );
   }
 

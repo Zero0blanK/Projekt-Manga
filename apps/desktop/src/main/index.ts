@@ -2,8 +2,9 @@
  * Electron main process entry point. Owns app lifecycle, the single window, and the
  * privileged IPC handlers the preload bridge exposes to it.
  */
+import os from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, Menu } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, Menu } from 'electron';
 import { createMainWindow } from './window';
 import { registerIpcHandlers } from './ipc';
 import { getDb } from './db/connection';
@@ -11,7 +12,8 @@ import { localStore } from './db/local-store';
 import { buildLocalWebUrl, LOCAL_API_BASE_URL, resolveApiUrl } from '../shared/config';
 import { resolveServerPaths, shouldManageServers, startServers, stopServers } from './servers';
 import { resolveServerTokenKey } from './server-secrets';
-import { appendLog } from './log-buffer';
+import { captureConsole } from './log-buffer';
+import { recordStartupError } from './diagnostics';
 import { checkForUpdates, initUpdater } from './updater';
 import {
   markLocalDataPresence,
@@ -31,6 +33,9 @@ import {
   showBackgroundWindow,
 } from './startup-background';
 
+// First, so everything below that warns or fails also reaches the diagnostic report.
+captureConsole();
+
 // Without these, a main-process exception or a renderer crash dies silently — no log,
 // just an unresponsive window or a process that exits with nothing printed. Neither
 // restarts anything; they only make the failure visible.
@@ -40,6 +45,14 @@ process.on('uncaughtException', (error) => {
 
 process.on('unhandledRejection', (reason) => {
   console.error('[main] Unhandled promise rejection:', reason);
+});
+
+// A GPU or utility process crash is otherwise invisible: the window just renders wrong.
+app.on('child-process-gone', (_event, details) => {
+  if (details.reason === 'clean-exit') return;
+  console.error(
+    `[main] ${details.type} process gone (${details.reason}, exit code ${details.exitCode})`,
+  );
 });
 
 // One window, one app instance. A second launch (double-clicking the icon again, or
@@ -131,7 +144,7 @@ if (!gotLock) {
     ready.catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[main] Bundled servers did not become ready:', message);
-      appendLog('main', `[supervisor] servers not ready: ${message}`);
+      recordStartupError('servers-ready', error);
     });
 
     return LOCAL_API_BASE_URL;
@@ -141,6 +154,36 @@ if (!gotLock) {
   // exits — without this the next launch finds the ports occupied.
   app.on('will-quit', stopServers);
   app.on('before-quit', markQuitting);
+
+  /** Tells the reader why local data is unavailable. Resolves false when they chose Quit. */
+  async function reportLocalCacheFailure(error: unknown): Promise<boolean> {
+    // The home directory carries the account name; the copied text goes into issues.
+    const message = (error instanceof Error ? error.message : String(error))
+      .split(os.homedir())
+      .join('~');
+    const { response } = await dialog.showMessageBox({
+      type: 'error',
+      title: 'Projekt Manga',
+      message: "Projekt Manga couldn't open its local data",
+      detail:
+        `${message}\n\nThe app can still open, but offline reading, local progress and ` +
+        'downloads may not work until this is fixed. Settings › About › Review diagnostic ' +
+        'report has the details.',
+      buttons: ['Open anyway', 'Copy details', 'Quit'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    });
+    if (response === 1) {
+      clipboard.writeText(
+        [
+          `Projekt Manga ${app.getVersion()} (Electron ${process.versions.electron}, ${process.platform} ${process.arch})`,
+          `Local cache failed to open: ${message}`,
+        ].join('\n'),
+      );
+    }
+    return response !== 2;
+  }
 
   app.whenReady().then(async () => {
     // Match electron-builder's appId so Windows attributes renderer notifications to
@@ -154,7 +197,18 @@ if (!gotLock) {
     // Opens the local DB and runs any pending migrations synchronously, so a broken
     // migration fails loudly at startup instead of on whatever IPC call happens to be
     // first. Local-first reads/writes work from here regardless of what happens next.
-    getDb();
+    try {
+      getDb();
+    } catch (error) {
+      // Not fatal: the servers and the window still start, so the reader can reach
+      // Settings and copy a diagnostic report. Without this the app simply never opened.
+      console.error('[main] Could not open the local cache:', error);
+      recordStartupError('local-cache', error);
+      if (!(await reportLocalCacheFailure(error))) {
+        app.quit();
+        return;
+      }
+    }
 
     // Before the window: this is what decides which URL it loads. A failure here is not
     // fatal — the window falls back to the configured/default URL and shows its own
@@ -165,7 +219,7 @@ if (!gotLock) {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[main] Failed to start bundled servers:', message);
-      appendLog('main', `[supervisor] failed to start: ${message}`);
+      recordStartupError('servers-start', error);
     }
 
     // After the servers, so the diagnostics handler reports the real supervision state.

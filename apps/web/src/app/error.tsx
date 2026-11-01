@@ -1,7 +1,10 @@
 'use client';
 
+import { recordClientError } from '@/lib/client-diagnostics';
+
 export default function Error({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
+  recordClientError('render', error);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">

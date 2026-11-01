@@ -1,9 +1,12 @@
 'use client';
 
+import { recordClientError } from '@/lib/client-diagnostics';
+
 import '@/styles.css';
 
 export default function GlobalError({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
+  recordClientError('render', error);
 
   return (
     <html lang="en" className="dark">

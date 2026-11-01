@@ -6,10 +6,20 @@ import {
   listInstalledExtensions,
   getScraperHealth,
   getRecentServerDiagnostics,
+  getServerRuntimeDiagnostics,
+  getSourceHealth,
   type InstalledExtension,
+  type RequestFailure,
   type ScraperHealth,
   type ServerDiagnosticEvent,
+  type ServerRuntimeDiagnostics,
+  type SourceHealth,
 } from '@projekt-manga/api-client';
+import {
+  readClientDiagnostics,
+  type ClientErrorEvent,
+  type PageVisit,
+} from '@/lib/client-diagnostics';
 
 /**
  * The "Copy diagnostic report" payload: what a user can paste into a GitHub issue so a
@@ -33,7 +43,20 @@ import {
  * redaction is used, and it is a second line of defence, not the primary one.
  */
 
-/** Shape the desktop main process returns over IPC. Absent in a plain browser. */
+/** One supervised server child, as main/servers.ts reports it. */
+export interface DesktopServerStatus {
+  started: boolean;
+  running: boolean;
+  uptimeSeconds: number | null;
+  exitCode: number | null;
+  exitSignal: string | null;
+  ready: boolean;
+  readyError: string | null;
+  usingBundledNode: boolean;
+}
+
+/** Shape the desktop main process returns over IPC. Absent in a plain browser. Fields
+ * after `managedServers` are optional because an older desktop shell does not send them. */
 export interface DesktopDiagnostics {
   appVersion: string;
   electronVersion: string;
@@ -45,8 +68,39 @@ export interface DesktopDiagnostics {
   /** Local SQLite cache schema version, and whether its last migration succeeded. */
   localDbVersion: number | null;
   localDbMigrationOk: boolean;
+  localDbError?: string | null;
   /** Whether this build supervises its own API/web processes. */
   managedServers: boolean;
+  packaged?: boolean;
+  osVersion?: string | null;
+  locale?: string | null;
+  uptimeSeconds?: { app: number; system: number };
+  memory?: { systemTotalMb: number; systemFreeMb: number; appProcessesMb: number };
+  cpu?: { model: string; cores: number } | null;
+  processes?: Array<{ type: string; memoryMb: number; cpuPercent: number }>;
+  gpu?: Record<string, string> | null;
+  displays?: Array<{ width: number; height: number; scaleFactor: number; primary: boolean }>;
+  storage?: {
+    freeGb: number | null;
+    totalGb: number | null;
+    serverDbMb: number | null;
+    localCacheMb: number | null;
+    installedSourceBundles: number | null;
+  };
+  servers?: Record<'api' | 'web', DesktopServerStatus> | null;
+  update?: {
+    status: string;
+    availableVersion: string | null;
+    error: string | null;
+    autoDownload: boolean;
+  } | null;
+  settings?: {
+    closeToTray: boolean;
+    hideFromCapture: boolean;
+    appLock: boolean;
+    signedIn: boolean;
+  } | null;
+  startupErrors?: Array<{ at: string; stage: string; message: string }>;
   logs: { api: string[]; web: string[]; main: string[] };
 }
 
@@ -56,8 +110,8 @@ interface DesktopDiagnosticsBridge {
 
 /** Longest log line kept. A stack trace pasted in full is unreadable in an issue, and a
  * very long line is also the most likely place for an accidentally-serialised blob. */
-const MAX_LOG_LINE = 300;
-const MAX_LOG_LINES = 40;
+const MAX_LOG_LINE = 600;
+const MAX_LOG_LINES = 150;
 
 /**
  * Removes the credential shapes that realistically appear in this app's logs.
@@ -179,23 +233,6 @@ function scraperSection(scraper: ScraperHealth | null): string {
   ].join('\n');
 }
 
-function desktopSection(d: DesktopDiagnostics | null): string {
-  if (d === null) {
-    return [
-      '- Running in: browser (no desktop shell)',
-      `- User agent: ${typeof navigator === 'undefined' ? 'unknown' : navigator.userAgent}`,
-    ].join('\n');
-  }
-
-  return [
-    `- App version: ${d.appVersion}`,
-    `- Electron: ${d.electronVersion} (Chrome ${d.chromeVersion}, Node ${d.nodeVersion})`,
-    `- OS: ${d.platform} ${d.arch} (${d.osRelease})`,
-    `- Supervised servers: ${d.managedServers}`,
-    `- Local cache schema: v${d.localDbVersion ?? 'unknown'} (last migration ${d.localDbMigrationOk ? 'ok' : 'FAILED'})`,
-  ].join('\n');
-}
-
 function serverEventsSection(events: ServerDiagnosticEvent[] | null): string[] {
   if (events === null) return ['_Could not read recent server events._'];
   if (events.length === 0) return ['_(No recent server events.)_'];
@@ -213,6 +250,308 @@ function serverEventsSection(events: ServerDiagnosticEvent[] | null): string[] {
   });
 }
 
+const yesNo = (value: boolean | null | undefined) =>
+  value === null || value === undefined ? 'unknown' : value ? 'yes' : 'no';
+
+function duration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return 'unknown';
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+/** A table whose every cell is scrubbed, with pipes escaped so a value cannot break it. */
+function table(headers: string[], rows: Array<Array<string | number | boolean | null>>): string {
+  const cell = (value: string | number | boolean | null) =>
+    scrubText(value === null ? '—' : String(value))
+      .replace(/\|/g, '\\|')
+      .replace(/\n/g, ' ');
+  return [
+    `| ${headers.join(' | ')} |`,
+    `| ${headers.map(() => '---').join(' | ')} |`,
+    ...rows.map((row) => `| ${row.map(cell).join(' | ')} |`),
+  ].join('\n');
+}
+
+/** Reads without assuming any browser API exists: the report runs in tests with a bare
+ * window, and in the cases worth reporting something may well be broken. */
+function read<T>(get: () => T | undefined): T | null {
+  try {
+    return get() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function browserFacts(): Promise<string[]> {
+  const nav = typeof navigator === 'undefined' ? null : navigator;
+  const media = (query: string) =>
+    read(() =>
+      typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : undefined,
+    );
+  let storage: StorageEstimate | null = null;
+  try {
+    storage = (await nav?.storage?.estimate?.()) ?? null;
+  } catch {
+    // Unavailable, e.g. in a private window.
+  }
+  const heap = read(
+    () =>
+      (performance as unknown as { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } })
+        .memory,
+  );
+  const mb = (bytes: number | undefined) =>
+    bytes === undefined ? 'unknown' : `${Math.round(bytes / 1024 / 1024)} MB`;
+  const dark = media('(prefers-color-scheme: dark)');
+  return [
+    `- User agent: ${nav?.userAgent ?? 'unknown'}`,
+    `- Languages: ${read(() => nav?.languages?.join(', ')) ?? nav?.language ?? 'unknown'}`,
+    `- Time zone: ${read(() => Intl.DateTimeFormat().resolvedOptions().timeZone) ?? 'unknown'}`,
+    `- Online: ${yesNo(nav?.onLine)}`,
+    `- Viewport: ${read(() => (window.innerWidth ? `${window.innerWidth}×${window.innerHeight}` : undefined)) ?? 'unknown'} at ${read(() => window.devicePixelRatio) ?? '?'}x`,
+    `- Colour scheme: ${dark === null ? 'unknown' : dark ? 'dark' : 'light'}, reduced motion: ${yesNo(media('(prefers-reduced-motion: reduce)'))}`,
+    `- CPU threads: ${nav?.hardwareConcurrency ?? 'unknown'}, device memory: ${read(() => (nav as unknown as { deviceMemory?: number } | null)?.deviceMemory) ?? 'unknown'} GB`,
+    `- JS heap: ${heap ? `${mb(heap.usedJSHeapSize)} of ${mb(heap.jsHeapSizeLimit)}` : 'unknown'}`,
+    `- Site storage: ${storage ? `${mb(storage.usage)} used of ${mb(storage.quota)}` : 'unknown'}`,
+  ];
+}
+
+function desktopSection(d: DesktopDiagnostics | null): string[] {
+  if (d === null) return ['- Running in: browser (no desktop shell)'];
+  const lines = [
+    `- App version: ${d.appVersion}${d.packaged === false ? ' (unpackaged development run)' : ''}`,
+    `- Electron: ${d.electronVersion} (Chrome ${d.chromeVersion}, Node ${d.nodeVersion})`,
+    `- OS: ${d.osVersion ? `${d.osVersion}, ` : ''}${d.platform} ${d.arch} (${d.osRelease})`,
+  ];
+  if (d.locale) lines.push(`- Locale: ${d.locale}`);
+  if (d.uptimeSeconds)
+    lines.push(
+      `- Uptime: app ${duration(d.uptimeSeconds.app)}, system ${duration(d.uptimeSeconds.system)}`,
+    );
+  if (d.cpu) lines.push(`- CPU: ${d.cpu.model} (${d.cpu.cores} threads)`);
+  if (d.memory)
+    lines.push(
+      `- Memory: ${d.memory.systemFreeMb} MB free of ${d.memory.systemTotalMb} MB; this app uses ${d.memory.appProcessesMb} MB`,
+    );
+  if (d.displays?.length)
+    lines.push(
+      `- Displays: ${d.displays
+        .map((s) => `${s.width}×${s.height}@${s.scaleFactor}x${s.primary ? ' (primary)' : ''}`)
+        .join(', ')}`,
+    );
+  lines.push(
+    `- Supervised servers: ${d.managedServers}`,
+    `- Local cache schema: v${d.localDbVersion ?? 'unknown'} (last migration ${d.localDbMigrationOk ? 'ok' : 'FAILED'})`,
+  );
+  if (d.localDbError) lines.push(`- Local cache error: ${scrubText(d.localDbError)}`);
+  if (d.storage) {
+    const s = d.storage;
+    lines.push(
+      `- Disk: ${s.freeGb ?? '?'} GB free of ${s.totalGb ?? '?'} GB`,
+      `- Data sizes: server database ${s.serverDbMb ?? 'none'} MB, local cache ${s.localCacheMb ?? 'none'} MB, ${s.installedSourceBundles ?? 'unknown'} installed source bundles`,
+    );
+  }
+  if (d.update)
+    lines.push(
+      `- Updates: ${d.update.status}${d.update.availableVersion ? ` (offering ${d.update.availableVersion})` : ''}, auto-download ${yesNo(d.update.autoDownload)}${d.update.error ? `, last error: ${scrubText(d.update.error)}` : ''}`,
+    );
+  if (d.settings)
+    lines.push(
+      `- Settings: signed in ${yesNo(d.settings.signedIn)}, app lock ${yesNo(d.settings.appLock)}, close to tray ${yesNo(d.settings.closeToTray)}, hidden from capture ${yesNo(d.settings.hideFromCapture)}`,
+    );
+  return lines;
+}
+
+function serverProcessSection(d: DesktopDiagnostics | null): string | null {
+  if (!d?.servers) return null;
+  const row = (name: string, s: DesktopServerStatus) => [
+    name,
+    s.running ? 'running' : s.started ? 'exited' : 'not started',
+    s.ready ? 'yes' : s.readyError ? `no: ${s.readyError}` : 'not yet',
+    duration(s.uptimeSeconds),
+    s.exitCode ?? s.exitSignal ?? null,
+    s.usingBundledNode ? 'bundled' : 'Electron',
+  ];
+  return table(
+    ['Process', 'State', 'Port ready', 'Uptime', 'Exit', 'Node'],
+    [row('API', d.servers.api), row('Web', d.servers.web)],
+  );
+}
+
+function processTable(d: DesktopDiagnostics | null): string | null {
+  if (!d?.processes?.length) return null;
+  return table(
+    ['Process', 'Memory (MB)', 'CPU %'],
+    d.processes.map((p) => [p.type, p.memoryMb, p.cpuPercent]),
+  );
+}
+
+function gpuLine(d: DesktopDiagnostics | null): string | null {
+  if (!d?.gpu) return null;
+  // Only the features that are not plainly enabled: the full list is long and mostly noise.
+  const notable = Object.entries(d.gpu).filter(([, status]) => !/^enabled/.test(status));
+  return notable.length === 0
+    ? '- GPU features: all enabled'
+    : `- GPU features not fully enabled: ${notable.map(([k, v]) => `${k}=${v}`).join(', ')}`;
+}
+
+function runtimeSection(runtime: ServerRuntimeDiagnostics | null): string[] {
+  if (runtime === null)
+    return ['- Runtime details: unavailable (server unreachable, or this client is not an admin)'];
+  const counts = Object.entries(runtime.counts)
+    .map(([key, value]) => `${key} ${value ?? 'unreadable'}`)
+    .join(', ');
+  const downloads = runtime.downloads
+    ? Object.entries(runtime.downloads)
+        .map(([status, n]) => `${status.toLowerCase()} ${n}`)
+        .join(', ') || 'none'
+    : 'unreadable';
+  const features = Object.entries(runtime.features)
+    .map(([key, value]) => `${key} ${typeof value === 'boolean' ? yesNo(value) : (value ?? 'no')}`)
+    .join(', ');
+  const m = runtime.migrations;
+  return [
+    `- Node: ${runtime.node} on ${runtime.platform} (${runtime.nodeEnv ?? 'no NODE_ENV'})`,
+    `- Uptime: ${duration(runtime.uptimeSeconds)}`,
+    `- Memory: ${runtime.memoryMb.rss} MB resident, heap ${runtime.memoryMb.heapUsed}/${runtime.memoryMb.heapTotal} MB`,
+    m
+      ? `- Migrations: ${m.applied} applied, latest ${m.latest ?? 'none'}${m.failed ? `, ${m.failed} FAILED` : ''}`
+      : '- Migrations: could not read the migrations table',
+    `- Rows: ${counts}`,
+    `- Downloads: ${downloads}`,
+    `- Configured: ${features}`,
+  ];
+}
+
+function sourceHealthSection(health: SourceHealth[] | null): string {
+  if (health === null) return '_Could not read source health._';
+  const rows = health.filter(
+    (h) => h.browse?.lastErrorCode || h.update?.lastErrorCode || h.browse?.retryAfterAt,
+  );
+  if (rows.length === 0) return `_No source reports a recent failure (${health.length} tracked)._`;
+  return table(
+    ['Source', 'Browse error', 'Update error', 'Retry after'],
+    rows.map((h) => [
+      h.sourceId,
+      h.browse?.lastErrorCode ?? null,
+      h.update?.lastErrorCode ?? null,
+      h.browse?.retryAfterAt ?? h.update?.retryAfterAt ?? null,
+    ]),
+  );
+}
+
+function requestsSection(requests: RequestFailure[]): string {
+  if (requests.length === 0) return '_No failed requests since this page loaded._';
+  return table(
+    ['Time', 'Request', 'Status', 'From API', 'Code', 'Took', 'Request id', 'Message'],
+    requests
+      .slice(-40)
+      .map((r) => [
+        r.at.slice(11, 23),
+        `${r.method} ${r.path}`,
+        r.status === 0 ? r.kind : r.status,
+        r.status === 0 ? null : r.fromApi ? 'yes' : 'NO',
+        r.code ?? null,
+        `${r.durationMs} ms`,
+        r.requestId ?? null,
+        r.message.slice(0, 160),
+      ]),
+  );
+}
+
+function clientErrorsSection(errors: ClientErrorEvent[]): string {
+  if (errors.length === 0) return '_No client errors since this page loaded._';
+  return codeBlock(
+    scrubLogs(
+      errors.flatMap((e) => [
+        `${e.at.slice(11, 23)} ${e.kind.toUpperCase()} on ${e.page}: ${e.message}`,
+        ...(e.stack ? e.stack.split('\n').map((frame) => `    ${frame.trim()}`) : []),
+      ]),
+    ),
+  );
+}
+
+function pagesSection(pages: PageVisit[]): string {
+  if (pages.length === 0) return '_(none recorded)_';
+  return pages.map((p) => `- ${p.at.slice(11, 19)} ${scrubText(p.page)}`).join('\n');
+}
+
+const firstLine = (text: string) => scrubText(text.split('\n')[0] ?? '');
+
+/**
+ * The first thing a reader of the report sees: what looks wrong, in plain words, drawn
+ * from the sections below. Each rule points at the section that holds its evidence.
+ */
+export function likelyProblems(input: {
+  desktop: DesktopDiagnostics | null;
+  reachable: boolean;
+  runtime: ServerRuntimeDiagnostics | null;
+  requests: RequestFailure[];
+  errors: ClientErrorEvent[];
+  sourceHealth: SourceHealth[] | null;
+}): string[] {
+  const { desktop, reachable, runtime, requests, errors, sourceHealth } = input;
+  const problems: string[] = [];
+  const exitOf = (s: DesktopServerStatus) => s.exitCode ?? s.exitSignal ?? 'unknown';
+
+  const api = desktop?.servers?.api;
+  if (api?.started && !api.running)
+    problems.push(`The API server exited (code ${exitOf(api)}); "Recent API log" says why.`);
+  else if (api && !api.ready && api.readyError)
+    problems.push(`The API server never opened its port: ${firstLine(api.readyError)}`);
+  const web = desktop?.servers?.web;
+  if (web?.started && !web.running)
+    problems.push(`The web server exited (code ${exitOf(web)}); "Recent web log" says why.`);
+
+  const apiLog = desktop?.logs.api.join('\n') ?? '';
+  const missing = apiLog.match(/Cannot find (?:package|module) '([^']+)'/);
+  if (missing)
+    problems.push(`The API cannot load "${scrubText(missing[1] ?? '')}" (ERR_MODULE_NOT_FOUND).`);
+  if (!reachable) problems.push('The API did not answer its health check.');
+
+  if (desktop && !desktop.localDbMigrationOk)
+    problems.push(
+      `The local cache could not be opened${desktop.localDbError ? `: ${firstLine(desktop.localDbError)}` : '.'}`,
+    );
+  for (const startup of desktop?.startupErrors ?? [])
+    problems.push(`Start-up step "${startup.stage}" failed: ${firstLine(startup.message)}`);
+  if (runtime?.migrations?.failed)
+    problems.push(`${runtime.migrations.failed} server database migration(s) did not finish.`);
+  if (runtime && Object.values(runtime.counts).some((n) => n === null))
+    problems.push('Some server tables could not be read; the database schema may be incomplete.');
+
+  const freeGb = desktop?.storage?.freeGb;
+  if (typeof freeGb === 'number' && freeGb < 1)
+    problems.push(`The disk is nearly full (${freeGb} GB free).`);
+  if (desktop?.update?.error)
+    problems.push(`The updater reported: ${firstLine(desktop.update.error)}`);
+
+  const proxied = requests.filter((r) => r.status >= 500 && !r.fromApi);
+  if (proxied.length > 0)
+    problems.push(
+      `${proxied.length} request(s) failed with ${proxied[0]?.status} and no API response: the API was down or unreachable behind the web server.`,
+    );
+  const serverErrors = requests.filter((r) => r.status >= 500 && r.fromApi);
+  if (serverErrors.length > 0)
+    problems.push(
+      `${serverErrors.length} request(s) failed inside the API (${[...new Set(serverErrors.map((r) => r.code ?? r.status))].join(', ')}); match their request ids in "Recent server events".`,
+    );
+  const unanswered = requests.filter((r) => r.kind === 'network' || r.kind === 'timeout');
+  if (unanswered.length > 0)
+    problems.push(`${unanswered.length} request(s) got no answer at all (network or timeout).`);
+  const crashes = errors.filter((e) => e.kind !== 'reported');
+  if (crashes.length > 0)
+    problems.push(`${crashes.length} uncaught error(s) in the page; see "Client errors".`);
+  const failingSources =
+    sourceHealth?.filter((h) => h.browse?.lastErrorCode || h.update?.lastErrorCode) ?? [];
+  if (failingSources.length > 0)
+    problems.push(
+      `${failingSources.length} source(s) report recent failures; see "Source health".`,
+    );
+
+  return problems;
+}
+
 /**
  * Builds the pasteable report. Never throws: a diagnostic tool that fails when the app is
  * broken is useless precisely when it is needed.
@@ -220,35 +559,89 @@ function serverEventsSection(events: ServerDiagnosticEvent[] | null): string[] {
 export async function buildDiagnosticReport(): Promise<string> {
   const bridge = (window as unknown as { desktop?: DesktopDiagnosticsBridge }).desktop;
 
-  const [desktop, health, installed, scraper, serverEvents] = await Promise.all([
-    bridge?.diagnostics ? settled(bridge.diagnostics.collect()) : Promise.resolve(null),
-    settled(getHealth()),
-    settled(listInstalledExtensions()),
-    settled(getScraperHealth()),
-    settled(getRecentServerDiagnostics()),
-  ]);
+  const [desktop, health, installed, scraper, serverEvents, runtime, sourceHealth, browser] =
+    await Promise.all([
+      bridge?.diagnostics ? settled(bridge.diagnostics.collect()) : Promise.resolve(null),
+      settled(getHealth()),
+      settled(listInstalledExtensions()),
+      settled(getScraperHealth()),
+      settled(getRecentServerDiagnostics()),
+      settled(getServerRuntimeDiagnostics()),
+      settled(getSourceHealth()),
+      browserFacts().catch(() => ['- Browser facts unavailable']),
+    ]);
+  // Read after the calls above, so a failure among them is listed too.
+  const client = readClientDiagnostics();
+  const problems = likelyProblems({
+    desktop,
+    reachable: health !== null,
+    runtime,
+    requests: client.requests,
+    errors: client.errors,
+    sourceHealth,
+  });
+  const page = read(() => (typeof location === 'undefined' ? undefined : location.pathname));
 
   const sections = [
     '## Projekt Manga diagnostic report',
     '',
     `Generated: ${new Date().toISOString()}`,
+    `Page: ${scrubText(page ?? 'unknown')} (open ${duration(client.pageAgeSeconds)})`,
+    '',
+    '### Likely problems',
+    problems.length === 0 ? '_Nothing stands out._' : problems.map((p) => `- ${p}`).join('\n'),
     '',
     '### Environment',
-    desktopSection(desktop),
+    desktopSection(desktop).join('\n'),
+    '',
+    '### Browser',
+    browser.join('\n'),
+  ];
+
+  const servers = serverProcessSection(desktop);
+  if (servers) sections.push('', '### Supervised servers', servers);
+  const appProcesses = processTable(desktop);
+  const gpu = gpuLine(desktop);
+  if (appProcesses || gpu) {
+    sections.push('', '### App processes');
+    if (appProcesses) sections.push(appProcesses);
+    if (gpu) sections.push('', gpu);
+  }
+  if (desktop?.startupErrors?.length)
+    sections.push(
+      '',
+      '### Start-up errors',
+      codeBlock(scrubLogs(desktop.startupErrors.map((e) => `${e.at} [${e.stage}] ${e.message}`))),
+    );
+
+  sections.push(
     '',
     '### Server',
     `- API base URL: ${redactUrl(getApiBaseUrl())}`,
     `- Reachable: ${health ? 'yes' : 'no'}`,
+    ...runtimeSection(runtime),
+    '',
+    '### Failed requests (this page)',
+    requestsSection(client.requests),
+    '',
+    '### Client errors (this page)',
+    clientErrorsSection(client.errors),
+    '',
+    '### Pages visited',
+    pagesSection(client.pages),
     '',
     '### Installed sources',
     extensionRows(installed),
+    '',
+    '### Source health',
+    sourceHealthSection(sourceHealth),
     '',
     '### Scraper health',
     scraperSection(scraper),
     '',
     '### Recent server events',
     codeBlock(serverEventsSection(serverEvents)),
-  ];
+  );
 
   if (desktop) {
     sections.push(

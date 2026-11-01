@@ -72,4 +72,38 @@ describe('health access', () => {
     });
     expect(JSON.stringify(response.body.data)).not.toMatch(/message|url|path|token/i);
   });
+
+  it('reports runtime facts as booleans and counts, never configured values', async () => {
+    const secret = 'a3f1c9d84b2e7f0a15c6d93b8e4f7a2c';
+    process.env.TOKEN_ENCRYPTION_KEY = secret;
+    process.env.TRANSLATE_PROVIDER = 'https://user:pw@translate.example.com';
+    prismaMock.$queryRawUnsafe.mockImplementation(async (sql: string) => {
+      if (sql.includes('_prisma_migrations'))
+        return [
+          { migration_name: '20260101_init', finished_at: new Date(), rolled_back_at: null },
+          { migration_name: '20260202_broken', finished_at: null, rolled_back_at: null },
+        ];
+      if (sql.includes('FROM downloads')) return [{ status: 'FAILED', n: 3n }];
+      if (sql.includes('FROM users')) throw new Error('no such table: users at C:/Users/x/pm.db');
+      return [{ n: 7n }];
+    });
+    try {
+      const response = await request(app).get('/api/health/runtime');
+
+      expect(response.status).toBe(200);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.body.data).toMatchObject({
+        migrations: { applied: 1, latest: '20260101_init', failed: 1 },
+        counts: { titles: 7, users: null },
+        downloads: { FAILED: 3 },
+        features: { tokenEncryptionKey: true, translate: 'other' },
+      });
+      const body = JSON.stringify(response.body);
+      expect(body).not.toContain(secret);
+      expect(body).not.toMatch(/translate\.example|no such table|Users/);
+    } finally {
+      delete process.env.TOKEN_ENCRYPTION_KEY;
+      delete process.env.TRANSLATE_PROVIDER;
+    }
+  });
 });

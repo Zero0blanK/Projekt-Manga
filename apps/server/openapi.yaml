@@ -1630,6 +1630,53 @@ paths:
                               type: object
                               additionalProperties: { type: integer }
 
+  /health/runtime:
+    get:
+      tags: [Health]
+      summary: Process and database facts for the diagnostic report
+      description: >
+        Admin only (loopback passes; a remote client sends X-Admin-Token when ADMIN_TOKEN
+        is set). Node version, uptime, memory, which optional settings are configured (as
+        booleans), applied migrations, row counts and download states. No paths or values.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          node: { type: string }
+                          platform: { type: string }
+                          nodeEnv: { type: string, nullable: true }
+                          uptimeSeconds: { type: integer }
+                          memoryMb:
+                            type: object
+                            additionalProperties: { type: integer }
+                          features:
+                            type: object
+                          migrations:
+                            type: object
+                            nullable: true
+                            properties:
+                              applied: { type: integer }
+                              latest: { type: string, nullable: true }
+                              failed: { type: integer }
+                          counts:
+                            type: object
+                            additionalProperties: { type: integer, nullable: true }
+                          downloads:
+                            type: object
+                            nullable: true
+                            additionalProperties: { type: integer }
+        '403':
+          $ref: '#/components/responses/Error'
+
   /health/scraper:
     get:
       tags: [Health]

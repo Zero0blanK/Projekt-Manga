@@ -279,6 +279,23 @@ function attachWindowHandlers(win: BrowserWindow, reload: () => void): void {
     console.error(`[window] Renderer process gone (${details.reason}), reloading`, details);
     if (!win.isDestroyed()) reload();
   });
+  // Each of these reaches the diagnostic report through the captured console.
+  win.webContents.on('unresponsive', () => console.warn('[window] Renderer became unresponsive'));
+  win.webContents.on('responsive', () => console.warn('[window] Renderer responsive again'));
+  win.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+    // -3 is ERR_ABORTED: a navigation replaced by another, not a failure.
+    if (code === -3 || !isMainFrame) return;
+    let origin = 'unknown';
+    try {
+      origin = new URL(url).origin;
+    } catch {
+      // Keep "unknown".
+    }
+    console.warn(`[window] Page failed to load (${code} ${description}) at ${origin}`);
+  });
+  win.webContents.on('preload-error', (_event, _path, error) => {
+    console.error('[window] Preload script failed:', error);
+  });
 }
 
 /** Another window on an app page, offset from the one it was opened from. Only ever

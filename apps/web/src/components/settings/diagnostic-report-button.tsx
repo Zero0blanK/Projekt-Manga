@@ -15,6 +15,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
+/** Saves the report as a Markdown file — easier to attach to an issue than to paste when
+ * it is long. */
+function saveReport(report: string): void {
+  const url = URL.createObjectURL(new Blob([report], { type: 'text/markdown' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `projekt-manga-diagnostics-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.md`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /**
  * Produces the pasteable report described in lib/diagnostics.ts.
  *
@@ -66,8 +77,10 @@ export function DiagnosticReportButton() {
           <DialogHeader>
             <DialogTitle>Review diagnostic report</DialogTitle>
             <DialogDescription>
-              Check this report before copying or sharing it. It includes recent server event IDs
-              and counts, but omits raw error messages, URLs, and file paths.
+              Check this report before copying or sharing it. It lists recent errors, failed
+              requests, the pages you visited in this window and the app&apos;s recent logs, with
+              passwords, tokens, cookies and your account name removed. Request paths can name a
+              title you opened.
             </DialogDescription>
           </DialogHeader>
           <Textarea
@@ -83,6 +96,14 @@ export function DiagnosticReportButton() {
               className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted"
             >
               Close
+            </button>
+            <button
+              type="button"
+              disabled={!report}
+              onClick={() => report && saveReport(report)}
+              className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              Save as file
             </button>
             <button
               type="button"

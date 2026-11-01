@@ -64,5 +64,28 @@ export interface ServerDiagnosticEvent {
 export const getScraperHealth = (signal?: AbortSignal) =>
   request<ScraperHealth>('/health/scraper', { signal });
 
+/** Shape of GET /api/health/runtime (admin only). Counts are null when a table could not
+ * be read. */
+export interface ServerRuntimeDiagnostics {
+  node: string;
+  platform: string;
+  nodeEnv: string | null;
+  uptimeSeconds: number;
+  memoryMb: { rss: number; heapUsed: number; heapTotal: number };
+  features: {
+    adminToken: boolean;
+    tokenEncryptionKey: boolean;
+    clientUrl: boolean;
+    trustProxy: boolean;
+    translate: string | null;
+  };
+  migrations: { applied: number; latest: string | null; failed: number } | null;
+  counts: Record<string, number | null>;
+  downloads: Record<string, number> | null;
+}
+
+export const getServerRuntimeDiagnostics = (signal?: AbortSignal) =>
+  request<ServerRuntimeDiagnostics>('/health/runtime', { signal });
+
 export const getRecentServerDiagnostics = (signal?: AbortSignal) =>
   request<ServerDiagnosticEvent[]>('/health/diagnostics', { signal });
