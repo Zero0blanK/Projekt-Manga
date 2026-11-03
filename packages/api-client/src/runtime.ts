@@ -34,6 +34,45 @@ export function hasLocalDataBridge(): boolean {
   return getDesktopDataBridge() !== null;
 }
 
+/**
+ * Whether library data is read from and written to the desktop's local database (then
+ * synced), or straight to the server like a browser.
+ *
+ * The desktop app now answers "server" for every library, signed in or not, so it and
+ * every browser on the same server show one library and see each other's reading live
+ * (the installed app's server is its own child process, always there while it runs).
+ * The local path stays for a main process that still answers local-first. Null until
+ * asked.
+ */
+let localFirst: boolean | null = null;
+
+/** Asks the desktop main process again. Call after signing in or out. */
+export async function refreshLocalDataMode(): Promise<boolean> {
+  const bridge = getDesktopDataBridge();
+  if (!bridge) return (localFirst = false);
+  try {
+    const result = await bridge.invoke('meta', 'mode');
+    localFirst =
+      result.success && (result.data as { localFirst?: unknown } | undefined)?.localFirst === true;
+  } catch {
+    localFirst = false;
+  }
+  return localFirst;
+}
+
+/** The last known answer, for callers that cannot wait (a page-unload beacon). */
+export function usesLocalFirstDataSync(): boolean {
+  return getDesktopDataBridge() !== null && localFirst === true;
+}
+
+/** Whether this call should use the local database: false in any browser, and on desktop
+ * without a signed-in account. */
+export async function usesLocalFirstData(): Promise<boolean> {
+  if (!getDesktopDataBridge()) return false;
+  if (localFirst === null) await refreshLocalDataMode();
+  return localFirst === true;
+}
+
 /** Calls the local SQLite DB via IPC. Throws if no desktop bridge is present — callers
  * must check hasLocalDataBridge() first (or catch and fall back to the HTTP path). */
 export async function localInvoke<T>(domain: string, op: string, args?: unknown): Promise<T> {

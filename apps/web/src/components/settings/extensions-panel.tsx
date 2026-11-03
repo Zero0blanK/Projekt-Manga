@@ -5,7 +5,9 @@ import Link from 'next/link';
 import { ApiError } from '@projekt-manga/api-client';
 import { Panel, Field, Toggle } from '@/components/settings/field-controls';
 import { HIDE_LIBRARY_IN_SOURCES } from '@/lib/library-titles';
+import { AUTO_OPEN_CHALLENGE_SETTING } from '@/lib/source-browser';
 import { AddRepositoryForm } from '@/components/extensions/add-repository-form';
+import { SuwayomiServer } from '@/components/settings/suwayomi-server';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
@@ -77,6 +79,12 @@ export function ExtensionsPanel() {
           hint="Leave them out of source listings and searches"
         >
           <Toggle settingKey={HIDE_LIBRARY_IN_SOURCES} />
+        </Field>
+        <Field
+          label="Open browser checks automatically"
+          hint="Desktop app: pass source checks out of sight, showing the window only if a check needs you"
+        >
+          <Toggle settingKey={AUTO_OPEN_CHALLENGE_SETTING} defaultOn />
         </Field>
       </Panel>
       <Panel
@@ -188,6 +196,12 @@ export function ExtensionsPanel() {
             );
           })
         )}
+      </Panel>
+      <Panel
+        title="Suwayomi server"
+        subtitle="Use the Mihon sources installed on your Suwayomi server"
+      >
+        <SuwayomiServer />
       </Panel>
     </div>
   );

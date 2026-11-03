@@ -49,6 +49,22 @@ describe('boot splash gating', () => {
     expect(runInitScript(`${window.location.origin}/discover`)).toBe(true);
   });
 
+  it('never plays once the reader turns the opening animation off', () => {
+    localStorage.setItem(
+      'projekt-manga:state:v1',
+      JSON.stringify({ settings: { showSplash: false } }),
+    );
+    expect(runInitScript('https://elsewhere.example/')).toBe(true);
+    localStorage.setItem(
+      'projekt-manga:state:v1',
+      JSON.stringify({ settings: { showSplash: true } }),
+    );
+    document.documentElement.removeAttribute(SPLASH_SKIP_ATTR);
+    sessionStorage.clear();
+    localStorage.removeItem(SPLASH_LAST_SHOWN_KEY);
+    expect(runInitScript()).toBe(false);
+  });
+
   it('skips on a reload in the same tab', () => {
     sessionStorage.setItem(SPLASH_SESSION_KEY, '1');
     expect(runInitScript()).toBe(true);

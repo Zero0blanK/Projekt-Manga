@@ -10,7 +10,13 @@ import {
   updateCloudflareClearanceFromBrowserCookies,
 } from '../features/CloudflareClearance.js';
 import { CLOUDFLARE_PATTERNS, matchesAny } from '../utils/detectionPatterns.js';
-import { buildFingerprintInjectionScript } from '../features/FingerprintManager.js';
+import {
+  alignFingerprintWithBrowser,
+  buildAcceptLanguage,
+  buildFingerprintInjectionScript,
+  buildUserAgentMetadata,
+  createFallbackFingerprint,
+} from '../features/FingerprintManager.js';
 
 // Pooled by proxy identity ('direct' for no proxy). Chromium only honors a proxy set at
 // browser launch (a per-context override is silently ignored), so each proxy needs its
@@ -31,9 +37,6 @@ export interface PlaywrightFetchOptions {
   session?: Session | null;
   headless?: boolean;
 }
-
-const DEFAULT_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
 /** Evicts the least-recently-used pooled browser(s) once over capacity. getBrowserForProxy()
  *  re-inserts on every reuse, so the first Map key is always the LRU entry. */
@@ -79,7 +82,13 @@ async function getBrowserForProxy(
   }
 
   const launchPromise = (async () => {
-    const launchOptions: Record<string, unknown> = { headless };
+    const launchOptions: Record<string, unknown> = {
+      headless,
+      // Launching without this switch keeps Chromium from deriving its automation state
+      // before the injected page script runs.
+      ignoreDefaultArgs: ['--enable-automation'],
+      args: ['--disable-blink-features=AutomationControlled', '--disable-infobars'],
+    };
 
     if (proxy) {
       try {
@@ -111,28 +120,42 @@ async function getBrowserForProxy(
 /** Creates a fresh per-request context carrying the current fingerprint. */
 async function createContext(
   browserInstance: Browser,
-  fingerprint?: BrowserFingerprint | null,
+  fingerprint: BrowserFingerprint,
 ): Promise<BrowserContext> {
   return browserInstance.newContext({
-    userAgent: fingerprint?.userAgent || DEFAULT_UA,
-    viewport: fingerprint?.viewport || { width: 1920, height: 1080 },
-    locale: fingerprint?.language || 'en-US',
-    timezoneId: fingerprint?.timezone || 'America/New_York',
+    userAgent: fingerprint.userAgent,
+    viewport: fingerprint.viewport,
+    locale: fingerprint.language,
+    timezoneId: fingerprint.timezone,
+    extraHTTPHeaders: {
+      'Accept-Language': buildAcceptLanguage(fingerprint.languages),
+    },
   });
+}
+
+/**
+ * Playwright has no stealth plugin equivalent, and a context-level userAgent does not
+ * update the client hints Chromium sends. CDP's override sets the UA, platform, and
+ * Sec-CH-UA* metadata together so the challenge script cannot spot the mismatch.
+ */
+async function applyClientHints(page: Page, fingerprint: BrowserFingerprint): Promise<void> {
+  try {
+    const client = await page.context().newCDPSession(page);
+    await client.send('Network.setUserAgentOverride', {
+      userAgent: fingerprint.userAgent,
+      acceptLanguage: buildAcceptLanguage(fingerprint.languages),
+      platform: fingerprint.platform,
+      userAgentMetadata: buildUserAgentMetadata(fingerprint),
+    });
+  } catch (err) {
+    getLogger().debug('[Playwright] CDP user-agent override unavailable', {
+      error: (err as Error).message,
+    });
+  }
 }
 
 async function applyFingerprintScripts(page: Page, fingerprint: BrowserFingerprint): Promise<void> {
   await page.addInitScript(buildFingerprintInjectionScript(fingerprint));
-}
-
-async function applyDefaultStealth(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    // Runs in the page, not in Node.
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
-    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-  });
 }
 
 async function applySession(
@@ -186,7 +209,11 @@ export async function fetchHtmlWithPlaywright(
   const proxyUrl = proxy?.url || null;
 
   const browserInstance = await getBrowserForProxy(proxy, headless);
-  const ctx = await createContext(browserInstance, fingerprint);
+  const effectiveFingerprint = alignFingerprintWithBrowser(
+    fingerprint ?? createFallbackFingerprint(),
+    await browserInstance.version(),
+  );
+  const ctx = await createContext(browserInstance, effectiveFingerprint);
 
   if (session) {
     await applySession(ctx, session, url);
@@ -209,12 +236,9 @@ export async function fetchHtmlWithPlaywright(
       await page.context().addCookies(clearanceCookies);
     }
 
-    // Apply fingerprint or default stealth for this page only.
-    if (fingerprint) {
-      await applyFingerprintScripts(page, fingerprint);
-    } else {
-      await applyDefaultStealth(page);
-    }
+    // Apply client hints and page-level fingerprint patches before navigation.
+    await applyClientHints(page, effectiveFingerprint);
+    await applyFingerprintScripts(page, effectiveFingerprint);
 
     await page.goto(url, {
       waitUntil: 'networkidle',

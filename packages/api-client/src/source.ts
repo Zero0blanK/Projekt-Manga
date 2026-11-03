@@ -20,6 +20,11 @@ export interface SourceSummary {
   lang: string;
   base_url: string;
   isNSFW: boolean;
+  /** Where the source runs: an installed extension, or a connected Suwayomi server. Older
+   * servers omit it, which means an extension. */
+  provider?: 'extension' | 'suwayomi';
+  /** The source's own icon, for sources without an installed extension record. */
+  icon_url?: string | null;
 }
 
 export interface SourceOperationHealth {

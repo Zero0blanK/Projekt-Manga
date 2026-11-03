@@ -162,6 +162,9 @@ export function AppearancePanel() {
 
       <Panel title="Motion" subtitle="Animation and transitions">
         <Group label="Accessibility" />
+        <Field label="Opening animation" hint="The splash shown when the app starts">
+          <Toggle settingKey="showSplash" defaultOn />
+        </Field>
         <Field label="Reduce motion" hint="Near-instant transitions everywhere">
           <Toggle settingKey="reduceMotion" />
         </Field>

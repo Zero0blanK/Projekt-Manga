@@ -22,6 +22,8 @@ import backupRoutes from './routes/backup.route.js';
 import sourceNetworkRoutes from './routes/sourceNetwork.route.js';
 import notificationChannelRoutes from './routes/notificationChannel.route.js';
 import translateRoutes from './routes/translate.route.js';
+import suwayomiRoutes from './routes/suwayomi.route.js';
+import libraryEventsRoutes, { announceLibraryWrites } from './routes/libraryEvents.route.js';
 import errorHandler from './middleware/error.middleware.js';
 import captureUserAgent from './middleware/userAgent.middleware.js';
 import { attachUser } from './middleware/auth.middleware.js';
@@ -85,6 +87,7 @@ app.use(express.json({ limit: '5mb' }));
 app.set('trust proxy', resolveTrustProxy(process.env.TRUST_PROXY));
 app.use(captureUserAgent);
 app.use(attachUser);
+app.use(announceLibraryWrites);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/manga', mangaRoutes);
@@ -109,6 +112,8 @@ app.use('/api/backup', backupRoutes);
 app.use('/api/source-network', sourceNetworkRoutes);
 app.use('/api/notification-channels', notificationChannelRoutes);
 app.use('/api/translate', translateRoutes);
+app.use('/api/suwayomi', suwayomiRoutes);
+app.use('/api/library-events', libraryEventsRoutes);
 
 app.use(errorHandler);
 

@@ -171,16 +171,205 @@ export class FingerprintManager {
   }
 }
 
+export interface BrowserUserAgentMetadata {
+  brands: Array<{ brand: string; version: string }>;
+  fullVersionList: Array<{ brand: string; version: string }>;
+  platform: string;
+  platformVersion: string;
+  architecture: string;
+  model: string;
+  mobile: boolean;
+  bitness: string;
+  wow64: boolean;
+  formFactors: string[];
+}
+
+interface ChromiumTarget {
+  os: 'windows' | 'mac' | 'linux' | 'android';
+  platform: string;
+  chromePlatform: string;
+  mobile: boolean;
+}
+
+function resolveChromiumTarget(fingerprint: BrowserFingerprint): ChromiumTarget {
+  switch (fingerprint.platform) {
+    case 'MacIntel':
+      return { os: 'mac', platform: 'MacIntel', chromePlatform: 'macOS', mobile: false };
+    case 'Linux x86_64':
+      return { os: 'linux', platform: 'Linux x86_64', chromePlatform: 'Linux', mobile: false };
+    case 'Linux armv8l':
+    case 'iPhone':
+      return { os: 'android', platform: 'Linux armv8l', chromePlatform: 'Android', mobile: true };
+    default:
+      return { os: 'windows', platform: 'Win32', chromePlatform: 'Windows', mobile: false };
+  }
+}
+
+function isEdgeUserAgent(userAgent: string): boolean {
+  return /\bEdg[A-Za-z]*\//.test(userAgent);
+}
+
+function chromiumUserAgent(os: ChromiumTarget['os'], major: string, edge: boolean): string {
+  const suffix = edge ? ` Edg/${major}.0.0.0` : '';
+  switch (os) {
+    case 'mac':
+      return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36${suffix}`;
+    case 'linux':
+      return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36${suffix}`;
+    case 'android':
+      return `Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Mobile Safari/537.36`;
+    default:
+      return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36${suffix}`;
+  }
+}
+
+function parseBrowserVersion(input: string): { major: string; fullVersion: string } {
+  const match =
+    /(?:HeadlessChrome|Chrome|Chromium|Edg|EdgA|EdgiOS)\/(\d+(?:\.\d+){0,3})/.exec(input) ??
+    /(\d+(?:\.\d+){0,3})/.exec(input);
+  const raw = match?.[1] ?? '124.0.0.0';
+  const [major = '124', minor = '0', build = '0', patch = '0'] = raw.split('.');
+  return {
+    major,
+    fullVersion: `${major}.${minor}.${build}.${patch}`,
+  };
+}
+
+function webglForTarget(target: ChromiumTarget): { vendor: string; renderer: string } {
+  switch (target.platform) {
+    case 'MacIntel':
+      return { vendor: 'Apple Inc.', renderer: 'Apple M2' };
+    case 'Linux x86_64':
+      return {
+        vendor: 'Google Inc. (Intel)',
+        renderer: 'ANGLE (Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)',
+      };
+    case 'Linux armv8l':
+      return {
+        vendor: 'Google Inc. (Qualcomm)',
+        renderer: 'ANGLE (Qualcomm, Adreno (TM) 740, OpenGL ES 3.2)',
+      };
+    default:
+      return {
+        vendor: 'Google Inc. (Intel)',
+        renderer: 'ANGLE (Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)',
+      };
+  }
+}
+
+/**
+ * Rewrites a generated fingerprint so its user agent, platform, touch support, device
+ * pixel ratio, and WebGL identity all describe the actual Chromium build. The UA pools
+ * include Firefox/Safari/mobile profiles whose client hints CDP cannot fake in a
+ * Chromium binary; keeping them produces the exact inconsistencies challenge scripts use
+ * to reject a headless session.
+ */
+export function alignFingerprintWithBrowser(
+  fingerprint: BrowserFingerprint,
+  browserVersion: string,
+): BrowserFingerprint {
+  const { major, fullVersion } = parseBrowserVersion(browserVersion);
+  const target = resolveChromiumTarget(fingerprint);
+  const edge = !target.mobile && isEdgeUserAgent(fingerprint.userAgent);
+  const platformChanged = fingerprint.platform !== target.platform;
+
+  const aligned: BrowserFingerprint = {
+    ...fingerprint,
+    userAgent: chromiumUserAgent(target.os, major, edge),
+    browserVersion: fullVersion,
+    platform: target.platform,
+    maxTouchPoints: target.mobile ? Math.max(fingerprint.maxTouchPoints, 5) : 0,
+    pixelRatio: target.mobile ? 2 : 1,
+  };
+
+  if (platformChanged) {
+    const webgl = webglForTarget(target);
+    aligned.webglVendor = webgl.vendor;
+    aligned.webglRenderer = webgl.renderer;
+  }
+
+  return aligned;
+}
+
+/** Mirrors the q-values Chromium sends so the header and navigator.languages agree. */
+export function buildAcceptLanguage(languages: string[]): string {
+  return languages
+    .map((language, index) =>
+      index === 0 ? language : `${language};q=${Math.max(0.1, 1 - index * 0.1).toFixed(1)}`,
+    )
+    .join(',');
+}
+
+/** Client hints must agree with the user agent string and with navigator.userAgentData. */
+export function buildUserAgentMetadata(fp: BrowserFingerprint): BrowserUserAgentMetadata {
+  const { major, fullVersion } = parseBrowserVersion(fp.browserVersion ?? fp.userAgent);
+  const target = resolveChromiumTarget(fp);
+  const edge = !target.mobile && isEdgeUserAgent(fp.userAgent);
+  const brand = edge ? 'Microsoft Edge' : 'Google Chrome';
+
+  return {
+    brands: [
+      { brand: 'Chromium', version: major },
+      { brand, version: major },
+      { brand: 'Not A(Brand', version: '99' },
+    ],
+    fullVersionList: [
+      { brand: 'Chromium', version: fullVersion },
+      { brand, version: fullVersion },
+      { brand: 'Not A(Brand', version: '99.0.0.0' },
+    ],
+    platform: target.chromePlatform,
+    platformVersion:
+      target.chromePlatform === 'Windows'
+        ? '10.0.0'
+        : target.chromePlatform === 'macOS' || target.chromePlatform === 'Android'
+          ? '14.0.0'
+          : '6.5.0',
+    architecture: target.mobile ? 'arm' : 'x86',
+    model: target.mobile ? 'Pixel 8' : '',
+    mobile: target.mobile,
+    bitness: '64',
+    wow64: false,
+    formFactors: [target.mobile ? 'Mobile' : 'Desktop'],
+  };
+}
+
+/** A conservative desktop fingerprint used when anti-detection did not supply one. */
+export function createFallbackFingerprint(): BrowserFingerprint {
+  return {
+    userAgent: '',
+    platform: 'Win32',
+    viewport: { width: 1920, height: 1080 },
+    deviceMemory: 8,
+    hardwareConcurrency: 8,
+    maxTouchPoints: 0,
+    timezone: 'America/New_York',
+    language: 'en-US',
+    languages: ['en-US', 'en'],
+    colorDepth: 24,
+    pixelRatio: 1,
+    webglVendor: 'Google Inc. (Intel)',
+    webglRenderer: 'ANGLE (Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)',
+  };
+}
+
 /**
  * Builds the browser-context fingerprint-override script as a plain string so Puppeteer
  * (evaluateOnNewDocument) and Playwright (addInitScript) inject identical patching logic.
  */
 export function buildFingerprintInjectionScript(fp: BrowserFingerprint): string {
+  const metadata = buildUserAgentMetadata(fp);
+
   return `(() => {
   const fp = ${JSON.stringify(fp)};
+  const meta = ${JSON.stringify(metadata)};
   const nav = navigator;
   const scr = screen;
   const win = window;
+  const mobile = meta.mobile;
+  const hide = (target, prop, getter) => {
+    try { Object.defineProperty(target, prop, { get: getter, configurable: true }); } catch (e) {}
+  };
 
   Object.defineProperty(nav, 'platform', { get: () => fp.platform });
   Object.defineProperty(nav, 'deviceMemory', { get: () => fp.deviceMemory });
@@ -189,15 +378,163 @@ export function buildFingerprintInjectionScript(fp: BrowserFingerprint): string 
   Object.defineProperty(nav, 'webdriver', { get: () => false });
   Object.defineProperty(nav, 'language', { get: () => fp.language });
   Object.defineProperty(nav, 'languages', { get: () => fp.languages });
+  Object.defineProperty(nav, 'vendor', { get: () => 'Google Inc.' });
+  Object.defineProperty(nav, 'productSub', { get: () => '20030107' });
 
+  Object.defineProperty(scr, 'width', { get: () => fp.viewport.width });
+  Object.defineProperty(scr, 'availWidth', { get: () => fp.viewport.width });
+  Object.defineProperty(scr, 'height', { get: () => fp.viewport.height });
+  Object.defineProperty(scr, 'availHeight', { get: () => Math.max(fp.viewport.height - 60, 0) });
   Object.defineProperty(scr, 'colorDepth', { get: () => fp.colorDepth });
+  Object.defineProperty(scr, 'pixelDepth', { get: () => fp.colorDepth });
   Object.defineProperty(win, 'devicePixelRatio', { get: () => fp.pixelRatio });
+  Object.defineProperty(win, 'outerWidth', { get: () => fp.viewport.width });
+  Object.defineProperty(win, 'outerHeight', { get: () => fp.viewport.height });
+
+  try {
+    const conn = nav.connection;
+    if (conn) {
+      hide(conn, 'effectiveType', () => '4g');
+      hide(conn, 'rtt', () => 50);
+      hide(conn, 'downlink', () => 10);
+      hide(conn, 'saveData', () => false);
+    } else {
+      hide(nav, 'connection', () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false }));
+    }
+  } catch (e) {}
+
+  try {
+    if (!win.chrome) win.chrome = {};
+    const chrome = win.chrome;
+    if (!chrome.runtime) chrome.runtime = {};
+    if (!chrome.app) {
+      chrome.app = {
+        isInstalled: false,
+        InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+        RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+      };
+    }
+    if (typeof chrome.csi !== 'function') chrome.csi = function () { return {}; };
+    if (typeof chrome.loadTimes !== 'function') chrome.loadTimes = function () { return {}; };
+  } catch (e) {}
+
+  try {
+    const Perm = win.Permissions;
+    if (Perm && Perm.prototype && typeof Perm.prototype.query === 'function') {
+      const query = Perm.prototype.query;
+      Perm.prototype.query = function (parameters) {
+        if (parameters && parameters.name === 'notifications') {
+          const state = typeof Notification !== 'undefined' && Notification.permission === 'denied' ? 'denied' : 'prompt';
+          return Promise.resolve({ state: state, onchange: null });
+        }
+        return query.apply(this, arguments);
+      };
+    }
+  } catch (e) {}
+
+  try {
+    const makeMime = (type, suffixes, description) => ({ type, suffixes, description, enabledPlugin: null });
+    const plugins = [
+      { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', mimeTypes: [makeMime('application/pdf', 'pdf', 'Portable Document Format')] },
+      { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', mimeTypes: [makeMime('application/pdf', 'pdf', 'Portable Document Format')] },
+      { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', mimeTypes: [makeMime('application/pdf', 'pdf', 'Portable Document Format')] },
+      { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format', mimeTypes: [makeMime('application/pdf', 'pdf', 'Portable Document Format')] },
+      { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'Portable Document Format', mimeTypes: [makeMime('application/pdf', 'pdf', 'Portable Document Format')] },
+    ];
+    const mimeTypes = [];
+    plugins.forEach((p) => {
+      p.length = p.mimeTypes.length;
+      p.item = (i) => p.mimeTypes[i] || null;
+      p.namedItem = (name) => p.mimeTypes.filter((m) => m.type === name)[0] || null;
+      p.mimeTypes.forEach((m) => {
+        m.enabledPlugin = p;
+        if (!mimeTypes.some((x) => x.type === m.type)) mimeTypes.push(m);
+      });
+    });
+    const pluginArray = { length: plugins.length };
+    plugins.forEach((p, i) => {
+      pluginArray[i] = p;
+      if (win.Plugin && win.Plugin.prototype) Object.setPrototypeOf(p, win.Plugin.prototype);
+    });
+    pluginArray.item = (i) => plugins[i] || null;
+    pluginArray.namedItem = (name) => plugins.filter((p) => p.name === name)[0] || null;
+    pluginArray.refresh = () => {};
+    if (win.PluginArray && win.PluginArray.prototype) Object.setPrototypeOf(pluginArray, win.PluginArray.prototype);
+    const mimeArray = { length: mimeTypes.length };
+    mimeTypes.forEach((m, i) => {
+      mimeArray[i] = m;
+      if (win.MimeType && win.MimeType.prototype) Object.setPrototypeOf(m, win.MimeType.prototype);
+    });
+    mimeArray.item = (i) => mimeTypes[i] || null;
+    mimeArray.namedItem = (name) => mimeTypes.filter((m) => m.type === name)[0] || null;
+    if (win.MimeTypeArray && win.MimeTypeArray.prototype) Object.setPrototypeOf(mimeArray, win.MimeTypeArray.prototype);
+    Object.defineProperty(nav, 'plugins', { get: () => pluginArray });
+    Object.defineProperty(nav, 'mimeTypes', { get: () => mimeArray });
+  } catch (e) {}
+
+  try {
+    const brands = meta.brands;
+    const fullVersionList = meta.fullVersionList;
+    const uaData = {
+      brands: brands,
+      mobile: mobile,
+      platform: meta.platform,
+      getHighEntropyValues: (hints) => {
+        const values = {
+          brands: brands,
+          fullVersionList: fullVersionList,
+          mobile: mobile,
+          platform: meta.platform,
+          platformVersion: meta.platformVersion,
+          architecture: meta.architecture,
+          model: meta.model,
+          bitness: meta.bitness,
+          wow64: meta.wow64,
+          formFactors: meta.formFactors,
+          uaFullVersion: fullVersionList[0] ? fullVersionList[0].version : '',
+        };
+        const result = {};
+        (hints || []).forEach((hint) => { result[hint] = values[hint]; });
+        return Promise.resolve(result);
+      },
+    };
+    const data = nav.userAgentData;
+    if (data) {
+      hide(data, 'brands', () => brands);
+      hide(data, 'mobile', () => mobile);
+      hide(data, 'platform', () => meta.platform);
+      try {
+        const original = typeof data.getHighEntropyValues === 'function' ? data.getHighEntropyValues.bind(data) : null;
+        if (original) {
+          data.getHighEntropyValues = (hints) =>
+            original(hints).then((values) => Object.assign({}, values, {
+              brands: brands,
+              fullVersionList: fullVersionList,
+              mobile: mobile,
+              platform: meta.platform,
+              platformVersion: meta.platformVersion,
+              architecture: meta.architecture,
+              model: meta.model,
+              bitness: meta.bitness,
+              wow64: meta.wow64,
+              formFactors: meta.formFactors,
+            }));
+        }
+      } catch (e) {}
+    } else {
+      if (win.NavigatorUAData && win.NavigatorUAData.prototype) {
+        Object.setPrototypeOf(uaData, win.NavigatorUAData.prototype);
+      }
+      Object.defineProperty(nav, 'userAgentData', { get: () => uaData });
+    }
+  } catch (e) {}
 
   const origDTF = Intl.DateTimeFormat;
   Intl.DateTimeFormat = function (locales, options) {
     return new origDTF(locales, Object.assign({}, options, { timeZone: (options && options.timeZone) || fp.timezone }));
   };
   Intl.DateTimeFormat.prototype = origDTF.prototype;
+  Intl.DateTimeFormat.supportedLocalesOf = origDTF.supportedLocalesOf;
 
   const WebGLRC = win.WebGLRenderingContext;
   if (WebGLRC) {
@@ -223,18 +560,30 @@ export function buildFingerprintInjectionScript(fp: BrowserFingerprint): string 
   if (HTMLCanvas) {
     const origToDataURL = HTMLCanvas.prototype.toDataURL;
     HTMLCanvas.prototype.toDataURL = function (type, quality) {
-      const ctx = this.getContext('2d');
-      if (ctx) {
-        const imgData = ctx.getImageData(0, 0, this.width, this.height);
-        const data = imgData.data;
-        const seed = fp.webglRenderer.length;
-        // Perturbs 1% of pixels by +/-1 on the red channel: visually identical, but it
-        // changes the exact bytes so canvas-fingerprint hashes differ from other renders.
-        for (let i = 0; i < data.length; i += 4) {
-          if (Math.random() < 0.01) data[i] += (seed % 3) - 1;
+      try {
+        const ctx = this.getContext('2d');
+        if (ctx && typeof document !== 'undefined') {
+          const imgData = ctx.getImageData(0, 0, this.width, this.height);
+          const data = imgData.data;
+          const source = String(fp.userAgent) + '|' + String(fp.webglRenderer);
+          let seed = 2166136261;
+          for (let c = 0; c < source.length; c++) {
+            seed ^= source.charCodeAt(c);
+            seed = Math.imul(seed, 16777619);
+          }
+          seed = seed >>> 0;
+          // Deterministic per-fingerprint perturbation: hashes stay stable across calls,
+          // while still differing from the stock headless Chromium canvas output.
+          for (let i = 0; i < data.length; i += 4) {
+            let h = (i ^ seed) >>> 0;
+            h = Math.imul(h ^ (h >>> 16), 2246822507) >>> 0;
+            h = Math.imul(h ^ (h >>> 13), 3266489909) >>> 0;
+            h = (h ^ (h >>> 16)) >>> 0;
+            if (h % 100 === 0) data[i] = data[i] > 0 ? data[i] - 1 : 1;
+          }
+          ctx.putImageData(imgData, 0, 0);
         }
-        ctx.putImageData(imgData, 0, 0);
-      }
+      } catch (e) {}
       return origToDataURL.call(this, type, quality);
     };
   }

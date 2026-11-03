@@ -210,7 +210,7 @@ function lockPage(): string {
   h1{font-size:1.05rem;font-weight:600;margin:0;}
   input{background:#221e19;border:1px solid #35302a;color:inherit;border-radius:.5rem;
     padding:.6rem .8rem;font-size:1rem;text-align:center;}
-  button{background:#e9a25a;color:#18130f;border:0;padding:.55rem;border-radius:999px;
+  button{background:#7fb1ff;color:#18130f;border:0;padding:.55rem;border-radius:999px;
     font-weight:600;cursor:pointer;}
   p{color:#e88;min-height:1.5em;margin:0;font-size:.85rem;}
 </style></head><body>

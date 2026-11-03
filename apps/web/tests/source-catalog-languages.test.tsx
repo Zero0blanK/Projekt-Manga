@@ -73,12 +73,15 @@ beforeEach(() => {
 });
 
 describe('Extension catalogue language sections', () => {
-  it('groups regional languages and shows readable regional labels', () => {
+  it('groups regional languages, multilingual and English first, with readable labels', () => {
     render(<SourceCatalog />);
-    expect(screen.getByRole('tab', { name: 'All 5' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'English 2' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Japanese 1' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Multilingual 1' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('5 catalogue results');
+    const available = screen.getByRole('region', { name: 'Available extensions' });
+    expect(
+      within(available)
+        .getAllByRole('heading', { level: 4 })
+        .map((heading) => heading.textContent),
+    ).toEqual(['Multilingual', 'English', 'Japanese', 'Portuguese']);
     expect(
       within(screen.getByRole('region', { name: 'English sources' })).getAllByRole('listitem'),
     ).toHaveLength(2);
@@ -86,17 +89,17 @@ describe('Extension catalogue language sections', () => {
     expect(screen.getByText('v1.0.0 · Japanese')).toBeInTheDocument();
   });
 
-  it('filters via accessible tabs and supports keyboard navigation', async () => {
-    const user = userEvent.setup();
-    render(<SourceCatalog />);
-    await user.click(screen.getByRole('tab', { name: 'Japanese 1' }));
+  it('shows one language, or one repository, from the page filters', () => {
+    const other = entry('other', 'Other repository source', 'en', 'repo-b');
+    mocks.entries.push(other);
+    const { rerender } = render(<SourceCatalog language="ja" />);
     expect(screen.getByText('Japanese source')).toBeVisible();
     expect(screen.queryByText('English source')).not.toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('1 catalogue results');
-    await user.keyboard('{Home}');
-    await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'All 5' })).toHaveAttribute('aria-selected', 'true'),
-    );
+    rerender(<SourceCatalog repositoryId="repo-b" />);
+    expect(screen.getByText('Other repository source')).toBeVisible();
+    expect(screen.queryByText('Japanese source')).not.toBeInTheDocument();
+    rerender(<SourceCatalog />);
     expect(screen.getByText('English source')).toBeVisible();
   });
 
@@ -110,11 +113,11 @@ describe('Extension catalogue language sections', () => {
     const { rerender } = render(
       <SourceCatalog filters={{ ...emptySourceFilters, name: 'English' }} />,
     );
-    expect(screen.getByRole('tab', { name: 'All 1' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('1 catalogue results');
     expect(screen.queryByText('English adult')).not.toBeInTheDocument();
     rerender(<SourceCatalog filters={{ ...emptySourceFilters, status: 'installed' }} />);
-    expect(screen.getByRole('tab', { name: 'English 1' })).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: /Japanese/ })).not.toBeInTheDocument();
+    expect(screen.getByText('English source')).toBeInTheDocument();
+    expect(screen.queryByText('Japanese source')).not.toBeInTheDocument();
   });
 
   it('keeps repositories with matching keys separate and preserves actions and conflicts', async () => {
@@ -177,7 +180,7 @@ describe('Extension catalogue language sections', () => {
     expect(screen.queryByText('No sources match the current filters.')).not.toBeInTheDocument();
     mocks.loading = false;
     rerender(<SourceCatalog filters={{ ...emptySourceFilters, name: 'nothing matches' }} />);
-    expect(screen.getByRole('tab', { name: 'All 0' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('0 catalogue results');
     expect(screen.getByText('No sources match the current filters.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh Offline repository' })).toBeInTheDocument();
   });

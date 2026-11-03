@@ -1,7 +1,7 @@
 import type { GetMangaOptions, AddMangaPayload } from '@projekt-manga/types';
 import { SESSION_COOKIE_NAME } from '@projekt-manga/types';
 import { ApiError, request } from './client.js';
-import { hasLocalDataBridge, localInvoke } from './runtime.js';
+import { localInvoke, usesLocalFirstData } from './runtime.js';
 
 export interface Manga {
   id: string;
@@ -117,8 +117,8 @@ export const getServerManga = (options: GetMangaOptions = {}, signal?: AbortSign
     signal,
   });
 
-export const getManga = (options: GetMangaOptions = {}, signal?: AbortSignal) => {
-  if (hasLocalDataBridge()) {
+export const getManga = async (options: GetMangaOptions = {}, signal?: AbortSignal) => {
+  if (await usesLocalFirstData()) {
     // localInvoke has no AbortSignal parameter — `signal` is silently dropped on this
     // branch, so cancellation is only honoured on the HTTP path below. A caller relying on
     // abort here keeps waiting on desktop.
@@ -130,12 +130,12 @@ export const getManga = (options: GetMangaOptions = {}, signal?: AbortSignal) =>
 export const getMangaById = (mangaId: string, signal?: AbortSignal) =>
   request<Manga | null>(`/manga/${encodeURIComponent(mangaId)}`, { signal });
 
-export const getMangaDetailsById = (
+export const getMangaDetailsById = async (
   mangaId: string,
   signal?: AbortSignal,
   sessionToken?: string,
 ) => {
-  if (hasLocalDataBridge()) {
+  if (await usesLocalFirstData()) {
     return localInvoke<MangaWithDetails>('manga', 'getDetails', { mangaId });
   }
   return request<MangaWithDetails>(`/manga/details/${encodeURIComponent(mangaId)}`, {
@@ -150,7 +150,7 @@ export const getMangaDetailsById = (
 /**
  * Mirrors a library write into the desktop's local database.
  *
- * `getManga` above reads the library from the local database on desktop, but writes go
+ * `getManga` above reads the library from the local database on a signed-in desktop, but writes go
  * only to the API. Without mirroring, a title added mid-session stays invisible until the
  * next app start re-seeds, and re-adding it fails because the API already has the row.
  *
@@ -159,7 +159,7 @@ export const getMangaDetailsById = (
  * reported failure. A later retry can reconcile that exact title from the server library.
  */
 async function mirrorLibraryWrite(mangaId: string, inLibrary: boolean): Promise<boolean> {
-  if (!hasLocalDataBridge()) return true;
+  if (!(await usesLocalFirstData())) return true;
   try {
     if (inLibrary) {
       return await localInvoke<boolean>('manga', 'syncOne', { mangaId });
@@ -184,7 +184,7 @@ export const addManga = async (payload: AddMangaPayload) => {
       !(error instanceof ApiError) ||
       error.status !== 409 ||
       payload.in_library === false ||
-      !hasLocalDataBridge()
+      !(await usesLocalFirstData())
     ) {
       throw error;
     }

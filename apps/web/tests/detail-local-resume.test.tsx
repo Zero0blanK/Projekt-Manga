@@ -11,7 +11,7 @@ const { getMangaDetailsById, getAllDownloads } = vi.hoisted(() => ({
 vi.mock('@projekt-manga/api-client', () => ({
   getMangaDetailsById,
   getAllDownloads,
-  hasLocalDataBridge: () => true,
+  usesLocalFirstDataSync: () => true,
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock('@/lib/library-store', () => ({

@@ -10,6 +10,7 @@ import {
   signOutOtherDevices as apiSignOutOtherDevices,
   hasLocalDataBridge,
   localInvoke,
+  refreshLocalDataMode,
   type PublicUser,
   type RegisterPayload,
   type LoginPayload,
@@ -71,6 +72,9 @@ async function activateDesktopAccount(user: PublicUser): Promise<void> {
   if (!bridge?.syncCachedSession) return;
   try {
     await bridge.syncCachedSession({ user_id: user.id, email: user.email });
+    // A signed-in desktop keeps its library locally and syncs it; read the new mode before
+    // the seed below refetches the library.
+    await refreshLocalDataMode();
     await seedDesktopAccount();
   } catch (error) {
     reportError(
@@ -120,6 +124,8 @@ export const sessionActions = {
     await desktopAuthBridge()
       ?.clearCachedSession?.()
       .catch((error: unknown) => reportError(error, 'Desktop session could not be cleared.'));
+    // Signed out, the desktop uses the server's shared library like a browser does.
+    await refreshLocalDataMode();
     setSessionUser(null);
   },
   async deleteAccount(password: string) {
@@ -127,6 +133,8 @@ export const sessionActions = {
     await desktopAuthBridge()
       ?.clearCachedSession?.()
       .catch((error: unknown) => reportError(error, 'Desktop session could not be cleared.'));
+    // Signed out, the desktop uses the server's shared library like a browser does.
+    await refreshLocalDataMode();
     setSessionUser(null);
   },
   async signOutOtherDevices() {

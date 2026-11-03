@@ -1,6 +1,6 @@
 import type { Source } from '@projekt-manga/types';
 import type { download, chapter as Chapter, manga } from '@prisma/client';
-import { getInstalledSandboxedSource } from '../services/sandboxedSourceRegistry.service.js';
+import { resolveSource } from '../services/sourceResolver.service.js';
 import downloadService from '../services/download.service.js';
 import { recordDiagnosticEvent } from '../utils/diagnosticLog.js';
 import { withRequestId } from '../utils/requestContext.js';
@@ -396,7 +396,7 @@ export class DownloadWorker extends EventEmitter {
     // extension can be added, updated or removed at any time, and a download queued
     // against one installed five minutes ago must see that change, not a stale reference
     // to a process that may already have been torn down.
-    const source = await getInstalledSandboxedSource(sourceId);
+    const source = await resolveSource(sourceId);
     if (!source) throw new NotFoundError(`Source not found: ${sourceId}`);
 
     const run = () =>

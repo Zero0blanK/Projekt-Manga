@@ -136,8 +136,12 @@ contextBridge.exposeInMainWorld('desktop', {
   // A source's website in an isolated window (main/source-browser.ts), for Cloudflare checks
   // and logins. Resolves once the window is closed and its cookies are saved by the server.
   source: {
-    openBrowser: (sourceId: string) =>
-      ipcRenderer.invoke(SOURCE_OPEN_BROWSER_CHANNEL, { sourceId }),
+    // `closeWhenPassed`: the app opened it by itself, so it closes once the site shows.
+    openBrowser: (sourceId: string, options?: { closeWhenPassed?: boolean }) =>
+      ipcRenderer.invoke(SOURCE_OPEN_BROWSER_CHANNEL, {
+        sourceId,
+        closeWhenPassed: options?.closeWhenPassed === true,
+      }),
   },
   // The calling window only (main/ipc.ts): the reader's "keep window on top".
   window: {

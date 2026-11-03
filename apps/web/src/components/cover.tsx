@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Image from 'next/image';
 import { ImageOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCoverBlur } from '@/components/discover/cover-privacy-provider';
@@ -32,6 +31,63 @@ function recoveryGroup(src: string): string | null {
   }
 }
 
+/** How far a download has got, as a fraction. */
+type Progress = number;
+
+/**
+ * Progress for a download whose size the server didn't send: it still moves with every
+ * kilobyte that arrives, approaching but never reaching full until the image is done.
+ */
+const UNSIZED_HALF_BYTES = 48 * 1024;
+const unsizedProgress = (received: number) => 0.9 * (received / (received + UNSIZED_HALF_BYTES));
+
+const RING_RADIUS = 16;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+/**
+ * A ring that fills as the cover's bytes arrive. It fades in after a moment, so a cover
+ * that comes from cache never flashes one.
+ */
+function CoverProgress({ progress }: { progress: Progress }) {
+  return (
+    <div
+      role="progressbar"
+      aria-label="Loading cover"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(progress * 100)}
+      className="absolute inset-0 grid place-items-center animate-in fade-in fill-mode-both delay-150 duration-300"
+    >
+      <svg
+        viewBox="0 0 40 40"
+        className="size-1/3 max-h-10 max-w-10 -rotate-90 text-primary"
+        aria-hidden
+      >
+        <circle
+          cx="20"
+          cy="20"
+          r={RING_RADIUS}
+          fill="none"
+          strokeWidth="4"
+          className="stroke-foreground/10"
+        />
+        <circle
+          cx="20"
+          cy="20"
+          r={RING_RADIUS}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="4"
+          strokeLinecap="round"
+          strokeDasharray={RING_CIRCUMFERENCE}
+          strokeDashoffset={RING_CIRCUMFERENCE * (1 - Math.max(progress, 0.02))}
+          className="transition-[stroke-dashoffset] duration-200 ease-out"
+        />
+      </svg>
+    </div>
+  );
+}
+
 function retryStagger(src: string): number {
   let hash = 0;
   for (const character of src) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
@@ -45,30 +101,16 @@ function retryStagger(src: string): number {
  *
  * `className` sizes the box (the caller decides aspect/dimensions); the image fills it.
  *
- * Uses next/image rather than a bare <img>: covers are the bulk of what this app
- * downloads, they're rendered small (a 44px-wide list row showing a 900px source file),
- * and every one arrives through this app's API — so narrow remotePatterns entries
- * (see next.config.ts) authorise the lot and the optimizer can
- * serve AVIF/WebP at the size actually displayed. The reader's page images deliberately
- * stay on a plain <img>: those need to reflow to each scan's real aspect ratio, which
- * rules out the fixed dimensions next/image requires.
+ * Downloads the image straight from this app's API (the image proxy, or the server's cover
+ * cache) rather than through Next's optimizer: the optimizer fetches the whole image on the
+ * server before sending anything, so the browser could report no progress while the real
+ * download happened. Reading the API's response as it streams is what fills the ring.
  */
 export function Cover({
   src,
   alt = '',
   className,
   rounded = 'rounded-md',
-  /** Matches the rendered width so the optimizer picks a sensible candidate. The default
-   * covers the small list/grid thumbnails that make up nearly every use; pass a real
-   * value for anything displayed large, like a detail-page hero. */
-  sizes = '200px',
-  /**
-   * Higher than Next's default 75. A cover is a second lossy encode of a JPEG a source
-   * already compressed, and at the sizes shown here that shows up as mush around line
-   * art and lettering. 85 is a few KiB more for a visible difference; the covers are
-   * small files either way.
-   */
-  quality = 85,
   priority = false,
   sourceId,
   mangaId,
@@ -77,7 +119,9 @@ export function Cover({
   alt?: string;
   className?: string;
   rounded?: string;
+  /** Accepted for callers written for next/image; the original image is shown. */
   sizes?: string;
+  /** Accepted for callers written for next/image; the original image is shown. */
   quality?: number;
   priority?: boolean;
   sourceId?: string;
@@ -91,6 +135,11 @@ export function Cover({
   const hadError = useRef(false);
   const recoveryUsed = useRef(false);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  /** Until the box nears the viewport nothing is fetched, like next/image's lazy loading. */
+  const [near, setNear] = useState(priority);
+  const [progress, setProgress] = useState<Progress>(0);
+  const [objectUrl, setObjectUrl] = useState<string | null>(null);
 
   const retry = useCallback(
     (delay: number, resetAttempts = false) => {
@@ -145,53 +194,128 @@ export function Cover({
     };
   }, [src, retry]);
 
+  const handleLoad = () => {
+    if (!src) return;
+    if (retryTimer.current) clearTimeout(retryTimer.current);
+    retryTimer.current = null;
+    const recovered = hadError.current;
+    hadError.current = false;
+    recoveryUsed.current = false;
+    attempts.current = 0;
+    setLoaded(true);
+    if (recovered) {
+      const group = recoveryGroup(src);
+      if (group) for (const listener of recoveryListeners.get(group) ?? []) listener();
+    }
+  };
+
+  const handleError = () => {
+    if (!src) return;
+    hadError.current = true;
+    setLoaded(false);
+    if (attempts.current >= retryDelays.length) {
+      setFailed(true);
+    } else if (!retryTimer.current) {
+      retry(retryDelays[attempts.current] + retryStagger(src));
+    }
+  };
+  // The download below reports failures through this, without restarting on every render.
+  const latestHandleError = useRef(handleError);
+  useEffect(() => {
+    latestHandleError.current = handleError;
+  });
+
+  const current = src ? (imageSrc.base === src ? (imageSrc.value ?? src) : src) : null;
+
+  useEffect(() => {
+    if (near) return;
+    const element = box.current;
+    if (!element || typeof IntersectionObserver === 'undefined') {
+      setNear(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setNear(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '400px' },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [near]);
+
+  const downloadUrl = current && near && !failed ? current : null;
+
+  /**
+   * Downloads the cover itself rather than leaving it to an <img>, which reports nothing
+   * until it is done; reading the body as it streams is what lets the ring fill. The bytes
+   * then reach the <img> as a blob URL, and the browser's HTTP cache still applies.
+   */
+  useEffect(() => {
+    if (!downloadUrl) return;
+    const controller = new AbortController();
+    let created: string | null = null;
+    setProgress(0);
+    setObjectUrl(null);
+    void (async () => {
+      try {
+        const response = await fetch(downloadUrl, { signal: controller.signal });
+        if (!response.ok || !response.body) throw new Error(`Cover answered ${response.status}`);
+        const total = Number(response.headers.get('content-length')) || 0;
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let received = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.byteLength;
+          setProgress(total ? Math.min(1, received / total) : unsizedProgress(received));
+        }
+        setProgress(1);
+        const type = response.headers.get('content-type') ?? undefined;
+        created = URL.createObjectURL(new Blob(chunks as BlobPart[], { type }));
+        setObjectUrl(created);
+      } catch {
+        if (!controller.signal.aborted) latestHandleError.current();
+      }
+    })();
+    return () => {
+      controller.abort();
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [downloadUrl]);
+
   const showPlaceholder = !src || failed;
 
   return (
-    <div className={cn('relative overflow-hidden bg-muted', rounded, className)}>
+    <div ref={box} className={cn('relative overflow-hidden bg-muted', rounded, className)}>
       {showPlaceholder ? (
         <div className="grid h-full w-full place-items-center text-muted-foreground/40">
           <ImageOff className="h-1/4 max-h-5 w-auto" />
         </div>
       ) : (
         <>
-          {/* Neutral tone underneath until the bytes arrive, so the box never flashes. */}
-          {!loaded && <div className="absolute inset-0 animate-pulse bg-muted" />}
-          <Image
-            src={imageSrc.base === src ? (imageSrc.value ?? src) : src}
-            alt={blur ? `Adult cover hidden: ${alt}` : alt}
-            fill
-            sizes={sizes}
-            quality={quality}
-            priority={priority}
-            onLoad={() => {
-              if (retryTimer.current) clearTimeout(retryTimer.current);
-              retryTimer.current = null;
-              const recovered = hadError.current;
-              hadError.current = false;
-              recoveryUsed.current = false;
-              attempts.current = 0;
-              setLoaded(true);
-              if (recovered) {
-                const group = recoveryGroup(src);
-                if (group) for (const listener of recoveryListeners.get(group) ?? []) listener();
-              }
-            }}
-            onError={() => {
-              hadError.current = true;
-              setLoaded(false);
-              if (attempts.current >= retryDelays.length) {
-                setFailed(true);
-              } else if (!retryTimer.current) {
-                retry(retryDelays[attempts.current] + retryStagger(src));
-              }
-            }}
-            className={cn(
-              'object-cover transition-opacity duration-300',
-              blur && 'blur-xl',
-              loaded ? 'opacity-100' : 'opacity-0',
-            )}
-          />
+          {!loaded && <CoverProgress progress={progress} />}
+          {objectUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- the bytes downloaded above
+            <img
+              src={objectUrl}
+              data-src={current ?? undefined}
+              alt={blur ? `Adult cover hidden: ${alt}` : alt}
+              decoding="async"
+              onLoad={handleLoad}
+              onError={handleError}
+              className={cn(
+                'absolute inset-0 h-full w-full object-cover transition-opacity duration-300',
+                blur && 'blur-xl',
+                loaded ? 'opacity-100' : 'opacity-0',
+              )}
+            />
+          )}
         </>
       )}
       {blur && (

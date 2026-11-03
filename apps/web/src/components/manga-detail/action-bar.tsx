@@ -15,7 +15,7 @@ import { fromMangaDetails, type Manga } from '@/lib/manga-data';
 import {
   getMangaChapters,
   getMangaDetailsById,
-  hasLocalDataBridge,
+  usesLocalFirstDataSync,
   getAllDownloads,
   initiateDownload,
   cancelDownload,
@@ -39,7 +39,7 @@ import { SourceSwitch } from './source-switch';
 function ContinueReadingLink({ manga }: { manga: Manga }) {
   const [localPosition, setLocalPosition] = useState<Manga | null>(null);
   useEffect(() => {
-    if (!hasLocalDataBridge()) return;
+    if (!usesLocalFirstDataSync()) return;
     let active = true;
     getMangaDetailsById(manga.id)
       .then((details) => {

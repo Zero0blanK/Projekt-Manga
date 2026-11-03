@@ -605,6 +605,86 @@ describe('POST /api/extensions/repositories/:id/refresh', () => {
     const requested = vi.mocked(axios.get).mock.calls[0][0] as string;
     expect(requested).toBe('https://example.com/repo.json');
   });
+
+  it('gives an installed source the icon its repository added later, without a new version', async () => {
+    const ICON = 'https://example.com/icons/test-source.png';
+    prismaMock.extension_repository.findMany.mockResolvedValueOnce([
+      { id: 'repo-1', url: 'https://example.com/repo.json' },
+    ]);
+    mockIndexFetch({ sources: [{ ...VALID_INDEX.sources[0], icon_url: ICON }] });
+    prismaMock.installed_extension.findMany.mockResolvedValueOnce([
+      { id: 'ext-1', repository_id: 'repo-1', source_key: 'test-source', icon_url: null },
+      { id: 'ext-2', repository_id: 'repo-1', source_key: 'other', icon_url: null },
+    ]);
+
+    const res = await request(app).get('/api/extensions/repositories');
+
+    expect(res.status).toBe(200);
+    // Only the listed source, and nothing else about it.
+    expect(prismaMock.installed_extension.updateMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.installed_extension.updateMany).toHaveBeenCalledWith({
+      where: { repository_id: 'repo-1', source_key: 'test-source', NOT: { icon_url: ICON } },
+      data: { icon_url: ICON },
+    });
+  });
+
+  it('replaces an icon the repository has since changed', async () => {
+    prismaMock.extension_repository.findMany.mockResolvedValueOnce([
+      { id: 'repo-1', url: 'https://example.com/repo.json' },
+    ]);
+    mockIndexFetch({
+      sources: [{ ...VALID_INDEX.sources[0], icon_url: 'https://example.com/new.png' }],
+    });
+    prismaMock.installed_extension.findMany.mockResolvedValueOnce([
+      {
+        id: 'ext-1',
+        repository_id: 'repo-1',
+        source_key: 'test-source',
+        icon_url: 'https://example.com/old.svg',
+      },
+    ]);
+
+    await request(app).get('/api/extensions/repositories');
+
+    expect(prismaMock.installed_extension.updateMany).toHaveBeenCalledWith({
+      where: {
+        repository_id: 'repo-1',
+        source_key: 'test-source',
+        NOT: { icon_url: 'https://example.com/new.png' },
+      },
+      data: { icon_url: 'https://example.com/new.png' },
+    });
+  });
+
+  it('leaves an icon that already matches, and keeps one the listing dropped', async () => {
+    prismaMock.extension_repository.findMany.mockResolvedValueOnce([
+      { id: 'repo-1', url: 'https://example.com/repo.json' },
+    ]);
+    mockIndexFetch({
+      sources: [
+        { ...VALID_INDEX.sources[0], icon_url: 'https://example.com/old.png' },
+        { ...VALID_INDEX.sources[0], source_key: 'other', icon_url: undefined },
+      ],
+    });
+    prismaMock.installed_extension.findMany.mockResolvedValueOnce([
+      {
+        id: 'ext-1',
+        repository_id: 'repo-1',
+        source_key: 'test-source',
+        icon_url: 'https://example.com/old.png',
+      },
+      {
+        id: 'ext-2',
+        repository_id: 'repo-1',
+        source_key: 'other',
+        icon_url: 'https://example.com/o.png',
+      },
+    ]);
+
+    await request(app).get('/api/extensions/repositories');
+
+    expect(prismaMock.installed_extension.updateMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /api/extensions/installed/:id/update', () => {
@@ -983,5 +1063,98 @@ describe('host-level routes from a remote client', () => {
     const directory = await request(app).get('/api/downloads/directory').set(remote);
 
     expect([install.status, restore.status, directory.status]).toEqual([403, 403, 403]);
+  });
+});
+
+describe('installed source icons', () => {
+  const SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>';
+  const PNG = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(16),
+  ]);
+
+  function mockInstalled(id: string, icon_url: string | null) {
+    prismaMock.installed_extension.findUnique.mockResolvedValueOnce({
+      id,
+      repository_id: 'repo-1',
+      source_key: 'test-source',
+      icon_url,
+    });
+  }
+
+  it('stores the icon when a source is installed, and serves it without the network', async () => {
+    prismaMock.extension_repository.findUnique.mockResolvedValueOnce({
+      id: 'repo-1',
+      url: 'https://example.com/repo.json',
+    });
+    prismaMock.installed_extension.findUnique.mockResolvedValueOnce(null);
+    mockIndexFetch({
+      sources: [{ ...VALID_INDEX.sources[0], icon_url: 'https://example.com/i.svg' }],
+    });
+    mockBundleFetch();
+    vi.mocked(axios.get).mockResolvedValueOnce({ data: Buffer.from(SVG) });
+    prismaMock.installed_extension.create.mockResolvedValueOnce({ id: 'ext-icon' });
+
+    const installed = await request(app)
+      .post('/api/extensions/installed')
+      .send({ repository_id: 'repo-1', source_key: 'test-source', acknowledge_unsigned: true });
+    expect(installed.status).toBe(201);
+
+    // Offline from here on: any download would fail.
+    vi.mocked(axios.get).mockRejectedValue(new Error('offline'));
+    mockInstalled('ext-icon', 'https://example.com/i.svg');
+    const res = await request(app).get('/api/extensions/installed/ext-icon/icon');
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('image/svg+xml');
+    expect(res.headers['content-security-policy']).toContain('sandbox');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(Buffer.from(res.body).toString()).toBe(SVG);
+  });
+
+  it('downloads the icon on first use for a source installed before icons were stored', async () => {
+    mockInstalled('ext-old', 'https://example.com/old.png');
+    vi.mocked(axios.get).mockResolvedValueOnce({ data: PNG });
+
+    const res = await request(app).get('/api/extensions/installed/ext-old/icon');
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('image/png');
+    const stored = JSON.parse(
+      await fs.readFile(path.join(tmpBundlesDir, 'ext-old', 'icon.json'), 'utf8'),
+    );
+    expect(stored.url).toBe('https://example.com/old.png');
+  });
+
+  it('re-downloads a changed icon, and keeps the old copy when that fails', async () => {
+    mockInstalled('ext-change', 'https://example.com/a.png');
+    vi.mocked(axios.get).mockResolvedValueOnce({ data: PNG });
+    await request(app).get('/api/extensions/installed/ext-change/icon');
+
+    mockInstalled('ext-change', 'https://example.com/b.svg');
+    vi.mocked(axios.get).mockRejectedValueOnce(new Error('offline'));
+    const offline = await request(app).get('/api/extensions/installed/ext-change/icon');
+    expect(offline.status).toBe(200);
+    expect(offline.headers['content-type']).toContain('image/png');
+
+    mockInstalled('ext-change', 'https://example.com/b.svg');
+    vi.mocked(axios.get).mockResolvedValueOnce({ data: Buffer.from(SVG) });
+    const online = await request(app).get('/api/extensions/installed/ext-change/icon');
+    expect(online.headers['content-type']).toContain('image/svg+xml');
+  });
+
+  it('refuses something that is not an image, and a source with no icon', async () => {
+    mockInstalled('ext-html', 'https://example.com/icon.png');
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      data: Buffer.from('<html><body>hi</body></html>'),
+    });
+    const html = await request(app).get('/api/extensions/installed/ext-html/icon');
+    expect(html.status).toBe(400);
+    await expect(fs.stat(path.join(tmpBundlesDir, 'ext-html', 'icon.json'))).rejects.toThrow();
+
+    mockInstalled('ext-none', null);
+    const none = await request(app).get('/api/extensions/installed/ext-none/icon');
+    expect(none.status).toBe(404);
   });
 });

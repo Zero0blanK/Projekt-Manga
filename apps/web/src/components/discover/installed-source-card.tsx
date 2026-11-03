@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import type { InstalledExtension } from '@projekt-manga/api-client';
+import { buildInstalledExtensionIconUrl, type InstalledExtension } from '@projekt-manga/api-client';
 import type { DisplaySource } from '@/lib/manga-data';
 import {
   DropdownMenu,
@@ -34,20 +34,11 @@ import { sourceLanguageName as languageName, repairSourceName } from '@/lib/sour
 import { extensionActions, type CatalogEntry } from '@/lib/extensions-store';
 import { toast } from '@/hooks/use-toast';
 import { useSourceHealthStatus } from '@/lib/source-health-status';
-import { websiteUrl } from '@/lib/source-url';
+import { isProxyPlaceholder, sourceIconUrl, websiteUrl } from '@/lib/source-url';
 import { useConfirm } from '@/hooks/use-confirm';
 /** The extension's own icon when its repository ships one, the lettered tile otherwise. */
-function SourceAvatar({
-  name,
-  accent,
-  iconUrl,
-}: {
-  name: string;
-  accent: string;
-  iconUrl: string | null | undefined;
-}) {
+function SourceAvatar({ name, accent, url }: { name: string; accent: string; url: string | null }) {
   const [failed, setFailed] = useState(false);
-  const url = websiteUrl(iconUrl);
   if (url && !failed)
     return (
       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-secondary">
@@ -60,6 +51,7 @@ function SourceAvatar({
           height={28}
           loading="lazy"
           onError={() => setFailed(true)}
+          onLoad={(event) => setFailed(isProxyPlaceholder(event.currentTarget))}
           className="size-7 rounded-md object-contain"
         />
       </span>
@@ -78,6 +70,7 @@ function SourceAvatar({
 export function InstalledSourceCard({
   source,
   record,
+  listingIconUrl,
   editionEntries = [],
   pinned,
   privateReading,
@@ -89,6 +82,8 @@ export function InstalledSourceCard({
 }: {
   source: DisplaySource;
   record?: InstalledExtension;
+  /** The icon its repository lists now, for a source installed before it had one. */
+  listingIconUrl?: string | null;
   editionEntries?: CatalogEntry[];
   pinned: boolean;
   privateReading: boolean;
@@ -154,10 +149,17 @@ export function InstalledSourceCard({
   const website =
     websiteUrl(record?.homepage) ??
     (source.id.startsWith('mangadex') ? 'https://mangadex.org/' : websiteUrl(source.base_url));
+  // The copy stored with the installed source shows offline; the listing's icon covers a
+  // source installed before its repository published one. A Suwayomi source has no record
+  // and brings its own icon from that server.
+  const iconSrc = record?.icon_url
+    ? buildInstalledExtensionIconUrl(record.id)
+    : sourceIconUrl(listingIconUrl ?? source.icon_url);
+  const suwayomi = source.provider === 'suwayomi';
   return (
     <article className="flex flex-col rounded-2xl border border-border/60 bg-surface/40 p-3 transition hover:border-primary/30">
       <div className="mb-3 flex items-start gap-3">
-        <SourceAvatar name={source.name} accent={source.accent} iconUrl={record?.icon_url} />
+        <SourceAvatar key={iconSrc} name={source.name} accent={source.accent} url={iconSrc} />
         <div className="min-w-0 flex-1">
           <h2 className="truncate font-semibold">{source.name}</h2>
           {/* Language and version always share the first line; status badges get their own
@@ -169,7 +171,7 @@ export function InstalledSourceCard({
                 languageName(source.lang))}
             <span className="tabular-nums">
               {' · '}
-              {record ? `v${record.version}` : 'Version unavailable'}
+              {record ? `v${record.version}` : suwayomi ? 'Suwayomi' : 'Version unavailable'}
             </span>
           </p>
           {(rating === 'nsfw' ||

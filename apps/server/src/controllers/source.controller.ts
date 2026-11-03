@@ -33,6 +33,11 @@ import { HostLimiter } from '../utils/hostLimiter.js';
 import { ValidationError } from '../utils/customErrors.js';
 import { createByteLimitStream } from '../utils/byteLimitStream.js';
 import { MAX_IMAGE_BYTES, detectRasterImageType } from '../utils/imageContent.js';
+import {
+  fetchSuwayomiImage,
+  isSuwayomiImageUrl,
+  SuwayomiError,
+} from '../services/suwayomi/client.js';
 
 /** Covers high-resolution manga covers without allowing the image proxy to become an
  * unbounded bandwidth relay. The streamed check below also covers chunked responses. */
@@ -303,11 +308,29 @@ const checkLibraryUpdates = async (_req: Request, res: Response, next: NextFunct
   }
 };
 
+const proxySuwayomiImage = async (req: Request, res: Response, url: string) => {
+  try {
+    const image = await fetchSuwayomiImage(url);
+    res.setHeader('Content-Type', image.contentType);
+    res.setHeader('Content-Length', String(image.bytes.length));
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    return res.status(200).end(image.bytes);
+  } catch (error) {
+    if (!(error instanceof SuwayomiError)) throw error;
+    if (error.code === 'NOT_FOUND') return proxyError(req, res, 404, MISSING_IMAGE_MESSAGE);
+    return proxyError(req, res, 502, error.message);
+  }
+};
+
 const proxyImage = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { url, source_id } = req.validated as ImageProxyQuery;
     const targetUrl = url.trim();
     const sourceId = source_id?.trim().toLowerCase() ?? '';
+
+    // The connected Suwayomi server is usually on this machine or the LAN, which the public
+    // guard below refuses; its own image paths go through its own pinned client instead.
+    if (isSuwayomiImageUrl(targetUrl)) return await proxySuwayomiImage(req, res, targetUrl);
 
     try {
       await assertPublicHttpUrl(targetUrl);
@@ -333,7 +356,11 @@ const proxyImage = async (req: Request, res: Response, next: NextFunction) => {
         axios.get(targetUrl, {
           responseType: 'stream',
           timeout: 30000,
-          headers: createImageRequestHeaders(sourceId, { ...extraHeaders, ...sessionHeaders }),
+          headers: createImageRequestHeaders(
+            sourceId,
+            { ...extraHeaders, ...sessionHeaders },
+            targetUrl,
+          ),
           validateStatus: () => true,
           // Validates the address every hop actually connects to, which beforeRedirect
           // (hostname only) and a pre-flight DNS check (TOCTOU) both miss.

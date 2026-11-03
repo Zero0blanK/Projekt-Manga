@@ -1,3 +1,5 @@
+import { APP_STATE_STORAGE_KEY } from './theme';
+
 /**
  * Session-once gating for the boot splash, mirroring how `lib/theme.ts` prevents a theme
  * flash: a blocking script in `<head>` decides *before the first paint* whether this
@@ -31,7 +33,9 @@ export const SPLASH_INTERVAL_MS = 12 * 60 * 60 * 1000;
  * - this tab already showed it (a reload);
  * - the page was opened from inside the app, e.g. a title opened in a new tab: the
  *   referrer is this origin;
- * - this browser showed it within `SPLASH_INTERVAL_MS`.
+ * - this browser showed it within `SPLASH_INTERVAL_MS`;
+ * - the reader turned it off (Settings › Appearance › Motion › Opening animation, the
+ *   `showSplash` setting in the saved app state).
  *
  * Checking `sessionStorage` alone would replay the intro in every new tab, hence the
  * referrer and interval checks. Otherwise it records the showing right away and leaves the
@@ -39,9 +43,10 @@ export const SPLASH_INTERVAL_MS = 12 * 60 * 60 * 1000;
  */
 export const SPLASH_INIT_SCRIPT = `(function(){try{
 var KEY=${JSON.stringify(SPLASH_SESSION_KEY)},LAST=${JSON.stringify(SPLASH_LAST_SHOWN_KEY)},now=Date.now();
+var off=false;try{var st=JSON.parse(localStorage.getItem(${JSON.stringify(APP_STATE_STORAGE_KEY)})||"{}");off=!!st&&!!st.settings&&st.settings.showSplash===false;}catch(e){}
 var fromApp=false;try{fromApp=!!document.referrer&&new URL(document.referrer).origin===location.origin;}catch(e){}
 var last=0;try{last=Number(localStorage.getItem(LAST))||0;}catch(e){}
-if(sessionStorage.getItem(KEY)||fromApp||(last>0&&now-last<${SPLASH_INTERVAL_MS})){
+if(off||sessionStorage.getItem(KEY)||fromApp||(last>0&&now-last<${SPLASH_INTERVAL_MS})){
 document.documentElement.setAttribute(${JSON.stringify(SPLASH_SKIP_ATTR)},"1");
 sessionStorage.setItem(KEY,"1");
 }else{

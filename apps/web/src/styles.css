@@ -96,8 +96,8 @@ select:not([multiple]) {
   --popover: oklch(0.2 0.009 60);
   --popover-foreground: oklch(0.96 0.005 80);
 
-  /* Warm amber-coral accent — refined, not neon */
-  --primary: oklch(0.78 0.14 55);
+  /* Azure accent (the default; Settings > Appearance > Accent changes it) */
+  --primary: oklch(0.76 0.12 258);
   --primary-foreground: oklch(0.18 0.02 60);
 
   --secondary: oklch(0.24 0.01 60);

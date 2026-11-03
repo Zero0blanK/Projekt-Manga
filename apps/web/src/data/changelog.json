@@ -2,6 +2,76 @@
   "$comment": "Release notes for Settings > Changelog. Newest first — the first entry's version and date are also what the About panel reports. IMPORTANT: the first entry's version must match `version` in apps/desktop/package.json, which is what app.getVersion() returns and what the updater compares against a GitHub release; if the two drift, the About panel reports one version while the update check reasons about another (tests/changelog.test.ts guards this). Each entry: version (semver), date (YYYY-MM-DD), and changes grouped by type. Types: added | changed | fixed | removed. Add the next entry above this one when a version is actually published — not while it is still being built.",
   "releases": [
     {
+      "version": "1.0.2",
+      "date": "2026-11-02",
+      "changes": [
+        {
+          "type": "added",
+          "text": "Suwayomi server support: connect one in Settings › Extensions (with an optional login, stored encrypted), and its sources appear in Discover to browse, search, filter, read and download like any other"
+        },
+        {
+          "type": "added",
+          "text": "Discover › Extensions lists every extension your Suwayomi server can install, with Install, Update and Uninstall"
+        },
+        {
+          "type": "added",
+          "text": "Discover filters on both Installed sources and Extensions: by source repository author (or Suwayomi), language and content rating; the language tabs are now a dropdown"
+        },
+        {
+          "type": "added",
+          "text": "When a source asks for a browser check, the desktop app opens it by itself and reloads the source once it's passed; turn this off in Settings › Extensions"
+        },
+        {
+          "type": "added",
+          "text": "Settings › Appearance › Motion has a switch to turn off the opening animation"
+        },
+        {
+          "type": "added",
+          "text": "Page translation can use your own DeepL or LibreTranslate service; its API key is stored encrypted and never shown again"
+        },
+        {
+          "type": "added",
+          "text": "Source icons are saved when you install a source, so they still show offline"
+        },
+        {
+          "type": "changed",
+          "text": "The desktop app and the website now use one library on the same server, signed in or not; reading, progress and library changes in one show up in the other within a second, without reloading"
+        },
+        {
+          "type": "changed",
+          "text": "Installed sources are ordered Pinned, Multilingual, English, then other languages alphabetically; a pinned source appears only in Pinned, and pins can be reordered across languages"
+        },
+        {
+          "type": "changed",
+          "text": "Covers show a progress ring that fills as the image downloads, instead of a placeholder that pops in"
+        },
+        {
+          "type": "changed",
+          "text": "Blue is the new default accent color; a color you already picked is kept"
+        },
+        {
+          "type": "changed",
+          "text": "The desktop app's library address stays the same between launches, so saved links keep working"
+        },
+        {
+          "type": "changed",
+          "text": "Errors from a Suwayomi server are short and readable, and say when its own Cloudflare setting is off"
+        },
+        {
+          "type": "fixed",
+          "text": "Some covers failed to load with \"not a valid image\""
+        },
+        {
+          "type": "fixed",
+          "text": "The Discover search box showed two clear buttons"
+        },
+        {
+          "type": "fixed",
+          "text": "Small action buttons in Settings, such as Remove, also submitted the form around them"
+        }
+      ]
+    },
+    {
       "version": "1.0.1",
       "date": "2026-11-01",
       "changes": [

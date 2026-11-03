@@ -27,6 +27,7 @@ const groups: Array<{ section: SectionId; description: string; labels: string[] 
       'Interface density',
       'Library grid size',
       'Show chapter badge on covers',
+      'Opening animation',
       'Reduce motion',
       'Smooth scrolling',
     ],
@@ -70,6 +71,8 @@ const groups: Array<{ section: SectionId; description: string; labels: string[] 
       'Skip duplicate chapters',
       'Enhance low-resolution pages',
       'Translate pages into',
+      'Page translation',
+      'Translation API key',
       'Crop borders',
       'Split wide pages',
       'Show page number',
@@ -84,7 +87,13 @@ const groups: Array<{ section: SectionId; description: string; labels: string[] 
   {
     section: 'extensions',
     description: 'Trusted source index URLs, repositories and installation',
-    labels: ['Add a repository', 'Extension repositories', 'Hide titles already in your library'],
+    labels: [
+      'Add a repository',
+      'Extension repositories',
+      'Hide titles already in your library',
+      'Open browser checks automatically',
+      'Suwayomi server',
+    ],
   },
   {
     section: 'notifications',

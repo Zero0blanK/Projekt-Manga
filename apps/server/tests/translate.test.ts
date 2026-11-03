@@ -46,7 +46,13 @@ const libre = (body: Sent) => ({
 describe('page translation', () => {
   it('reports that translation is off until the host sets it up', async () => {
     const status = await request(app).get('/api/translate/status');
-    expect(status.body.data).toEqual({ enabled: false, provider: null, source: 'ja' });
+    expect(status.body.data).toEqual({
+      enabled: false,
+      provider: null,
+      origin: null,
+      server_configured: false,
+      source: 'ja',
+    });
     const res = await request(app)
       .post('/api/translate')
       .send({ texts: ['こんにちは'], target: 'en' });

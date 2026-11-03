@@ -30,6 +30,7 @@ router.post(
   validateBody(installExtensionBodySchema),
   extensionRepositoryController.installExtension,
 );
+router.get('/installed/:id/icon', extensionRepositoryController.getInstalledExtensionIcon);
 router.post(
   '/installed/:id/update',
   requireAdmin,

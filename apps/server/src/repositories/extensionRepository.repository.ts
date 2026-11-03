@@ -112,6 +112,14 @@ const updateInstalledExtension = async (
   return await prisma.installed_extension.update({ where: { id }, data });
 };
 
+/** Sets an installed source's icon; a row that already has this icon is left untouched. */
+const syncIcon = async (repository_id: string, source_key: string, icon_url: string) => {
+  return await prisma.installed_extension.updateMany({
+    where: { repository_id, source_key, NOT: { icon_url } },
+    data: { icon_url },
+  });
+};
+
 const deleteInstalledExtension = async (id: string) => {
   return await prisma.installed_extension.delete({ where: { id } });
 };
@@ -129,6 +137,7 @@ const extensionRepositoryRepository = {
   getInstalledExtensionByKey,
   createInstalledExtension,
   updateInstalledExtension,
+  syncIcon,
   deleteInstalledExtension,
 };
 

@@ -26,6 +26,8 @@ export interface UserAgentProfile {
 
 export interface BrowserFingerprint {
   userAgent: string;
+  /** Full Chromium version (e.g. 141.0.7390.54) once aligned with the real browser. */
+  browserVersion?: string;
   platform: string;
   viewport: { width: number; height: number };
   deviceMemory: number;

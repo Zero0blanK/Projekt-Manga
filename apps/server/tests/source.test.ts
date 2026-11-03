@@ -164,6 +164,7 @@ describe('GET /api/source/sources', () => {
         lang: 'en',
         base_url: 'https://fake-source.example',
         isNSFW: false,
+        provider: 'extension',
       },
     ]);
   });

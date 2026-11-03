@@ -58,6 +58,7 @@ export interface PrismaMock {
   manga_override: ModelMock;
   manga_link: ModelMock;
   source_browser_session: ModelMock;
+  translation_setting: ModelMock;
   $transaction: ReturnType<typeof vi.fn>;
   /** Used by the readiness probe's `SELECT 1`, and by the startup pragmas. */
   $queryRawUnsafe: ReturnType<typeof vi.fn>;
@@ -90,6 +91,7 @@ export function createPrismaMock(): PrismaMock {
     manga_override: createModelMock(),
     manga_link: createModelMock(),
     source_browser_session: createModelMock(),
+    translation_setting: createModelMock(),
   } as PrismaMock;
 
   for (const key of Object.keys(mock) as (keyof PrismaMock)[]) {

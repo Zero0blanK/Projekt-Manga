@@ -12,6 +12,7 @@ import {
   guardedHttpsAgent,
 } from '../utils/ssrfGuard.js';
 import { MAX_IMAGE_BYTES, detectRasterImageType } from '../utils/imageContent.js';
+import { fetchSuwayomiImage, isSuwayomiImageUrl } from './suwayomi/client.js';
 import {
   PayloadTooLargeError,
   UpstreamError,
@@ -20,11 +21,16 @@ import {
 } from '../utils/customErrors.js';
 
 const downloadImage = async (url: string) => {
+  // A cover on the connected Suwayomi server, usually a local address the guard refuses.
+  if (isSuwayomiImageUrl(url)) {
+    const { bytes, contentType } = await fetchSuwayomiImage(url);
+    return { image: bytes, imageType: contentType };
+  }
   await assertPublicHttpUrl(url);
   const res = await axios.get(url, {
     responseType: 'stream',
     timeout: 15000,
-    headers: createImageRequestHeaders(),
+    headers: createImageRequestHeaders(undefined, {}, url),
     // Validates the address every hop actually connects to, which beforeRedirect
     // (hostname only) and a pre-flight DNS check (TOCTOU) both miss.
     httpAgent: guardedHttpAgent,

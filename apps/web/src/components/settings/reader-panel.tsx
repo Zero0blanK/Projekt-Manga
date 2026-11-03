@@ -58,6 +58,7 @@ import { READER_GUIDED_VIEW } from '@/lib/panel-detect';
 import { READER_ENHANCE } from '@/lib/enhance';
 import { ZoneLayoutPreview, describeZoneAction } from '@/components/reader/zone-layout-preview';
 import { KeyBindingsEditor } from '@/components/settings/key-bindings-editor';
+import { TranslationService } from '@/components/settings/translation-service';
 import {
   READER_ZONE_LAYOUT,
   ZONE_LAYOUTS,
@@ -370,7 +371,7 @@ export function ReaderPanel() {
         </Field>
         <Field
           label="Translate pages into"
-          hint="Right-click a Japanese page and choose Translate page. Text is read on this device; only the text goes to the server's translation service"
+          hint="Right-click a Japanese page and choose Translate page. Text is read on this device; only the text goes to the translation service below"
         >
           <Select
             settingKey={READER_TRANSLATE_TARGET}
@@ -425,6 +426,13 @@ export function ReaderPanel() {
         <Field label="Keep screen awake" hint="Keep the screen on while reading">
           <Toggle settingKey="keepScreenAwake" />
         </Field>
+      </Panel>
+
+      <Panel
+        title="Page translation"
+        subtitle="Your own DeepL or LibreTranslate service for Translate page"
+      >
+        <TranslationService />
       </Panel>
 
       <Panel title="Preloading" subtitle="Trading bandwidth for instant page turns">

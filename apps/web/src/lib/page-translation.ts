@@ -63,7 +63,12 @@ export function pageTranslation(url: string): PageTranslation | null {
 
 let status: Promise<boolean> | null = null;
 
-/** Whether the server has a translation service set up (asked once). */
+/** Asks again next time, after the reader saves or removes their own service. */
+export function forgetTranslationStatus(): void {
+  status = null;
+}
+
+/** Whether a translation service is set up for this reader (asked once). */
 export function translationAvailable(): Promise<boolean> {
   status ??= getTranslateStatus()
     .then((result) => result.enabled)

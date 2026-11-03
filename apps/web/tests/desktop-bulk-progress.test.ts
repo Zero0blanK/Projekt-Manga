@@ -2,22 +2,26 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   markPreviousChaptersAsRead,
   markPreviousChaptersAsUnread,
+  refreshLocalDataMode,
 } from '@projekt-manga/api-client';
+import { signedInBridge } from './helpers/signed-in-desktop';
 
 const desktopWindow = window as unknown as {
   desktop?: {
-    data: { invoke: ReturnType<typeof vi.fn> };
+    data: { invoke: (...args: never[]) => unknown };
   };
 };
 
-afterEach(() => {
+afterEach(async () => {
   delete desktopWindow.desktop;
+  await refreshLocalDataMode();
 });
 
 describe('desktop bulk chapter progress', () => {
   it('updates local chapter state and history for a library manga', async () => {
     const invoke = vi.fn().mockResolvedValue({ success: true, message: '', data: null });
-    desktopWindow.desktop = { data: { invoke } };
+    desktopWindow.desktop = { data: { invoke: signedInBridge(invoke) } };
+    await refreshLocalDataMode();
 
     const result = await markPreviousChaptersAsRead(
       'story',
@@ -58,7 +62,8 @@ describe('desktop bulk chapter progress', () => {
             ? { success: false, message: 'write failed' }
             : { success: true, message: '', data: null },
       );
-    desktopWindow.desktop = { data: { invoke } };
+    desktopWindow.desktop = { data: { invoke: signedInBridge(invoke) } };
+    await refreshLocalDataMode();
 
     const result = await markPreviousChaptersAsUnread('story', [
       { id: 'chapter-1', chapter_number: 1, source: 'source-a' },

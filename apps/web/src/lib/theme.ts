@@ -66,7 +66,7 @@ export const THEMES: ThemeOption[] = [
 export const LIGHT_THEMES: string[] = ['light', 'paper'];
 
 export const DEFAULT_THEME: ThemeId = 'dark';
-export const DEFAULT_ACCENT = '#e9a25a';
+export const DEFAULT_ACCENT = '#7fb1ff';
 
 export const ACCENTS: Array<{ value: string; label: string }> = [
   { value: '#e9a25a', label: 'Amber' },

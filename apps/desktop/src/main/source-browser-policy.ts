@@ -7,15 +7,28 @@
  * partition name. */
 const SOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
-export function parseOpenBrowserArgs(args: unknown): { sourceId: string } {
+export function parseOpenBrowserArgs(args: unknown): {
+  sourceId: string;
+  closeWhenPassed: boolean;
+} {
   if (typeof args !== 'object' || args === null || Array.isArray(args)) {
     throw new Error('openBrowser expects { sourceId }');
   }
-  const { sourceId } = args as { sourceId?: unknown };
+  const { sourceId, closeWhenPassed } = args as { sourceId?: unknown; closeWhenPassed?: unknown };
   if (typeof sourceId !== 'string' || !SOURCE_ID.test(sourceId)) {
     throw new Error('sourceId must be a source key');
   }
-  return { sourceId };
+  if (closeWhenPassed !== undefined && typeof closeWhenPassed !== 'boolean') {
+    throw new Error('closeWhenPassed must be true or false');
+  }
+  return { sourceId, closeWhenPassed: closeWhenPassed === true };
+}
+
+/** A page title that is still a browser check rather than the site. */
+export function isChallengeTitle(title: string): boolean {
+  return /just a moment|attention required|checking your browser|verify(ing)? you are human|ddos-guard/i.test(
+    title,
+  );
 }
 
 /** One persistent partition per source, so a login on one source never shows up in
@@ -70,6 +83,118 @@ export function browserUserAgent(defaultUserAgent: string): string {
     .replace(/\s+Electron\/\S+/gi, '')
     .replace(/\s+projekt[-_ ]?manga\S*\/\S+/gi, '')
     .trim();
+}
+
+export interface BrowserUserAgentMetadata {
+  brands: Array<{ brand: string; version: string }>;
+  fullVersionList: Array<{ brand: string; version: string }>;
+  platform: string;
+  platformVersion: string;
+  architecture: string;
+  model: string;
+  mobile: boolean;
+  bitness: string;
+  wow64: boolean;
+  formFactors: string[];
+}
+
+/** Everything about the browser identity that a challenge can see: the User-Agent, the
+ * Sec-CH-UA client hints, navigator.platform and navigator.languages. */
+export interface BrowserIdentity {
+  userAgent: string;
+  /** navigator.platform, not the client-hint platform ("Win32" rather than "Windows"). */
+  platform: string;
+  acceptLanguage: string;
+  userAgentMetadata: BrowserUserAgentMetadata;
+  clientHints: Record<string, string>;
+}
+
+function parseChromiumVersion(input: string): { major: string; fullVersion: string } {
+  const match = /(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?/.exec(input);
+  const major = match?.[1] ?? '124';
+  const [minor = '0', build = '0', patch = '0'] = match?.slice(2) ?? [];
+  return { major, fullVersion: `${major}.${minor}.${build}.${patch}` };
+}
+
+/**
+ * A plain Chrome identity matching the Chromium the window really is. Electron's own
+ * identity is not enough: its client hints name Chromium but not Google Chrome, and its
+ * User-Agent still carries Electron in subframes and workers. Chrome reduces the version
+ * in the User-Agent to `<major>.0.0.0`, so do the same; the full version stays in the
+ * client hints.
+ */
+export function browserIdentity(
+  defaultUserAgent: string,
+  preferredLanguages: readonly string[],
+  chromiumVersion: string,
+  platform: string = process.platform,
+  architecture: string = process.arch,
+): BrowserIdentity {
+  const { major, fullVersion } = parseChromiumVersion(chromiumVersion || defaultUserAgent);
+  const windows = platform === 'win32';
+  const mac = platform === 'darwin';
+  const metadataPlatform = windows ? 'Windows' : mac ? 'macOS' : 'Linux';
+  const platformVersion = windows ? '10.0.0' : mac ? '14.0.0' : '6.5.0';
+  const arm = architecture === 'arm' || architecture === 'arm64';
+  const userAgent = windows
+    ? `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`
+    : mac
+      ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`
+      : `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;
+  const userAgentMetadata: BrowserUserAgentMetadata = {
+    brands: [
+      { brand: 'Chromium', version: major },
+      { brand: 'Google Chrome', version: major },
+      { brand: 'Not A(Brand', version: '99' },
+    ],
+    fullVersionList: [
+      { brand: 'Chromium', version: fullVersion },
+      { brand: 'Google Chrome', version: fullVersion },
+      { brand: 'Not A(Brand', version: '99.0.0.0' },
+    ],
+    platform: metadataPlatform,
+    platformVersion,
+    architecture: arm ? 'arm' : 'x86',
+    model: '',
+    mobile: false,
+    bitness: architecture === 'ia32' ? '32' : '64',
+    wow64: false,
+    formFactors: ['Desktop'],
+  };
+  return {
+    userAgent,
+    platform: windows ? 'Win32' : mac ? 'MacIntel' : 'Linux x86_64',
+    acceptLanguage: acceptLanguages(preferredLanguages),
+    userAgentMetadata,
+    clientHints: {
+      'sec-ch-ua': userAgentMetadata.brands
+        .map(({ brand, version }) => `"${brand}";v="${version}"`)
+        .join(', '),
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': `"${metadataPlatform}"`,
+    },
+  };
+}
+
+/**
+ * Rewrites the identity headers on every request in the source's session, including
+ * subframe and worker requests that CDP's page-level override can miss. Header names are
+ * case-insensitive, so the old spellings are removed rather than added beside.
+ */
+export function applyBrowserIdentityHeaders(
+  headers: Record<string, string | string[]>,
+  identity: BrowserIdentity,
+  includeClientHints = true,
+): Record<string, string | string[]> {
+  const replaced = new Set(['user-agent', 'sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform']);
+  for (const name of Object.keys(headers)) {
+    if (replaced.has(name.toLowerCase())) delete headers[name];
+  }
+  headers['User-Agent'] = identity.userAgent;
+  if (includeClientHints) {
+    for (const [name, value] of Object.entries(identity.clientHints)) headers[name] = value;
+  }
+  return headers;
 }
 
 /**

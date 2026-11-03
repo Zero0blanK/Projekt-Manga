@@ -13,7 +13,7 @@ import {
   markChapterAsRead,
   addHistory,
   getAllDownloads,
-  hasLocalDataBridge,
+  usesLocalFirstDataSync,
   type MangaChapterRecord,
 } from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
@@ -656,7 +656,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
 
       // On tab close/hide a normal fetch is often killed mid-flight; sendBeacon is the
       // one transport the browser promises to finish.
-      if (useBeacon && !hasLocalDataBridge()) {
+      if (useBeacon && !usesLocalFirstDataSync()) {
         const queued = queueReaderProgressBeacons(
           buildApiUrl(path),
           body,

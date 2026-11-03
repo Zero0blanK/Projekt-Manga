@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { addManga } from '../../../packages/api-client/src/manga';
+import { refreshLocalDataMode } from '../../../packages/api-client/src/runtime';
+import { signedInBridge } from './helpers/signed-in-desktop';
 import type { AddMangaPayload } from '@projekt-manga/types';
 
 const payload: AddMangaPayload = {
@@ -31,15 +33,20 @@ const serverEntry = {
 
 const originalFetch = globalThis.fetch;
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch;
   Reflect.deleteProperty(window, 'desktop');
+  await refreshLocalDataMode();
 });
 
-describe('anonymous desktop manga add recovery', () => {
+describe('signed-in desktop manga add recovery', () => {
   it('repairs a stale local library after a previous server add returned 409', async () => {
     const invoke = vi.fn().mockResolvedValue({ success: true, message: '', data: true });
-    Object.defineProperty(window, 'desktop', { configurable: true, value: { data: { invoke } } });
+    Object.defineProperty(window, 'desktop', {
+      configurable: true,
+      value: { data: { invoke: signedInBridge(invoke) } },
+    });
+    await refreshLocalDataMode();
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -54,7 +61,11 @@ describe('anonymous desktop manga add recovery', () => {
 
   it('does not treat a different title conflict as a successful add', async () => {
     const invoke = vi.fn().mockResolvedValue({ success: true, message: '', data: true });
-    Object.defineProperty(window, 'desktop', { configurable: true, value: { data: { invoke } } });
+    Object.defineProperty(window, 'desktop', {
+      configurable: true,
+      value: { data: { invoke: signedInBridge(invoke) } },
+    });
+    await refreshLocalDataMode();
     globalThis.fetch = vi
       .fn()
       .mockResolvedValueOnce(
@@ -72,7 +83,11 @@ describe('anonymous desktop manga add recovery', () => {
 
   it('does not report recovery until the local library was actually updated', async () => {
     const invoke = vi.fn().mockResolvedValue({ success: true, message: '', data: false });
-    Object.defineProperty(window, 'desktop', { configurable: true, value: { data: { invoke } } });
+    Object.defineProperty(window, 'desktop', {
+      configurable: true,
+      value: { data: { invoke: signedInBridge(invoke) } },
+    });
+    await refreshLocalDataMode();
     globalThis.fetch = vi
       .fn()
       .mockResolvedValueOnce(

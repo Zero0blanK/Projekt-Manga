@@ -10,7 +10,7 @@ import {
   markChapterByLastPage,
   markChapterAsRead,
   addHistory,
-  hasLocalDataBridge,
+  usesLocalFirstDataSync,
 } from '@projekt-manga/api-client';
 import { invalidateSavedReadingProgress } from '@/lib/query-client';
 import { fromSourceDetails } from '@/lib/manga-data';
@@ -251,7 +251,7 @@ export function SourceReaderClient({
       // one transport the browser promises to finish — see the same guard in the library
       // reader (app/reader/[id]/client.tsx's flushProgress), which this mirrors so a
       // preview read doesn't lose progress/history that a library read wouldn't.
-      if (useBeacon && !hasLocalDataBridge()) {
+      if (useBeacon && !usesLocalFirstDataSync()) {
         const queued = queueReaderProgressBeacons(
           buildApiUrl(path),
           body,

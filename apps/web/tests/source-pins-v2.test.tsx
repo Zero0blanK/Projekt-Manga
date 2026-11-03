@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   session: { user: null as { id: string } | null, loading: false },
   languages: ['en', 'en', 'en'],
+  installed: [] as Array<{ source_key: string; repository_id: string; content_rating: null }>,
+  repositories: [] as Array<{ id: string; url: string; name: string | null }>,
 }));
 vi.mock('@/lib/source-health-status', () => ({ useSourceHealthStatus: () => 'ok' }));
 vi.mock('next/navigation', () => ({
@@ -28,8 +30,8 @@ vi.mock('@/lib/library-store', () => ({
   }),
 }));
 vi.mock('@/lib/extensions-store', () => ({
-  useInstalledExtensions: () => ({ installed: [] }),
-  useSourceCatalog: () => ({ entries: [] }),
+  useInstalledExtensions: () => ({ installed: mocks.installed }),
+  useSourceCatalog: () => ({ entries: [], repositories: mocks.repositories }),
 }));
 vi.mock('@/components/discover/first-use-setup', () => ({ FirstUseSetup: () => null }));
 vi.mock('@/components/discover/source-catalog', () => ({ SourceCatalog: () => null }));
@@ -47,6 +49,8 @@ import { queryClient, queryKeys } from '@/lib/query-client';
 beforeEach(() => {
   mocks.session = { user: null, loading: false };
   mocks.languages = ['en', 'en', 'en'];
+  mocks.installed = [];
+  mocks.repositories = [];
   actions.resetAll();
   queryClient.clear();
   queryClient.setQueryData(queryKeys.session, null);
@@ -95,33 +99,86 @@ describe('Source pin ordering and device persistence', () => {
     rerender(<DiscoverPageClient />);
     expect(sourceOrder()).toEqual(['Source C', 'Source A', 'Source B']);
   });
-  it('separates language sections, groups English regions and keeps pin movement inside each language', async () => {
-    mocks.languages = ['en-US', 'ja', 'en'];
+  it('orders sections pinned, multilingual, English, then other languages by name', () => {
+    mocks.languages = ['ja', 'all', 'en-US'];
+    render(<DiscoverPageClient />);
+    const regions = () =>
+      screen.getAllByRole('region').map((region) => region.getAttribute('aria-label'));
+    expect(regions()).toEqual([
+      'Multilingual installed sources',
+      'English installed sources',
+      'Japanese installed sources',
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Pin Source A' }));
+    // A pinned source moves to Pinned and leaves its own language's section.
+    expect(regions()).toEqual([
+      'Pinned installed sources',
+      'Multilingual installed sources',
+      'English installed sources',
+    ]);
+    const pinned = screen.getByRole('region', { name: 'Pinned installed sources' });
+    expect(within(pinned).getByRole('heading', { name: 'Source A' })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Source A' })).toHaveLength(1);
+  });
+
+  it('moves pins across languages within the pinned section', async () => {
+    mocks.languages = ['en', 'ja', 'all'];
     const user = userEvent.setup();
     render(<DiscoverPageClient />);
-    const english = screen.getByRole('region', { name: 'English installed sources' });
-    const japanese = screen.getByRole('region', { name: 'Japanese installed sources' });
-    expect(within(english).getAllByRole('article')).toHaveLength(2);
-    expect(within(japanese).getAllByRole('article')).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Pin Source A' }));
     fireEvent.click(screen.getByRole('button', { name: 'Pin Source B' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Pin Source C' }));
-    await user.click(screen.getByRole('button', { name: 'Options for Source C' }));
-    await user.click(screen.getByRole('menuitem', { name: 'Move pin up' }));
-    expect(
-      within(english)
+    const pinned = () =>
+      within(screen.getByRole('region', { name: 'Pinned installed sources' }))
         .getAllByRole('article')
-        .map((article) => within(article).getByRole('heading').textContent),
-    ).toEqual(['Source C', 'Source A']);
-    expect(within(japanese).getByRole('heading', { name: 'Source B' })).toBeInTheDocument();
+        .map((article) => within(article).getByRole('heading').textContent);
+    expect(pinned()).toEqual(['Source A', 'Source B']);
     await user.click(screen.getByRole('button', { name: 'Options for Source B' }));
-    expect(screen.getByRole('menuitem', { name: 'Move pin up' })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    );
-    expect(screen.getByRole('menuitem', { name: 'Move pin down' })).toHaveAttribute(
-      'aria-disabled',
-      'true',
-    );
+    await user.click(screen.getByRole('menuitem', { name: 'Move pin up' }));
+    expect(pinned()).toEqual(['Source B', 'Source A']);
+  });
+
+  it('filters installed sources by language and rating', async () => {
+    mocks.languages = ['en', 'ja', 'en'];
+    const user = userEvent.setup();
+    render(<DiscoverPageClient />);
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Language' }), 'ja');
+    expect(sourceOrder()).toEqual(['Source B']);
+    expect(screen.getByRole('status')).toHaveTextContent('1 source');
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    expect(sourceOrder()).toEqual(['Source A', 'Source C', 'Source B']);
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Content rating' }), 'nsfw');
+    expect(screen.queryAllByRole('article')).toHaveLength(0);
+    // One place the sources come from, so no repository choice.
+    expect(screen.queryByRole('combobox', { name: 'Source repository' })).toBeNull();
+  });
+
+  it('filters installed sources by the repository author they came from', async () => {
+    mocks.installed = [
+      { source_key: 'a', repository_id: 'r1', content_rating: null },
+      { source_key: 'b', repository_id: 'r2', content_rating: null },
+      { source_key: 'c', repository_id: 'r1', content_rating: null },
+    ];
+    mocks.repositories = [
+      {
+        id: 'r1',
+        url: 'https://raw.githubusercontent.com/Alice/sources/main/index.json',
+        name: null,
+      },
+      {
+        id: 'r2',
+        url: 'https://raw.githubusercontent.com/Bob/sources/main/index.json',
+        name: null,
+      },
+    ];
+    const user = userEvent.setup();
+    render(<DiscoverPageClient />);
+    const repository = screen.getByRole('combobox', { name: 'Source repository' });
+    expect([...repository.querySelectorAll('option')].map((option) => option.textContent)).toEqual([
+      'All',
+      'Alice',
+      'Bob',
+    ]);
+    await user.selectOptions(repository, 'repo:r2');
+    expect(sourceOrder()).toEqual(['Source B']);
   });
 });

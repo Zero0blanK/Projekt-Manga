@@ -1,6 +1,6 @@
 import type { MangaHistory } from '@projekt-manga/types';
 import { request } from './client.js';
-import { hasLocalDataBridge, localInvoke } from './runtime.js';
+import { localInvoke, usesLocalFirstData } from './runtime.js';
 
 /** Row shape returned by GET /history (flattened, with manga title/thumbnail resolved). */
 export interface HistoryEntry {
@@ -58,8 +58,8 @@ export interface HistoryByMangaSlugEntry extends HistoryRecord {
 export const getServerHistory = (signal?: AbortSignal) =>
   request<HistoryEntry[]>('/history', { signal });
 
-export const getHistory = (signal?: AbortSignal) => {
-  if (hasLocalDataBridge()) {
+export const getHistory = async (signal?: AbortSignal) => {
+  if (await usesLocalFirstData()) {
     // localInvoke has no AbortSignal parameter — `signal` is silently dropped on this
     // branch, so cancellation is only honoured on the HTTP path below. A caller relying on
     // abort here keeps waiting on desktop.
@@ -68,8 +68,8 @@ export const getHistory = (signal?: AbortSignal) => {
   return getServerHistory(signal);
 };
 
-export const addHistory = (historyData: MangaHistory) => {
-  if (hasLocalDataBridge()) {
+export const addHistory = async (historyData: MangaHistory) => {
+  if (await usesLocalFirstData()) {
     return localInvoke<HistoryRecord>('history', 'add', historyData);
   }
   return request<HistoryRecord>('/history/add', { method: 'POST', body: historyData });
@@ -85,6 +85,6 @@ export const deleteHistory = async (id: string) => {
   const result = await request<null>(`/history/delete/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
-  if (hasLocalDataBridge()) await localInvoke('history', 'delete', { id });
+  if (await usesLocalFirstData()) await localInvoke('history', 'delete', { id });
   return result;
 };

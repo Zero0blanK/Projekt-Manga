@@ -178,6 +178,13 @@ async function dispatchDataInvoke(
   }
   const a = (args && typeof args === 'object' ? args : {}) as Record<string, unknown>;
 
+  // Whether the renderer keeps library data here or uses the server directly. Signed in or
+  // not, it uses the server, like every browser that opens the same library, so the app
+  // and the browser always show one library and see each other's reading as it happens.
+  // A signed-in account's older local changes still reach the server through sync.
+  if (domain === 'meta' && op === 'mode') {
+    return ok({ localFirst: false });
+  }
   if (domain === 'manga' && op === 'listLibrary') {
     return ok(localStore.listLibrary());
   }
@@ -313,9 +320,9 @@ export function registerIpcHandlers(
   // anything opens; a failure after that (not installed, remote server) is a failed
   // envelope the page can show.
   handleFromApp(DESKTOP_CHANNELS.sourceOpenBrowser, async (_event, args: unknown) => {
-    const { sourceId } = parseOpenBrowserArgs(args);
+    const { sourceId, closeWhenPassed } = parseOpenBrowserArgs(args);
     try {
-      return ok(await openSourceBrowser(sourceId));
+      return ok(await openSourceBrowser(sourceId, { closeWhenPassed }));
     } catch (error) {
       return {
         success: false,

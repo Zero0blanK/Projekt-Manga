@@ -40,6 +40,8 @@ const sourceSummarySchema = z.object({
   lang: z.string(),
   base_url: z.string(),
   isNSFW: z.boolean(),
+  provider: z.enum(['extension', 'suwayomi']).optional(),
+  icon_url: z.string().nullable().optional(),
 });
 
 const repositoryWithListingSchema = z.object({

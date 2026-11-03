@@ -30,8 +30,9 @@ async function withStore(run) {
   }
 }
 
-/** Loads dist/main/ipc.js against a stub Electron and a recording local store. */
-function loadIpc() {
+/** Loads dist/main/ipc.js against a stub Electron and a recording local store, with
+ * `session` as the cached signed-in account (none by default). */
+function loadIpc({ session = null } = {}) {
   const handlers = new Map();
   const lock = { locked: false };
   const calls = [];
@@ -79,7 +80,7 @@ function loadIpc() {
   const stubs = {
     electron,
     './db/local-store': { localStore },
-    './auth-cache': { getCachedSession: () => null },
+    './auth-cache': { getCachedSession: () => session },
     './sync': {},
     './diagnostics': {},
     './init-state': {},
@@ -179,6 +180,19 @@ test('data IPC rejects invalid ids and progress values before reaching the store
   assert.deepEqual(valid, { success: true, message: 'OK', data: null });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].name, 'updateChapterProgress');
+});
+
+test('the renderer uses the server library like a browser, signed in or not', async () => {
+  // The app and every browser on the same server show one library; a local copy would
+  // split them, anonymous or signed in.
+  const anonymous = loadIpc();
+  assert.deepEqual((await anonymous.invoke(anonymous.appEvent, 'meta', 'mode')).data, {
+    localFirst: false,
+  });
+  const signedIn = loadIpc({ session: { user_id: 'user-1', session_id: 'session-1' } });
+  assert.deepEqual((await signedIn.invoke(signedIn.appEvent, 'meta', 'mode')).data, {
+    localFirst: false,
+  });
 });
 
 test('syncOne is an explicit library add while other catalog writes are not', async () => {
@@ -325,7 +339,9 @@ test('source.openBrowser validates its argument before opening anything', async 
     allowedHosts: ['evil.test'],
   });
   assert.equal(result.success, true);
-  assert.deepEqual(calls, [{ name: 'openSourceBrowser', args: ['manga-site.en'] }]);
+  assert.deepEqual(calls, [
+    { name: 'openSourceBrowser', args: ['manga-site.en', { closeWhenPassed: false }] },
+  ]);
 });
 
 test('source browser policy keeps cookies for allowed hosts only, on a local server only', () => {
@@ -358,6 +374,61 @@ test('source browser policy keeps cookies for allowed hosts only, on a local ser
   // The header lists what navigator.languages lists; Electron adds the weights.
   assert.equal(policy.acceptLanguages(['en-US', 'ja', 'en-US']), 'en-US,ja');
   assert.equal(policy.acceptLanguages(['bad tag;q=1']), 'en-US');
+
+  const identity = policy.browserIdentity(
+    'Mozilla/5.0 Chrome/142.0.7444.175 Electron/43.8.0',
+    ['en-US', 'ja'],
+    '142.0.7444.175',
+    'win32',
+    'x64',
+  );
+  assert.equal(identity.platform, 'Win32');
+  assert.equal(identity.acceptLanguage, 'en-US,ja');
+  assert.equal(
+    identity.userAgent,
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+  );
+  assert.equal(identity.userAgentMetadata.platform, 'Windows');
+  assert.deepEqual(identity.userAgentMetadata.brands, [
+    { brand: 'Chromium', version: '142' },
+    { brand: 'Google Chrome', version: '142' },
+    { brand: 'Not A(Brand', version: '99' },
+  ]);
+  assert.deepEqual(identity.userAgentMetadata.fullVersionList, [
+    { brand: 'Chromium', version: '142.0.7444.175' },
+    { brand: 'Google Chrome', version: '142.0.7444.175' },
+    { brand: 'Not A(Brand', version: '99.0.0.0' },
+  ]);
+  assert.equal(identity.clientHints['sec-ch-ua-mobile'], '?0');
+  assert.equal(identity.clientHints['sec-ch-ua-platform'], '"Windows"');
+  assert.match(identity.clientHints['sec-ch-ua'], /"Google Chrome";v="142"/);
+
+  const headers = {
+    'User-Agent': 'Electron/43.8.0',
+    'sec-ch-ua': '"Chromium";v="142"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    Accept: 'text/html',
+  };
+  policy.applyBrowserIdentityHeaders(headers, identity);
+  assert.equal(headers['User-Agent'], identity.userAgent);
+  assert.equal(headers['sec-ch-ua'], identity.clientHints['sec-ch-ua']);
+  assert.equal(headers.Accept, 'text/html');
+  assert.equal(
+    Object.keys(headers).filter((name) => name.toLowerCase() === 'user-agent').length,
+    1,
+  );
+
+  const insecure = {
+    'user-agent': 'Electron/43.8.0',
+    'sec-ch-ua': '"Chromium";v="142"',
+    Accept: 'text/html',
+  };
+  policy.applyBrowserIdentityHeaders(insecure, identity, false);
+  assert.equal(insecure['User-Agent'], identity.userAgent);
+  assert.equal(insecure['user-agent'], undefined);
+  assert.equal(insecure['sec-ch-ua'], undefined);
+  assert.equal(insecure.Accept, 'text/html');
 
   const kept = policy.cookiesForAllowedHosts(
     [
@@ -693,4 +764,22 @@ test('the taskbar badge takes only a whole count and, on Windows, a small PNG', 
     await badge(appEvent, { count: 3, image: png });
     assert.deepEqual(calls, [{ name: 'setBadgeCount', args: [3] }]);
   }
+});
+
+test('a source window the app opened by itself may close once the site shows past its check', () => {
+  const policy = require('../dist/main/source-browser-policy.js');
+  assert.deepEqual(policy.parseOpenBrowserArgs({ sourceId: 'manhuaus' }), {
+    sourceId: 'manhuaus',
+    closeWhenPassed: false,
+  });
+  assert.deepEqual(policy.parseOpenBrowserArgs({ sourceId: 'manhuaus', closeWhenPassed: true }), {
+    sourceId: 'manhuaus',
+    closeWhenPassed: true,
+  });
+  assert.throws(() =>
+    policy.parseOpenBrowserArgs({ sourceId: 'manhuaus', closeWhenPassed: 'yes' }),
+  );
+  assert.equal(policy.isChallengeTitle('Just a moment...'), true);
+  assert.equal(policy.isChallengeTitle('Attention Required! | Cloudflare'), true);
+  assert.equal(policy.isChallengeTitle('ManhuaUS - Read Manhua Online'), false);
 });

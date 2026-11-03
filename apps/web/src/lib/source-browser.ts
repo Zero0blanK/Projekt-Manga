@@ -8,6 +8,7 @@ export type SourceBrowserResult = { saved: boolean; cookieCount: number; message
 type SourceBrowserBridge = {
   openBrowser: (
     sourceId: string,
+    options?: { closeWhenPassed?: boolean },
   ) => Promise<{ success: boolean; message: string; data?: SourceBrowserResult }>;
 };
 
@@ -20,6 +21,9 @@ export function sourceBrowserBridge(): SourceBrowserBridge | undefined {
 
 export const CHALLENGE_REQUIRED = 'CHALLENGE_REQUIRED';
 
+/** The setting (Settings › Extensions) for opening a source's check window by itself. */
+export const AUTO_OPEN_CHALLENGE_SETTING = 'autoOpenSourceChallenge';
+
 /** The query holding what the server has saved for a source's browser session. */
 export const sourceSessionKey = (sourceId: string) => ['source-browser-session', sourceId] as const;
 
@@ -28,13 +32,38 @@ export function isChallengeRequired(error: unknown): boolean {
   return error instanceof ApiError && error.code === CHALLENGE_REQUIRED;
 }
 
-/** Opens the source in the desktop window and resolves once it is closed and saved. */
-export async function openSourceBrowser(sourceId: string): Promise<SourceBrowserResult> {
-  const bridge = sourceBrowserBridge();
-  if (!bridge) throw new Error('Opening a source in a browser needs the desktop app.');
-  const result = await bridge.openBrowser(sourceId);
-  if (!result.success || !result.data) throw new Error(result.message);
-  return result.data;
+/** The source windows open now, so a second request for one joins it. */
+const openWindows = new Map<string, Promise<SourceBrowserResult>>();
+
+/** Opens the source in the desktop window and resolves once it is closed and saved. A
+ * source whose window is already open gets that window, not a second one.
+ * `closeWhenPassed` closes it by itself once the site shows past its check. */
+export function openSourceBrowser(
+  sourceId: string,
+  { closeWhenPassed = false }: { closeWhenPassed?: boolean } = {},
+): Promise<SourceBrowserResult> {
+  const open = openWindows.get(sourceId);
+  if (open) return open;
+  const opening = (async () => {
+    const bridge = sourceBrowserBridge();
+    if (!bridge) throw new Error('Opening a source in a browser needs the desktop app.');
+    const result = await bridge.openBrowser(sourceId, { closeWhenPassed });
+    if (!result.success || !result.data) throw new Error(result.message);
+    return result.data;
+  })().finally(() => openWindows.delete(sourceId));
+  openWindows.set(sourceId, opening);
+  return opening;
+}
+
+/** The source a failed request was for: `/source/<id>/...`. */
+export function sourceIdFromPath(path: string): string | null {
+  const id = /\/source\/([^/]+)\//.exec(path)?.[1];
+  if (!id || id === 'image-proxy' || id === 'library') return null;
+  try {
+    return decodeURIComponent(id);
+  } catch {
+    return null;
+  }
 }
 
 /** A cookie pasted from the reader's own browser, in the shape the server stores. */

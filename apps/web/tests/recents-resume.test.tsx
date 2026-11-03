@@ -41,8 +41,8 @@ describe('Recents resume', () => {
       'href',
       '/discover/preview/source-a/source-title/read?chapterId=chapter-7&page=3',
     );
-    expect(screen.getByRole('img', { name: 'Real Title' })).toHaveAttribute(
-      'src',
+    expect(await screen.findByRole('img', { name: 'Real Title' })).toHaveAttribute(
+      'data-src',
       'https://example.com/cover.jpg',
     );
   });

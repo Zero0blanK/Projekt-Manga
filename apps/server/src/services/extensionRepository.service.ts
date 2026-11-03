@@ -5,6 +5,7 @@ import axios from 'axios';
 // The `/sandbox` subpath — see the note in sandboxedSourceRegistry.service.ts.
 import { spawnSandboxedSource } from '@projekt-manga/extensions/sandbox';
 import type { Source } from '@projekt-manga/types';
+import { SUWAYOMI_PREFIX } from './suwayomi/source.js';
 import extensionRepositoryRepository, {
   type RepositoryMetadataInput,
 } from '../repositories/extensionRepository.repository.js';
@@ -154,12 +155,43 @@ const addRepository = async (url: string) => {
   return await extensionRepositoryRepository.createRepository(url, repository);
 };
 
+/**
+ * Gives installed sources the icon their repository now publishes.
+ *
+ * Install and update record the listing's icon, but a repository can add or replace one
+ * (say a placeholder .svg with the site's logo as .png) without a new version, and then
+ * nothing ever updates the source again, leaving it on a missing or dead link. Only the icon
+ * changes, only from the source's own repository, and a listing without an icon never clears
+ * one. Best effort: a listing is still shown if this fails.
+ */
+async function syncIcons(repositoryId: string, sources: ExtensionListingEntry[]) {
+  try {
+    const installed =
+      await extensionRepositoryRepository.getInstalledExtensionsForRepository(repositoryId);
+    const listed = new Map(sources.map((entry) => [entry.source_key, entry.icon_url]));
+    await Promise.all(
+      installed
+        .filter((row) => listed.get(row.source_key) && row.icon_url !== listed.get(row.source_key))
+        .map((row) =>
+          extensionRepositoryRepository.syncIcon(
+            repositoryId,
+            row.source_key,
+            listed.get(row.source_key)!,
+          ),
+        ),
+    );
+  } catch (error) {
+    console.warn('[extensions] Could not update source icons:', error);
+  }
+}
+
 const listRepositoriesWithListings = async () => {
   const repositories = await extensionRepositoryRepository.getAllRepositories();
   return await Promise.all(
     repositories.map(async (repository) => {
       try {
         const { sources } = await fetchRepositoryIndex(repository.url);
+        await syncIcons(repository.id, sources);
         return { ...repository, sources, fetchError: null as string | null };
       } catch (error) {
         return {
@@ -187,6 +219,7 @@ const refreshRepository = async (id: string) => {
     bustCache: true,
   });
   const updated = await extensionRepositoryRepository.touchRepositoryFetchedAt(id, metadata);
+  await syncIcons(id, sources);
   return { ...updated, sources };
 };
 
@@ -211,6 +244,92 @@ async function bundleDirFor(installedExtensionId: string): Promise<string> {
   await fs.mkdir(dir, { recursive: true });
   return dir;
 }
+
+/** Matches the repository build's own cap: anything bigger is a mistake, not an icon. */
+const MAX_ICON_BYTES = 512 * 1024;
+const ICON_FILE = 'icon.json';
+
+/** A source's icon as stored beside its bundle, so Discover shows it without a network. */
+export interface StoredIcon {
+  /** The listing's icon_url these bytes came from; a different one means they are stale. */
+  url: string;
+  type: string;
+  data: Buffer;
+}
+
+/**
+ * The image type of an icon, read from its bytes. The upstream Content-Type is whatever the
+ * repository's host says, so it is never trusted; anything that is not an image is refused.
+ */
+export function sniffIconType(bytes: Buffer): string | null {
+  const head = bytes.subarray(0, 12);
+  if (head.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))) return 'image/png';
+  if (head.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) return 'image/jpeg';
+  if (head.subarray(0, 4).toString('latin1') === 'GIF8') return 'image/gif';
+  if (
+    head.subarray(0, 4).toString('latin1') === 'RIFF' &&
+    head.subarray(8, 12).toString('latin1') === 'WEBP'
+  )
+    return 'image/webp';
+  if (head.subarray(0, 4).equals(Buffer.from([0, 0, 1, 0]))) return 'image/x-icon';
+  if (!bytes.includes(0)) {
+    const text = bytes.toString('utf8').trimStart();
+    if (text.startsWith('<') && /<svg[\s>]/i.test(text)) return 'image/svg+xml';
+  }
+  return null;
+}
+
+async function readStoredIcon(installedExtensionId: string): Promise<StoredIcon | null> {
+  try {
+    const raw = await fs.readFile(path.join(resolveBundlesDir(), installedExtensionId, ICON_FILE));
+    const parsed = JSON.parse(raw.toString('utf8')) as { url: string; type: string; data: string };
+    return { url: parsed.url, type: parsed.type, data: Buffer.from(parsed.data, 'base64') };
+  } catch {
+    return null;
+  }
+}
+
+/** Downloads an icon and stores it beside the bundle, replacing any earlier one. */
+async function storeIcon(installedExtensionId: string, url: string): Promise<StoredIcon> {
+  const data = await fetchWithSizeCap(url, MAX_ICON_BYTES);
+  const type = sniffIconType(data);
+  if (!type) throw new ValidationError('The source icon is not an image');
+  const dir = await bundleDirFor(installedExtensionId);
+  const target = path.join(dir, ICON_FILE);
+  // Written whole and renamed into place, so a reader never sees half an icon.
+  await fs.writeFile(`${target}.tmp`, JSON.stringify({ url, type, data: data.toString('base64') }));
+  await fs.rename(`${target}.tmp`, target);
+  return { url, type, data };
+}
+
+/** Best effort: a source still installs and updates when its icon cannot be fetched. */
+async function storeIconQuietly(installedExtensionId: string, url: string | null | undefined) {
+  if (!url) return;
+  await storeIcon(installedExtensionId, url).catch((error) => {
+    console.warn(`[extensions] Could not store the icon for ${installedExtensionId}:`, error);
+  });
+}
+
+/**
+ * The installed source's icon, from disk. Sources installed before icons were stored, or
+ * whose repository has since changed the icon, get it downloaded here on first use; when
+ * that fails (offline, say) an older stored copy is still better than none.
+ */
+const getInstalledIcon = async (id: string): Promise<StoredIcon> => {
+  const installed = await extensionRepositoryRepository.getInstalledExtensionById(id);
+  if (!installed) throw new NotFoundError('Installed extension not found');
+  const stored = await readStoredIcon(id);
+  if (stored && (!installed.icon_url || stored.url === installed.icon_url)) return stored;
+  if (!installed.icon_url) throw new NotFoundError('This source has no icon');
+  try {
+    return await storeIcon(id, installed.icon_url);
+  } catch (error) {
+    if (stored) return stored;
+    throw error instanceof AppError
+      ? error
+      : new UpstreamError('The source icon could not be fetched');
+  }
+};
 
 async function removeBundleFile(installedExtensionId: string): Promise<void> {
   const dir = path.join(resolveBundlesDir(), installedExtensionId);
@@ -413,6 +532,12 @@ const installExtension = async (
     );
   }
 
+  // Reserved for the connected Suwayomi server's sources (services/suwayomi), which are
+  // looked up by that prefix first; an extension using it would never load.
+  if (source_key.toLowerCase().startsWith(SUWAYOMI_PREFIX)) {
+    throw new ValidationError(`Source keys starting "${SUWAYOMI_PREFIX}" are reserved`);
+  }
+
   const existing = await extensionRepositoryRepository.getInstalledExtensionByKey(
     repository_id,
     source_key,
@@ -481,6 +606,7 @@ const installExtension = async (
       `Could not store the bundle for "${entry.source_key}": ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  await storeIconQuietly(created.id, entry.icon_url);
 
   return created;
 };
@@ -638,6 +764,9 @@ const updateExtension = async (id: string) => {
     if (!keepBackup) await fs.rm(backupPath, { force: true });
   }
   failedUpdateVersions.delete(id);
+  if (entry.icon_url && entry.icon_url !== installed.icon_url) {
+    await storeIconQuietly(id, entry.icon_url);
+  }
 
   return { installed: updated, changed: true };
 };
@@ -710,6 +839,7 @@ const extensionRepositoryService = {
   checkForUpdates,
   deleteInstalledExtension,
   getBundlePath,
+  getInstalledIcon,
   getAllInstalledExtensions: extensionRepositoryRepository.getInstalledExtensions,
 };
 

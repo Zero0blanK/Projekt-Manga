@@ -27,6 +27,7 @@ import {
   rethrowKnownOrWrap,
 } from '../utils/customErrors.js';
 import { detectRasterImageType } from '../utils/imageContent.js';
+import { fetchSuwayomiImage, isSuwayomiImageUrl, SuwayomiError } from './suwayomi/client.js';
 import { DownloadPathPolicy } from '../utils/downloadPathPolicy.js';
 import { currentRequestId } from '../utils/requestContext.js';
 import {
@@ -418,6 +419,44 @@ class DownloadService {
     }
   }
 
+  /** A page on the connected Suwayomi server, which is reached through its own pinned
+   * client rather than the public-address guard. */
+  private async downloadSuwayomiPage(
+    pageUrl: string,
+    pageNumber: number,
+    filePathDir: string,
+    signal: AbortSignal,
+    maxRetries: number,
+  ): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (signal.aborted) throw new ValidationError('Download cancelled');
+      try {
+        const image = await fetchSuwayomiImage(pageUrl, signal);
+        const stagedFile = path.join(os.tmpdir(), `projekt-manga-page-${randomUUID()}.part`);
+        try {
+          await fsp.writeFile(stagedFile, image.bytes, { flag: 'wx' });
+          await this.writeDownloadedPage(
+            filePathDir,
+            pageNumber,
+            stagedFile,
+            image.bytes.length,
+            pageExtensionByType[image.contentType],
+          );
+        } finally {
+          await fsp.rm(stagedFile, { force: true });
+        }
+        return;
+      } catch (error) {
+        if (signal.aborted) throw new ValidationError('Download cancelled');
+        if (error instanceof ValidationError) throw error;
+        lastError = error;
+        if (error instanceof SuwayomiError && error.code === 'NOT_FOUND') break;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new UpstreamError('Page download failed');
+  }
+
   async downloadPageWithRetry(
     downloadId: string,
     pageUrl: string,
@@ -429,10 +468,13 @@ class DownloadService {
       headers?: Record<string, string>;
     },
   ): Promise<void> {
+    if (isSuwayomiImageUrl(pageUrl)) {
+      return this.downloadSuwayomiPage(pageUrl, pageNumber, filePathDir, signal, maxRetries);
+    }
     let lastError: Error | null = null;
     const urlCandidates = this.buildDownloadUrlCandidates(pageUrl);
     const requestHeaders = {
-      ...createImageRequestHeaders(),
+      ...createImageRequestHeaders(undefined, {}, pageUrl),
       ...(requestOptions?.headers || {}),
     };
 

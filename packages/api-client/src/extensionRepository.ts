@@ -1,4 +1,4 @@
-import { request } from './client.js';
+import { buildApiUrl, request } from './client.js';
 import type {
   AddExtensionRepositoryBody,
   InstallExtensionBody,
@@ -77,6 +77,10 @@ export const updateInstalledExtension = (id: string) =>
       method: 'POST',
     },
   );
+
+/** URL for an <img src>: the icon stored with the installed source, so it shows offline. */
+export const buildInstalledExtensionIconUrl = (id: string) =>
+  buildApiUrl(`/extensions/installed/${encodeURIComponent(id)}/icon`);
 
 export const deleteInstalledExtension = (id: string) =>
   request<null>(`/extensions/installed/${encodeURIComponent(id)}`, { method: 'DELETE' });

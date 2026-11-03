@@ -18,6 +18,30 @@ const IMAGE_REFERERS: Record<string, string> = {
   mangatx: 'https://mangatx.cc/',
 };
 
+/** How this app names itself to hosts that ask clients to identify themselves. */
+export const APP_USER_AGENT = 'ProjektManga/1.0 (self-hosted manga reader)';
+
+/**
+ * Image hosts that want the client to say what it is rather than pose as a browser.
+ *
+ * MangaDex's API guidelines ask for an identifying User-Agent and forbid spoofing a
+ * browser's, and its CDN now enforces that: a request with a Chrome User-Agent gets a
+ * "Browser verification" HTML page instead of the cover, which the proxy then rejects as
+ * "not a valid image".
+ */
+const IDENTIFIED_IMAGE_HOSTS = ['mangadex.org', 'mangadex.network'];
+
+function wantsIdentifiedClient(targetUrl: string | undefined): boolean {
+  if (!targetUrl) return false;
+  let host: string;
+  try {
+    host = new URL(targetUrl).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return IDENTIFIED_IMAGE_HOSTS.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
 const USER_AGENT_SOURCE_URL =
   process.env.USER_AGENT_SOURCE_URL?.trim() ||
   process.env.IMAGE_PROXY_USER_AGENT_SOURCE_URL?.trim();
@@ -160,9 +184,11 @@ export function hasImageReferer(sourceId: string): boolean {
 export function createImageRequestHeaders(
   sourceId?: string,
   extraHeaders: Record<string, string> = {},
+  /** The image's URL, so hosts that want an identified client get one. */
+  targetUrl?: string,
 ) {
   return {
-    'User-Agent': getServerUserAgent(),
+    'User-Agent': wantsIdentifiedClient(targetUrl) ? APP_USER_AGENT : getServerUserAgent(),
     Accept: IMAGE_ACCEPT,
     'Accept-Language': 'en-US,en;q=0.9',
     'Cache-Control': 'no-cache',

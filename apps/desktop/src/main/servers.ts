@@ -81,17 +81,37 @@ export function getServerStatus(): Record<'api' | 'web', ServerProcessStatus> {
 }
 
 /**
- * Asks the OS for an unused port by binding to 0 and reading back what it assigned.
+ * The web port the built-in library asks for first. A browser tab or bookmark on the
+ * library keeps working from one launch to the next only if its address does; a random
+ * port per launch broke every one of them. The API port can stay random: browsers reach it
+ * through the web server's /api proxy, never directly.
+ */
+export const PREFERRED_WEB_PORT = 47811;
+
+/**
+ * Asks the OS for an unused port: `preferred` when it is free, otherwise whatever it
+ * assigns for port 0.
  *
  * Inherently racy (the port could be taken before the child binds it), but a fixed port
- * fails every time something else owns 3000 or 4000. Probed on the same host the child
- * will bind, since a port can be free on loopback and taken on another interface.
+ * with no fallback fails every time something else owns it. Probed on the same host the
+ * child will bind, since a port can be free on loopback and taken on another interface.
  */
-export function findFreePort(): Promise<number> {
+export async function findFreePort(preferred?: number): Promise<number> {
+  if (preferred !== undefined) {
+    try {
+      return await listenOnce(preferred);
+    } catch {
+      // Taken (another program, or a second copy of the app): fall back to any free port.
+    }
+  }
+  return listenOnce(0);
+}
+
+function listenOnce(port: number): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.on('error', reject);
-    server.listen(0, BIND_HOST, () => {
+    server.listen(port, BIND_HOST, () => {
       const address = server.address();
       if (address === null || typeof address === 'string') {
         server.close(() => reject(new Error('Could not determine a free port')));
@@ -272,7 +292,7 @@ export async function startServers(
   /** Secrets for the API process only (main/server-secrets.ts). */
   apiSecrets: { tokenEncryptionKey?: string } = {},
 ): Promise<RunningServers> {
-  const [apiPort, webPort] = await Promise.all([findFreePort(), findFreePort()]);
+  const [apiPort, webPort] = await Promise.all([findFreePort(), findFreePort(PREFERRED_WEB_PORT)]);
 
   apiProcess = spawnNode(
     paths.apiEntry,
@@ -297,6 +317,9 @@ export async function startServers(
       // set explicitly so a user environment carrying PROJEKT_MANGA_AUTO_MIGRATE=0 can't
       // turn it off for the installer.
       PROJEKT_MANGA_AUTO_MIGRATE: '1',
+      // The desktop's only reader is its host, so a translation service saved in Settings
+      // may be a LibreTranslate on this machine or the LAN.
+      TRANSLATE_ALLOW_PRIVATE_HOSTS: 'true',
       // Only when generated here: a key the user set in their own environment is
       // inherited unchanged.
       ...(apiSecrets.tokenEncryptionKey

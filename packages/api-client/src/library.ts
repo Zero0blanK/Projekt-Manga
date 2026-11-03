@@ -1,4 +1,4 @@
-import { request } from './client.js';
+import { buildApiUrl, request } from './client.js';
 
 export type ShelfStatus = 'READING' | 'COMPLETED' | 'ON_HOLD' | 'PLAN' | 'DROPPED';
 
@@ -43,3 +43,16 @@ export interface ReleaseEstimate {
  * database has no estimates, so callers treat a failure as "no estimates". */
 export const getReleaseEstimates = (signal?: AbortSignal) =>
   request<ReleaseEstimate[]>('/library/release-estimates', { signal });
+
+/**
+ * Calls `onChange` whenever this library changes on the server, from this app or any other
+ * on the same library (the desktop app and a browser, the same account on two devices).
+ * Sends the session cookie so the server knows whose library to report. Returns an
+ * unsubscribe function. Browser-only (relies on the global EventSource), which reconnects
+ * on its own after a dropped connection.
+ */
+export function subscribeToLibraryChanges(onChange: () => void): () => void {
+  const source = new EventSource(buildApiUrl('/library-events/stream'), { withCredentials: true });
+  source.addEventListener('change', () => onChange());
+  return () => source.close();
+}

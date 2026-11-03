@@ -6,7 +6,7 @@
 import { addExtra, PuppeteerExtra } from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import vanillaPuppeteer from 'puppeteer';
-import type { Browser, HTTPRequest, Page } from 'puppeteer';
+import type { Browser, HTTPRequest, Page, Protocol } from 'puppeteer';
 import { ProxyConfig, BrowserFingerprint } from './anon.config.js';
 import { Session, cookiesForUrl } from '../features/SessionManager.js';
 import { getLogger } from '../features/DetectionLogger.js';
@@ -15,7 +15,13 @@ import {
   updateCloudflareClearanceFromBrowserCookies,
 } from '../features/CloudflareClearance.js';
 import { CLOUDFLARE_PATTERNS, matchesAny } from '../utils/detectionPatterns.js';
-import { buildFingerprintInjectionScript } from '../features/FingerprintManager.js';
+import {
+  alignFingerprintWithBrowser,
+  buildAcceptLanguage,
+  buildFingerprintInjectionScript,
+  buildUserAgentMetadata,
+  createFallbackFingerprint,
+} from '../features/FingerprintManager.js';
 
 // puppeteer-extra's VanillaPuppeteer type still requires createBrowserFetcher, which
 // puppeteer v22+ removed. It is never called here, so the cast is safe.
@@ -105,6 +111,10 @@ async function ensureBrowser(
       headless: true,
       args: buildLaunchArgs(proxy),
       defaultViewport: viewport || { width: 1920, height: 1080 },
+      // Chromium flags itself as automated through this switch; navigator.webdriver is
+      // patched by the injected script, but some checks read the switch-derived state
+      // before page scripts run.
+      ignoreDefaultArgs: ['--enable-automation'],
     });
     browserPool.set(key, newBrowser);
     await evictExcessBrowsers();
@@ -130,28 +140,32 @@ export interface FetchPageOptions {
 }
 
 async function applyFingerprint(page: Page, fingerprint: BrowserFingerprint): Promise<void> {
-  await page.setUserAgent(fingerprint.userAgent);
+  await page.setUserAgent(
+    fingerprint.userAgent,
+    buildUserAgentMetadata(fingerprint) as Protocol.Emulation.UserAgentMetadata,
+  );
+  await page.setExtraHTTPHeaders({
+    'Accept-Language': buildAcceptLanguage(fingerprint.languages),
+  });
   await page.setViewport({
     width: fingerprint.viewport.width,
     height: fingerprint.viewport.height,
     deviceScaleFactor: fingerprint.pixelRatio,
   });
 
+  // Intl overrides only affect scripts that construct formatters; the real timezone and
+  // locale also drive Date offsets and Accept-Language behavior, so set them via CDP too.
+  try {
+    const client = await page.createCDPSession();
+    await client.send('Emulation.setTimezoneOverride', { timezoneId: fingerprint.timezone });
+    await client.send('Emulation.setLocaleOverride', { locale: fingerprint.language });
+  } catch (err) {
+    getLogger().debug('[Puppeteer] Emulation overrides unavailable', {
+      error: (err as Error).message,
+    });
+  }
+
   await page.evaluateOnNewDocument(buildFingerprintInjectionScript(fingerprint));
-}
-
-async function applyDefaultFingerprint(page: Page): Promise<void> {
-  const defaultUA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36`;
-  await page.setUserAgent(defaultUA);
-
-  await page.evaluateOnNewDocument(() => {
-    const nav = globalThis.navigator as unknown as Record<string, unknown>;
-    Object.defineProperty(nav, 'platform', { get: () => 'Win32' });
-    Object.defineProperty(nav, 'deviceMemory', { get: () => 8 });
-    Object.defineProperty(nav, 'hardwareConcurrency', { get: () => 8 });
-    Object.defineProperty(nav, 'maxTouchPoints', { get: () => 0 });
-    Object.defineProperty(nav, 'webdriver', { get: () => false });
-  });
 }
 
 /**
@@ -191,7 +205,12 @@ export async function fetchHtmlWithPuppeteer(
   const startTime = Date.now();
   const proxyUrl = proxy?.url || null;
 
-  const br = await ensureBrowser(proxy, fingerprint?.viewport);
+  const requestedFingerprint = fingerprint ?? createFallbackFingerprint();
+  const br = await ensureBrowser(proxy, requestedFingerprint.viewport);
+  const effectiveFingerprint = alignFingerprintWithBrowser(
+    requestedFingerprint,
+    await br.version(),
+  );
   const page = await br.newPage();
 
   try {
@@ -209,11 +228,7 @@ export async function fetchHtmlWithPuppeteer(
       await page.setCookie(...clearanceCookies);
     }
 
-    if (fingerprint) {
-      await applyFingerprint(page, fingerprint);
-    } else {
-      await applyDefaultFingerprint(page);
-    }
+    await applyFingerprint(page, effectiveFingerprint);
 
     // Session cookies are scoped to the visited host: sessions are keyed by proxy and
     // shared across sources, so an unfiltered jar would leak another source's cookies.

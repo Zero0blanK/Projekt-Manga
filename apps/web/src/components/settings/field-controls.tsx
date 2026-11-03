@@ -366,6 +366,8 @@ export function ActionButton({
       : 'border-border/60 text-foreground hover:bg-accent';
   return (
     <button
+      // Never a form's submit button: it runs its own action.
+      type="button"
       onClick={onClick}
       disabled={disabled}
       className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${styles}`}

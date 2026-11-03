@@ -18,3 +18,4 @@ export * from './backup.js';
 export * from './sourceNetwork.js';
 export * from './notificationChannel.js';
 export * from './translate.js';
+export * from './suwayomi.js';

@@ -90,6 +90,28 @@ const deleteInstalledExtension = async (req: Request, res: Response, next: NextF
   }
 };
 
+/**
+ * The installed source's icon, stored when it was installed, so it shows offline. SVG is
+ * served too: the sandbox CSP keeps it inert if someone opens the URL directly, and as an
+ * <img> it never runs script anyway.
+ */
+const getInstalledExtensionIcon = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params as { id: string };
+    const icon = await extensionRepositoryService.getInstalledIcon(id);
+    res.setHeader('Content-Type', icon.type);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    );
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    return res.status(200).send(icon.data);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const extensionRepositoryController = {
   listRepositories,
   addRepository,
@@ -99,6 +121,7 @@ const extensionRepositoryController = {
   installExtension,
   updateInstalledExtension,
   deleteInstalledExtension,
+  getInstalledExtensionIcon,
 };
 
 export default extensionRepositoryController;

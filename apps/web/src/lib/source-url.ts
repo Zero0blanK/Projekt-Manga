@@ -1,4 +1,4 @@
-import { getSourceMangaDetails, getSources } from '@projekt-manga/api-client';
+import { buildImageProxyUrl, getSourceMangaDetails, getSources } from '@projekt-manga/api-client';
 import { toast } from '@/hooks/use-toast';
 import { copyToClipboard } from '@/lib/clipboard';
 
@@ -31,6 +31,25 @@ export function websiteUrl(value: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * An <img src> for a source's repository icon, fetched through the API's image proxy like
+ * covers are. The desktop window's CSP only allows images from the app's own origins, so a
+ * direct GitHub URL loads in a browser but shows the lettered fallback in the app.
+ */
+export function sourceIconUrl(value: string | null | undefined): string | null {
+  const url = websiteUrl(value);
+  return url ? buildImageProxyUrl(url) : null;
+}
+
+/**
+ * The image proxy answers a refused image (an SVG, a dead link) with a 1×1 transparent PNG,
+ * which the browser reports as loaded rather than as an error. An icon showing that is
+ * treated as missing, so the lettered tile shows instead of an empty square.
+ */
+export function isProxyPlaceholder(image: HTMLImageElement): boolean {
+  return image.naturalWidth <= 1 && image.naturalHeight <= 1;
 }
 
 /** Copies a chapter's address on its source site, never this app's own page address. */

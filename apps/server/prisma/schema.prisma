@@ -261,6 +261,24 @@ model notification_channel {
   @@map("notification_channels")
 }
 
+/// A reader's own machine-translation service (Reader › Page translation), used instead of
+/// the host's TRANSLATE_* environment. One row per identity: `id` is "local" for the
+/// anonymous library and "user:<user_id>" for an account. The API key is stored only
+/// encrypted (TOKEN_ENCRYPTION_KEY) and never returned to a client.
+model translation_setting {
+  id            String   @id
+  user_id       String?  @unique
+  /// libretranslate | deepl
+  provider      String
+  url           String?
+  key_encrypted String?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  user          user?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("translation_settings")
+}
+
 model manga_library {
   manga_id           String       @id
   is_bookmarked      Boolean      @default(false)
@@ -324,6 +342,7 @@ model user {
   manga_overrides    manga_override[]
   manga_links        manga_link[]
   notification_channels notification_channel[]
+  translation_setting   translation_setting?
 
   @@map("users")
 }

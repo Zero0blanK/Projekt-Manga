@@ -56,9 +56,9 @@ function connectingHtml(webUrl: string, giveUp: boolean, managed: boolean): stri
   p{color:#a39c8f;margin:0;}
   code{background:#221e19;padding:.15rem .4rem;border-radius:.3rem;font-size:.85em;}
   .spin{width:1.5rem;height:1.5rem;margin:0 auto 1rem;border-radius:50%;
-    border:2px solid #35302a;border-top-color:#e9a25a;animation:s 0.8s linear infinite;}
+    border:2px solid #35302a;border-top-color:#7fb1ff;animation:s 0.8s linear infinite;}
   @keyframes s{to{transform:rotate(360deg)}}
-  button{margin-top:1.25rem;background:#e9a25a;color:#18130f;border:0;
+  button{margin-top:1.25rem;background:#7fb1ff;color:#18130f;border:0;
     padding:.5rem 1.1rem;border-radius:999px;font-weight:600;font-size:.8rem;cursor:pointer;}
 </style></head>
 <body><div class="card">

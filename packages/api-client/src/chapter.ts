@@ -1,6 +1,6 @@
 import type { Chapters } from '@projekt-manga/types';
 import { request } from './client.js';
-import { hasLocalDataBridge, localInvoke } from './runtime.js';
+import { localInvoke, usesLocalFirstData } from './runtime.js';
 import { addHistory } from './history.js';
 import type { MangaChapterRecord, MangaWithDetails } from './manga.js';
 
@@ -49,12 +49,12 @@ const localChapterStub = (
   chapterMeta: ChapterProgressMeta & { manga_id?: string },
 ) => ({ ...chapterMeta, manga_slug: mangaSlug, source_chapter_key: sourceChapterKey });
 
-export const markChapterAsRead = (
+export const markChapterAsRead = async (
   mangaSlug: string,
   sourceChapterKey: string,
   chapterMeta: ChapterProgressMeta,
 ) => {
-  if (hasLocalDataBridge()) {
+  if (await usesLocalFirstData()) {
     return localInvoke<null>('chapter', 'markRead', {
       isRead: true,
       chapter: localChapterStub(mangaSlug, sourceChapterKey, chapterMeta),
@@ -66,12 +66,12 @@ export const markChapterAsRead = (
   );
 };
 
-export const markChapterAsUnread = (
+export const markChapterAsUnread = async (
   mangaSlug: string,
   sourceChapterKey: string,
   chapterMeta: ChapterProgressMeta,
 ) => {
-  if (hasLocalDataBridge()) {
+  if (await usesLocalFirstData()) {
     return localInvoke<null>('chapter', 'markRead', {
       isRead: false,
       chapter: localChapterStub(mangaSlug, sourceChapterKey, chapterMeta),
@@ -83,13 +83,13 @@ export const markChapterAsUnread = (
   );
 };
 
-export const markChapterByLastPage = (
+export const markChapterByLastPage = async (
   mangaSlug: string,
   sourceChapterKey: string,
   lastPageRead: number,
   chapterMeta: ChapterProgressMeta,
 ) => {
-  if (hasLocalDataBridge()) {
+  if (await usesLocalFirstData()) {
     return localInvoke<null>('chapter', 'updateProgress', {
       lastPageRead,
       chapter: localChapterStub(mangaSlug, sourceChapterKey, chapterMeta),
@@ -117,7 +117,7 @@ const markChaptersBulk = async (
   isRead: boolean,
   manga?: BulkMarkMangaMeta,
 ): Promise<BulkMarkResult> => {
-  if (!hasLocalDataBridge()) {
+  if (!(await usesLocalFirstData())) {
     return request<BulkMarkResult>(
       `/chapter/${encode(mangaSlug)}/bulk-mark-${isRead ? 'read' : 'unread'}`,
       { method: 'POST', body: { chapters, ...manga } },
@@ -187,7 +187,7 @@ export const getChapterReadStatusById = (chapterId: string, signal?: AbortSignal
 export const getChapter = (mangaSlug: string, signal?: AbortSignal, source?: string) =>
   request<MangaChapterRecord[]>(`/chapter/${encode(mangaSlug)}`, { signal, query: { source } });
 
-/** The desktop reader writes chapter state locally, so its chapter list must read that
+/** A signed-in desktop reader writes chapter state locally, so its chapter list must read that
  * same state instead of asking the server for an older snapshot. */
 export const getMangaChapters = async (
   mangaId: string,
@@ -195,7 +195,7 @@ export const getMangaChapters = async (
   source: string,
   signal?: AbortSignal,
 ): Promise<MangaChapterRecord[]> => {
-  if (hasLocalDataBridge()) {
+  if (await usesLocalFirstData()) {
     const details = await localInvoke<MangaWithDetails | null>('manga', 'getDetails', { mangaId });
     if (details) return details.chapters;
   }

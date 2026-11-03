@@ -8,8 +8,8 @@ import type { ExtensionListingEntry } from '@projekt-manga/schemas';
 import { extensionActions, useSourceCatalog, type CatalogEntry } from '@/lib/extensions-store';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AddRepositoryForm } from '@/components/extensions/add-repository-form';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { repairSourceName, sourceLanguageGroup, sourceLanguageName } from '@/lib/source-language';
+import { compareLanguageGroups } from '@/lib/discover-filters';
 import { toast } from '@/hooks/use-toast';
 import { useConfirm } from '@/hooks/use-confirm';
 import { repositoryPublisher } from '@/lib/repository-url';
@@ -19,6 +19,7 @@ import {
   type SourceFiltersValue,
 } from './source-filters';
 import { useContentPrivacy, isAdultSource } from './content-privacy';
+import { isProxyPlaceholder, sourceIconUrl } from '@/lib/source-url';
 
 /**
  * Installing and removing sources, on the page where they get used.
@@ -65,17 +66,19 @@ function ratingSuffix(rating: string | null | undefined, isNSFW: boolean): strin
  */
 function SourceIcon({ url }: { url: string | null | undefined }) {
   const [failed, setFailed] = useState(false);
-  if (!url || failed) return null;
+  const src = sourceIconUrl(url);
+  if (!src || failed) return null;
   return (
     // eslint-disable-next-line @next/next/no-img-element -- see the note above
     <img
-      src={url}
+      src={src}
       alt=""
       aria-hidden
       width={20}
       height={20}
       loading="lazy"
       onError={() => setFailed(true)}
+      onLoad={(event) => setFailed(isProxyPlaceholder(event.currentTarget))}
       className="mt-0.5 size-5 shrink-0 rounded object-contain"
     />
   );
@@ -85,7 +88,17 @@ function detailLine(entry: ExtensionListingEntry): string {
   return `v${entry.version} · ${sourceLanguageName(entry.lang)}${ratingSuffix(entry.content_rating, entry.isNSFW)}`;
 }
 
-export function SourceCatalog({ filters = emptySourceFilters }: { filters?: SourceFiltersValue }) {
+export function SourceCatalog({
+  filters = emptySourceFilters,
+  language = '',
+  repositoryId = null,
+}: {
+  filters?: SourceFiltersValue;
+  /** A language group from Discover's filter bar, or '' for every language. */
+  language?: string;
+  /** Only this repository's sources, or null for every repository. */
+  repositoryId?: string | null;
+}) {
   const { repositories, entries, loading, hasNoRepositories } = useSourceCatalog();
   /** Each source row names its publisher, so it needs its repository by id. */
   const repositoryById = new Map(repositories.map((repository) => [repository.id, repository]));
@@ -94,16 +107,13 @@ export function SourceCatalog({ filters = emptySourceFilters }: { filters?: Sour
   const visibleEntries = entries.filter(
     (item) =>
       (!privacy.hideAdult || !isAdultSource(item.entry.content_rating, item.entry.isNSFW)) &&
-      matchesSourceFilters(item.entry, item.installedId !== null, filters),
+      matchesSourceFilters(item.entry, item.installedId !== null, filters) &&
+      (!repositoryId || item.repositoryId === repositoryId),
   );
-  const [selectedLanguage, setSelectedLanguage] = useState('all');
   const languageGroups = [
     ...new Set(visibleEntries.map((item) => sourceLanguageGroup(item.entry.lang))),
-  ].sort((a, b) => sourceLanguageName(a).localeCompare(sourceLanguageName(b)));
-  const activeLanguage =
-    selectedLanguage === 'all' || languageGroups.includes(selectedLanguage)
-      ? selectedLanguage
-      : 'all';
+  ].sort(compareLanguageGroups);
+  const activeLanguage = language || 'all';
   const groups = activeLanguage === 'all' ? languageGroups : [activeLanguage];
   const resultCount = visibleEntries.filter(
     (item) => activeLanguage === 'all' || sourceLanguageGroup(item.entry.lang) === activeLanguage,
@@ -288,180 +298,157 @@ export function SourceCatalog({ filters = emptySourceFilters }: { filters?: Sour
           </Link>
         </div>
       </div>
-      <Tabs value={activeLanguage} onValueChange={setSelectedLanguage} className="mt-4">
-        <div className="overflow-x-auto pb-1">
-          <TabsList aria-label="Extension languages" className="h-auto min-w-max justify-start">
-            <TabsTrigger value="all">
-              All <span className="ml-1.5 text-xs opacity-90">{visibleEntries.length}</span>
-            </TabsTrigger>
-            {languageGroups.map((group) => (
-              <TabsTrigger key={group} value={group}>
-                {sourceLanguageName(group)}{' '}
-                <span className="ml-1.5 text-xs opacity-90">
-                  {
-                    visibleEntries.filter((item) => sourceLanguageGroup(item.entry.lang) === group)
-                      .length
-                  }
-                </span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-        <TabsContent value={activeLanguage}>
-          <p role="status" className="mt-2 text-xs text-muted-foreground">
-            {resultCount} catalogue results
+      <div className="mt-4">
+        <p role="status" className="mt-2 text-xs text-muted-foreground">
+          {resultCount} catalogue results
+        </p>
+        {resultCount === 0 && (
+          <p className="mt-4 text-sm text-muted-foreground">
+            No sources match the current filters.
           </p>
-          {resultCount === 0 && (
-            <p className="mt-4 text-sm text-muted-foreground">
-              No sources match the current filters.
-            </p>
-          )}
-          <div className="mt-4 space-y-6">
-            {sections.map(({ label: sectionLabel, Icon, matches }) => {
-              const sectionEntries = visibleEntries.filter(
-                (item) =>
-                  matches(item) &&
-                  (activeLanguage === 'all' ||
-                    sourceLanguageGroup(item.entry.lang) === activeLanguage),
-              );
-              if (!sectionEntries.length) return null;
-              return (
-                <section
-                  key={sectionLabel}
-                  aria-label={`${sectionLabel} extensions`}
-                  className="space-y-4"
-                >
-                  <h3 className="flex items-center gap-2 text-base font-semibold text-foreground">
-                    <Icon aria-hidden="true" className="size-4 text-primary" />
-                    {sectionLabel}
-                    <span className="text-xs font-normal text-muted-foreground">
-                      {sectionEntries.length}
-                    </span>
-                  </h3>
-                  {groups
-                    .filter((group) =>
-                      sectionEntries.some((item) => sourceLanguageGroup(item.entry.lang) === group),
-                    )
-                    .map((group) => (
-                      <section
-                        key={group}
-                        aria-label={`${sourceLanguageName(group)} sources`}
-                        className="space-y-3"
-                      >
-                        <h4 className="text-sm font-semibold text-foreground">
-                          {sourceLanguageName(group)}
-                        </h4>
-                        {(() => {
-                          // One flat list per language group rather than a card per
-                          // repository: a per-repository header would repeat its name and
-                          // Refresh button for every section-and-language combination.
-                          // Attribution is shown on each source row instead.
-                          const rows = sectionEntries.filter(
-                            (item) =>
-                              sourceLanguageGroup(item.entry.lang) === group &&
-                              !repositoryById.get(item.repositoryId)?.fetchError,
-                          );
-                          if (!rows.length) return null;
-                          return (
-                            <ul className="divide-y divide-border/60 overflow-hidden rounded-2xl border border-border/60 bg-surface/40">
-                              {rows.map((item) => {
-                                const key = `${item.repositoryId}:${item.entry.source_key}`;
-                                const busy = busyKeys.has(key);
-                                const installed = item.installedId !== null;
-                                const repository = repositoryById.get(item.repositoryId);
-                                const publisher = repository
-                                  ? repositoryPublisher(repository)
-                                  : null;
+        )}
+        <div className="mt-4 space-y-6">
+          {sections.map(({ label: sectionLabel, Icon, matches }) => {
+            const sectionEntries = visibleEntries.filter(
+              (item) =>
+                matches(item) &&
+                (activeLanguage === 'all' ||
+                  sourceLanguageGroup(item.entry.lang) === activeLanguage),
+            );
+            if (!sectionEntries.length) return null;
+            return (
+              <section
+                key={sectionLabel}
+                aria-label={`${sectionLabel} extensions`}
+                className="space-y-4"
+              >
+                <h3 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                  <Icon aria-hidden="true" className="size-4 text-primary" />
+                  {sectionLabel}
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {sectionEntries.length}
+                  </span>
+                </h3>
+                {groups
+                  .filter((group) =>
+                    sectionEntries.some((item) => sourceLanguageGroup(item.entry.lang) === group),
+                  )
+                  .map((group) => (
+                    <section
+                      key={group}
+                      aria-label={`${sourceLanguageName(group)} sources`}
+                      className="space-y-3"
+                    >
+                      <h4 className="text-sm font-semibold text-foreground">
+                        {sourceLanguageName(group)}
+                      </h4>
+                      {(() => {
+                        // One flat list per language group rather than a card per
+                        // repository: a per-repository header would repeat its name and
+                        // Refresh button for every section-and-language combination.
+                        // Attribution is shown on each source row instead.
+                        const rows = sectionEntries.filter(
+                          (item) =>
+                            sourceLanguageGroup(item.entry.lang) === group &&
+                            !repositoryById.get(item.repositoryId)?.fetchError,
+                        );
+                        if (!rows.length) return null;
+                        return (
+                          <ul className="divide-y divide-border/60 overflow-hidden rounded-2xl border border-border/60 bg-surface/40">
+                            {rows.map((item) => {
+                              const key = `${item.repositoryId}:${item.entry.source_key}`;
+                              const busy = busyKeys.has(key);
+                              const installed = item.installedId !== null;
+                              const repository = repositoryById.get(item.repositoryId);
+                              const publisher = repository ? repositoryPublisher(repository) : null;
 
-                                return (
-                                  <li
-                                    key={key}
-                                    className="flex items-start justify-between gap-4 px-5 py-3"
-                                  >
-                                    <div className="flex min-w-0 gap-2.5">
-                                      <SourceIcon url={item.entry.icon_url} />
-                                      <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                          <span className="max-w-full truncate text-sm font-medium text-foreground">
-                                            {repairSourceName(item.entry.name)}
+                              return (
+                                <li
+                                  key={key}
+                                  className="flex items-start justify-between gap-4 px-5 py-3"
+                                >
+                                  <div className="flex min-w-0 gap-2.5">
+                                    <SourceIcon url={item.entry.icon_url} />
+                                    <div className="min-w-0">
+                                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                        <span className="max-w-full truncate text-sm font-medium text-foreground">
+                                          {repairSourceName(item.entry.name)}
+                                        </span>
+                                        <span className="text-xs text-muted-foreground">
+                                          {detailLine(item.entry)}
+                                        </span>
+                                        {item.updateAvailable && (
+                                          <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                                            Update
                                           </span>
-                                          <span className="text-xs text-muted-foreground">
-                                            {detailLine(item.entry)}
-                                          </span>
-                                          {item.updateAvailable && (
-                                            <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                                              Update
-                                            </span>
-                                          )}
-                                        </div>
-                                        {publisher && (
-                                          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                                            <span className="truncate">By. {publisher}</span>
-                                            {repository?.badge_label && (
-                                              <span className="shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-medium">
-                                                {repository.badge_label}
-                                              </span>
-                                            )}
-                                          </p>
-                                        )}
-                                        {item.conflictsWithInstalled && (
-                                          <p className="mt-1 text-xs text-muted-foreground">
-                                            Another repository already provides{' '}
-                                            <span className="text-foreground">
-                                              {item.entry.source_key}
-                                            </span>
-                                            . Remove that one first — two sources cannot share an
-                                            id.
-                                          </p>
                                         )}
                                       </div>
+                                      {publisher && (
+                                        <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                                          <span className="truncate">By. {publisher}</span>
+                                          {repository?.badge_label && (
+                                            <span className="shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-medium">
+                                              {repository.badge_label}
+                                            </span>
+                                          )}
+                                        </p>
+                                      )}
+                                      {item.conflictsWithInstalled && (
+                                        <p className="mt-1 text-xs text-muted-foreground">
+                                          Another repository already provides{' '}
+                                          <span className="text-foreground">
+                                            {item.entry.source_key}
+                                          </span>
+                                          . Remove that one first — two sources cannot share an id.
+                                        </p>
+                                      )}
                                     </div>
+                                  </div>
 
-                                    <div className="flex shrink-0 items-center gap-2">
-                                      {installed && item.updateAvailable && (
-                                        <button
-                                          onClick={() => handleUpdate(item)}
-                                          disabled={busy}
-                                          aria-label={`Update ${repairSourceName(item.entry.name)}`}
-                                          className="min-h-9 cursor-pointer rounded-lg border border-border/60 px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
-                                        >
-                                          {busy ? '…' : 'Update'}
-                                        </button>
-                                      )}
-                                      {installed ? (
-                                        <button
-                                          onClick={() => handleUninstall(item)}
-                                          disabled={busy}
-                                          aria-label={`Remove ${repairSourceName(item.entry.name)}`}
-                                          className="min-h-9 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive transition hover:bg-destructive/20 disabled:opacity-50"
-                                        >
-                                          {busy ? 'Removing…' : 'Remove'}
-                                        </button>
-                                      ) : (
-                                        <button
-                                          onClick={() => handleInstall(item)}
-                                          disabled={busy || item.conflictsWithInstalled}
-                                          aria-label={`Install ${repairSourceName(item.entry.name)}`}
-                                          className="min-h-9 cursor-pointer rounded-lg border border-border/60 px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
-                                        >
-                                          {busy ? 'Installing…' : 'Install'}
-                                        </button>
-                                      )}
-                                    </div>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          );
-                        })()}
-                      </section>
-                    ))}
-                </section>
-              );
-            })}
-          </div>
-        </TabsContent>
-      </Tabs>
+                                  <div className="flex shrink-0 items-center gap-2">
+                                    {installed && item.updateAvailable && (
+                                      <button
+                                        onClick={() => handleUpdate(item)}
+                                        disabled={busy}
+                                        aria-label={`Update ${repairSourceName(item.entry.name)}`}
+                                        className="min-h-9 cursor-pointer rounded-lg border border-border/60 px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
+                                      >
+                                        {busy ? '…' : 'Update'}
+                                      </button>
+                                    )}
+                                    {installed ? (
+                                      <button
+                                        onClick={() => handleUninstall(item)}
+                                        disabled={busy}
+                                        aria-label={`Remove ${repairSourceName(item.entry.name)}`}
+                                        className="min-h-9 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive transition hover:bg-destructive/20 disabled:opacity-50"
+                                      >
+                                        {busy ? 'Removing…' : 'Remove'}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleInstall(item)}
+                                        disabled={busy || item.conflictsWithInstalled}
+                                        aria-label={`Install ${repairSourceName(item.entry.name)}`}
+                                        className="min-h-9 cursor-pointer rounded-lg border border-border/60 px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
+                                      >
+                                        {busy ? 'Installing…' : 'Install'}
+                                      </button>
+                                    )}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        );
+                      })()}
+                    </section>
+                  ))}
+              </section>
+            );
+          })}
+        </div>
+      </div>
       {repositories
         .filter((repository) => repository.fetchError)
         .map((repository) => {

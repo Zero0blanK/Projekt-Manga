@@ -32,15 +32,15 @@ afterEach(() => {
 });
 
 describe('cover privacy policy', () => {
-  it('keeps adult covers visible by default', () => {
+  it('keeps adult covers visible by default', async () => {
     render(
       <CoverPrivacyProvider>
         <Cover src="/cover.png" sourceId="adult" alt="Adult title" />
       </CoverPrivacyProvider>,
     );
-    expect(screen.getByRole('img', { name: 'Adult title' })).not.toHaveClass('blur-xl');
+    expect(await screen.findByRole('img', { name: 'Adult title' })).not.toHaveClass('blur-xl');
   });
-  it('blurs adult-only and legacy adult sources while preserving mixed catalogues', () => {
+  it('blurs adult-only and legacy adult sources while preserving mixed catalogues', async () => {
     preferences.blurAdult = true;
     render(
       <CoverPrivacyProvider>
@@ -49,11 +49,15 @@ describe('cover privacy policy', () => {
         <Cover src="/c.png" sourceId="mixed" alt="Mixed" />
       </CoverPrivacyProvider>,
     );
-    expect(screen.getByRole('img', { name: 'Adult cover hidden: Adult' })).toHaveClass('blur-xl');
-    expect(screen.getByRole('img', { name: 'Adult cover hidden: Legacy' })).toHaveClass('blur-xl');
-    expect(screen.getByRole('img', { name: 'Mixed' })).not.toHaveClass('blur-xl');
+    expect(await screen.findByRole('img', { name: 'Adult cover hidden: Adult' })).toHaveClass(
+      'blur-xl',
+    );
+    expect(await screen.findByRole('img', { name: 'Adult cover hidden: Legacy' })).toHaveClass(
+      'blur-xl',
+    );
+    expect(await screen.findByRole('img', { name: 'Mixed' })).not.toHaveClass('blur-xl');
   });
-  it('updates already-mounted covers when privacy is disabled', () => {
+  it('updates already-mounted covers when privacy is disabled', async () => {
     preferences.blurAdult = true;
     const { rerender } = render(
       <CoverPrivacyProvider>
@@ -66,6 +70,6 @@ describe('cover privacy policy', () => {
         <Cover src="/a.png" sourceId="adult" alt="Adult" />
       </CoverPrivacyProvider>,
     );
-    expect(screen.getByRole('img', { name: 'Adult' })).not.toHaveClass('blur-xl');
+    expect(await screen.findByRole('img', { name: 'Adult' })).not.toHaveClass('blur-xl');
   });
 });

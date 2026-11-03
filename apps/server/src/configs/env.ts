@@ -86,6 +86,9 @@ const envSchema = z.object({
   TRANSLATE_URL: z.preprocess(blankAsUnset, z.string().url().optional()),
   /** The API key: required for DeepL, optional for LibreTranslate. */
   TRANSLATE_API_KEY: z.preprocess(blankAsUnset, z.string().min(1).optional()),
+  /** Let a translation service saved in Settings sit on a private address (a LibreTranslate
+   * on this machine or the LAN). Off by default on a shared server; the desktop app sets it. */
+  TRANSLATE_ALLOW_PRIVATE_HOSTS: z.preprocess(blankAsUnset, z.enum(['true', 'false']).optional()),
 });
 
 export interface DatabaseConfig {

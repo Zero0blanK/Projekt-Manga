@@ -23,10 +23,9 @@ import {
 } from '@projekt-manga/schemas';
 import type { SandboxedSource, UrlKeysResult } from '@projekt-manga/extensions/sandbox';
 import type { SourceUrlKeysBody } from '@projekt-manga/schemas';
-import {
-  getInstalledSandboxedSource,
-  getInstalledSandboxedSources,
-} from './sandboxedSourceRegistry.service.js';
+import { getInstalledSandboxedSources } from './sandboxedSourceRegistry.service.js';
+import { resolveSource } from './sourceResolver.service.js';
+import { getSuwayomiSourceSummaries } from './suwayomi/registry.js';
 import chapterService from './chapter.service.js';
 import type { AddedChapter } from '../repositories/chapter.repository.js';
 import mangaRepository from '../repositories/manga.repository.js';
@@ -145,7 +144,7 @@ function translateSourceError(error: unknown): never {
 }
 
 const getSourceById = async (sourceId: string) => {
-  const source = await getInstalledSandboxedSource(sourceId);
+  const source = await resolveSource(sourceId);
   if (!source) {
     throw new ServiceUnavailableError(`Source not found: ${sourceId}`);
   }
@@ -153,13 +152,21 @@ const getSourceById = async (sourceId: string) => {
 };
 
 const getSources = async () => {
-  return (await getInstalledSandboxedSources()).map((source) => ({
-    id: source.id,
-    name: source.name,
-    lang: source.lang,
-    base_url: source.base_url,
-    isNSFW: source.isNSFW,
-  }));
+  const [installed, suwayomi] = await Promise.all([
+    getInstalledSandboxedSources(),
+    getSuwayomiSourceSummaries(),
+  ]);
+  return [
+    ...installed.map((source) => ({
+      id: source.id,
+      name: source.name,
+      lang: source.lang,
+      base_url: source.base_url,
+      isNSFW: source.isNSFW,
+      provider: 'extension' as const,
+    })),
+    ...suwayomi,
+  ];
 };
 
 const getManga = async (params: {
