@@ -18,7 +18,11 @@ let temporaryDirectory: string;
 
 function openDatabase(filePath: string): DatabaseSync {
   const database = new DatabaseSync(filePath);
+  // Throwaway files: waiting for the disk on every statement is what made this matrix take
+  // minutes on the Windows runner, and it changes nothing about the schema or data checked.
   database.exec(`
+    PRAGMA synchronous = OFF;
+    PRAGMA journal_mode = MEMORY;
     CREATE TABLE IF NOT EXISTS _prisma_migrations (
       migration_name TEXT PRIMARY KEY,
       finished_at TEXT,

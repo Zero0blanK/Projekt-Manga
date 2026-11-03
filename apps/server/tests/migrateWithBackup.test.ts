@@ -109,7 +109,12 @@ describe('migrateWithBackup', () => {
         fs.writeFileSync(path.join(targetDir, 'migration.sql'), migration.sql);
 
         const original = new DatabaseSync(targetDb);
+        // Only this setup connection skips waiting for the disk: replaying the earlier
+        // migrations for every boundary is what took minutes on the Windows runner. The
+        // interrupted migration and the recovery under test use their normal settings.
         original.exec(`
+          PRAGMA synchronous = OFF;
+          PRAGMA journal_mode = MEMORY;
           CREATE TABLE _prisma_migrations (
             migration_name TEXT PRIMARY KEY,
             finished_at TEXT,
