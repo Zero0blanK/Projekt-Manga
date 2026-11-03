@@ -20,9 +20,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
+      # The repository's default branch (main). A scheduled run already checks it out; this
+      # used to name a `development` branch that doesn't exist, so every run failed here.
       - uses: actions/checkout@v4
-        with:
-          ref: development
 
       - uses: actions/setup-node@v4
         with:
