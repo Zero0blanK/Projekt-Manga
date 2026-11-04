@@ -25,6 +25,7 @@ import type { SandboxedSource, UrlKeysResult } from '@projekt-manga/extensions/s
 import type { SourceUrlKeysBody } from '@projekt-manga/schemas';
 import { getInstalledSandboxedSources } from './sandboxedSourceRegistry.service.js';
 import { resolveSource } from './sourceResolver.service.js';
+import { announceLibraryChange, EVERYONE } from '../utils/libraryChanges.js';
 import { getSuwayomiSourceSummaries } from './suwayomi/registry.js';
 import chapterService from './chapter.service.js';
 import type { AddedChapter } from '../repositories/chapter.repository.js';
@@ -224,6 +225,18 @@ const getCapabilities = async (sourceId: string): Promise<SourceCapabilities> =>
   } catch (error) {
     translateSourceError(error);
   }
+};
+
+/** Every listed source's capabilities in one call; a source that fails is left out, and
+ * asking for it alone reports why. */
+const getAllCapabilities = async (): Promise<Record<string, SourceCapabilities>> => {
+  const sources = await getSources();
+  const results = await Promise.allSettled(
+    sources.map(async (source) => [source.id, await getCapabilities(source.id)] as const),
+  );
+  return Object.fromEntries(
+    results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : [])),
+  );
 };
 
 const getCataloguePage = async (
@@ -437,6 +450,7 @@ const fetchMangaUpdates = async (
     const sync = await chapterService.syncChapters(manga_slug, latestChapters, source_id);
     newChapters = sync.added;
     newChapterList = sync.addedChapters;
+    if (newChapters > 0) announceLibraryChange(EVERYONE, 'library');
     changedChapters = sync.relinked + sync.updated + sync.removed;
 
     if (newChapters > 0 && resolvedMangaId) {
@@ -586,6 +600,7 @@ const checkAllLibraryUpdates = async (): Promise<LibraryUpdateResult> => {
 
 const sourceService = {
   getCapabilities,
+  getAllCapabilities,
   getCataloguePage,
   getSources,
   getManga,

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { Readable } from 'node:stream';
 import type { SourceErrorCode } from '@projekt-manga/types';
 import { detectRasterImageType, MAX_IMAGE_BYTES } from '../../utils/imageContent.js';
 import { readSuwayomiConnection, type SuwayomiConnection } from './settings.js';
@@ -171,6 +172,28 @@ export function isSuwayomiImageUrl(
   if (url.username || url.password || url.origin !== base.origin) return false;
   const prefix = `${base.pathname.replace(/\/+$/, '')}/api/v1/`;
   return url.pathname.startsWith(prefix) && !url.pathname.includes('/../');
+}
+
+/** An image response still arriving, for the proxy to stream on. */
+export async function openSuwayomiImage(
+  url: string,
+): Promise<{ stream: Readable; size: number | null }> {
+  const connection = requireConnection();
+  if (!isSuwayomiImageUrl(url, connection)) {
+    throw new SuwayomiError('BLOCKED', 'Not an image on the Suwayomi server');
+  }
+  try {
+    const response = await axios.get<Readable>(url, {
+      headers: headers(connection, 'image/*'),
+      responseType: 'stream',
+      timeout: IMAGE_TIMEOUT_MS,
+      maxRedirects: 0,
+    });
+    const size = Number(response.headers['content-length']);
+    return { stream: response.data, size: Number.isFinite(size) && size > 0 ? size : null };
+  } catch (error) {
+    throw toSuwayomiError(error);
+  }
 }
 
 export interface SuwayomiImage {

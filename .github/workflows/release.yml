@@ -40,9 +40,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -79,3 +79,15 @@ jobs:
           # Code signing: unset secrets mean an unsigned build (see docs/releasing.md).
           CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      # The draft's description and SHA256SUMS.txt, built from the changelog and the files
+      # just uploaded, so publishing it needs no copy-and-paste.
+      - name: Write the release notes and checksums
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          node scripts/release-notes.mjs apps/desktop/release
+          gh release edit "$GITHUB_REF_NAME" --notes-file apps/desktop/release/release-notes.md
+          gh release upload "$GITHUB_REF_NAME" apps/desktop/release/SHA256SUMS.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}

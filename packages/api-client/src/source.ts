@@ -68,6 +68,10 @@ export const getSources = (signal?: AbortSignal) =>
 export const getSourceHealth = (signal?: AbortSignal) =>
   request<SourceHealth[]>('/source/health', { signal });
 
+/** Every source's capabilities at once; a source that failed is missing from the result. */
+export const getAllSourceCapabilities = (signal?: AbortSignal) =>
+  request<Record<string, SourceCapabilities>>('/source/capabilities', { signal });
+
 export const getSourceCapabilities = (sourceId: string, signal?: AbortSignal) =>
   request<SourceCapabilities>(`/source/${encode(sourceId)}/capabilities`, { signal });
 

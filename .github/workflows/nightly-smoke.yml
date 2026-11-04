@@ -10,6 +10,8 @@ on:
 
 permissions:
   contents: read
+  # Only to open the failure issue below.
+  issues: write
 
 env:
   NODE_VERSION: '25'
@@ -22,9 +24,9 @@ jobs:
     steps:
       # The repository's default branch (main). A scheduled run already checks it out; this
       # used to name a `development` branch that doesn't exist, so every run failed here.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -44,3 +46,24 @@ jobs:
 
       - name: Smoke — restore across a restart
         run: npm run smoke:restore-restart
+        env:
+          # It builds the server first, and prisma.config.ts resolves DATABASE_URL even just
+          # to generate the client. The smoke gives its own server a throwaway database.
+          DATABASE_URL: file:./data/ci-generate.db
+
+      # A scheduled run has nobody watching it, so a failure opens one issue and adds to it
+      # on later nights instead of passing unnoticed.
+      - name: Report a failed night
+        if: failure() && github.event_name == 'schedule'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Nightly smoke is failing'
+          issue=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "Failed again: $RUN_URL"
+          else
+            gh issue create --title "$title" --body "First failed run: $RUN_URL"
+          fi

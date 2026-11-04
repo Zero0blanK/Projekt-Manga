@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from '@/hooks/use-toast';
+import { toastWithUndo } from '@/lib/undo-toast';
 import { SHELF_OPTIONS, type ShelfStatus } from '@/lib/app-store';
 import {
   applyLibraryAction,
@@ -92,7 +93,10 @@ function ShelfMenu({ manga, onRemoved }: { manga: Manga; onRemoved?: () => void 
     setRemoving(true);
     setTitleInLibrary(manga.id, false)
       .then(() => {
-        toast({ description: `Removed ${manga.title} from your library` });
+        toastWithUndo(`Removed ${manga.title} from your library`, async () => {
+          await setTitleInLibrary(manga.id, true);
+          router.refresh();
+        });
         if (onRemoved) onRemoved();
         else router.refresh();
       })

@@ -11,7 +11,6 @@ const baseState: UpdateState = {
   availableVersion: '1.1.0',
   downloadPercent: 100,
   error: null,
-  autoDownload: true,
   releaseNotes: 'What changed\n• Faster reader',
   prompt: true,
 };
@@ -21,7 +20,6 @@ function installBridge(state: Partial<UpdateState> = {}) {
     getState: vi.fn(async () => ({ success: true, data: { ...baseState, ...state } })),
     check: vi.fn(),
     download: vi.fn(),
-    setAutoDownload: vi.fn(),
     installNow: vi.fn(),
     updateNow: vi.fn(async () => ({ success: true })),
     dismiss: vi.fn(async () => ({ success: true })),
@@ -57,6 +55,22 @@ describe('UpdatePrompt', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Skip this version' }));
     expect(bridge.dismiss).toHaveBeenCalledWith('skip');
     await waitFor(() => expect(screen.queryByText('Version 1.1.0 is available')).toBeNull());
+  });
+
+  it('offers a version found while downloading nothing, and ignores clicks outside it', async () => {
+    const bridge = installBridge({ status: 'available', downloadPercent: null });
+    render(<UpdatePrompt />);
+    await screen.findByText('Version 1.1.0 is available');
+    fireEvent.pointerDown(document.body);
+    expect(bridge.dismiss).not.toHaveBeenCalled();
+    expect(screen.getByText('Version 1.1.0 is available')).toBeInTheDocument();
+  });
+
+  it('shows why a download failed and offers it again', async () => {
+    installBridge({ status: 'available', error: 'Could not reach GitHub to check for updates.' });
+    render(<UpdatePrompt />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach GitHub');
+    expect(screen.getByRole('button', { name: 'Update now' })).toBeInTheDocument();
   });
 
   it('stays hidden when there is nothing to offer, or in a browser', async () => {

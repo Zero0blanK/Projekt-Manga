@@ -5,17 +5,6 @@ import { ImageOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCoverBlur } from '@/components/discover/cover-privacy-provider';
 
-/**
- * What a cover in the main grid is actually rendered at.
- *
- * The column count varies with the density setting (manga-grid.tsx), so this is the widest
- * card at each breakpoint rather than an exact figure. Erring large is the safe direction:
- * the optimizer never scales a cover *up* past what the source published, so over-declaring
- * costs nothing on a small original and gains real detail on a big one. The 200px default
- * below is sized for list thumbnails and is too small for grid cards.
- */
-export const GRID_COVER_SIZES = '(min-width: 1280px) 280px, (min-width: 768px) 240px, 45vw';
-
 const retryDelays = [1_500, 4_000, 9_000, 20_000];
 const recoveryListeners = new Map<string, Set<() => void>>();
 
@@ -29,6 +18,18 @@ function recoveryGroup(src: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * A stored library cover at the size this box shows it; the server keeps these widths. A
+ * cover still coming from a source is left whole, since resizing it would mean the server
+ * downloading it first, with nothing for the ring to show.
+ */
+function sizedForBox(src: string, cssWidth: number): string {
+  if (!src.includes('/cache/thumbnail/')) return src;
+  const needed = cssWidth * (window.devicePixelRatio || 1);
+  const width = [200, 400, 800].find((candidate) => candidate >= needed) ?? 800;
+  return `${src}${src.includes('?') ? '&' : '?'}w=${width}`;
 }
 
 /** How far a download has got, as a fraction. */
@@ -119,10 +120,6 @@ export function Cover({
   alt?: string;
   className?: string;
   rounded?: string;
-  /** Accepted for callers written for next/image; the original image is shown. */
-  sizes?: string;
-  /** Accepted for callers written for next/image; the original image is shown. */
-  quality?: number;
   priority?: boolean;
   sourceId?: string;
   mangaId?: string;
@@ -247,7 +244,8 @@ export function Cover({
     return () => observer.disconnect();
   }, [near]);
 
-  const downloadUrl = current && near && !failed ? current : null;
+  const downloadUrl =
+    current && near && !failed ? sizedForBox(current, box.current?.clientWidth || 200) : null;
 
   /**
    * Downloads the cover itself rather than leaving it to an <img>, which reports nothing

@@ -32,7 +32,7 @@ describe('FilterPanel accessibility', () => {
   it('names the dropdown and the free-text field after their filter', () => {
     render(<FilterPanel fields={fields} values={{}} onApply={vi.fn()} />);
 
-    expect(screen.getByRole('combobox', { name: 'Status' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Status/ })).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Author' })).toBeTruthy();
   });
 

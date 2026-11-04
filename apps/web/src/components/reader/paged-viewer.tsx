@@ -385,11 +385,11 @@ export function PagedViewer({
     zoomBehavior === 'Original' ? 'fixed' : widthDriven ? 'width' : 'height';
   const sizeClass =
     zoomBehavior === 'Original'
-      ? 'h-[600px] w-[400px]'
+      ? 'aspect-[2/3] w-[400px] max-w-[calc(100vw-1rem)]'
       : widthDriven
         ? pagesPerView === 2
-          ? 'w-[34vw] max-w-sm'
-          : 'w-[60vw] max-w-xl'
+          ? 'w-[48vw] max-w-sm sm:w-[34vw]'
+          : 'w-[calc(100vw-1rem)] max-w-xl sm:w-[60vw]'
         : 'h-[calc(85vh-3rem)]';
 
   return (

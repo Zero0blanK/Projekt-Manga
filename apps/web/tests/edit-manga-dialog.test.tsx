@@ -57,7 +57,8 @@ it('sends only the fields that changed', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Edit details' }));
 
   fireEvent.change(screen.getByLabelText('Title'), { target: { value: '  My Title  ' } });
-  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'COMPLETED' } });
+  fireEvent.keyDown(screen.getByLabelText('Status'), { key: 'Enter' });
+  fireEvent.click(await screen.findByRole('menuitem', { name: 'Completed' }));
   fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
   await waitFor(() => expect(refresh).toHaveBeenCalled());

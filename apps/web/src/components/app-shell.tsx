@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useRouter, usePathname } from 'next/navigation';
 import { FloatingNav } from '@/components/floating-nav';
 import { Toaster } from '@/components/ui/toaster';
+import { ConnectionBanner } from '@/components/connection-banner';
+import { DownloadDial } from '@/components/downloads/download-dial';
 import { SplashIntro } from '@/components/splash-intro';
 import { LibraryUpdateDial } from '@/components/library/library-update-dial';
 import { useMangaLibrary } from '@/lib/library-store';
@@ -67,6 +69,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [restorePending, isReaderPath, pathname, leavingRestoredReader, restoreReaderPath, router]);
 
   const appReady = documentReady && desktopInitReady && !libraryLoading && staticDataReady;
+  const [splashDone, setSplashDone] = useState(false);
+  const finishSplash = useCallback(() => setSplashDone(true), []);
 
   // Remember where the reader came from, so detail pages can offer a real "back" to the
   // list they were browsing rather than a fixed destination. Detail pages are skipped as
@@ -164,7 +168,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Always rendered, not gated behind client-only state, so its markup is part of the
           server-rendered HTML. It decides for itself whether this session skips straight
           through; see splash-intro.tsx and lib/splash.ts. */}
-      <SplashIntro ready={appReady} />
+      <SplashIntro ready={appReady} onFinish={finishSplash} />
       <AutomaticLibraryUpdates suspended={restorePending} />
       <AutomaticDesktopSync ready={appReady && !restorePending} />
       {!restorePending && (
@@ -183,9 +187,15 @@ export function AppShell({ children }: { children: ReactNode }) {
           {!restorePending && !leavingRestoredReader && children}
         </main>
       </div>
-      {/* After the splash, so the changelog isn't hidden behind it. */}
-      {appReady && !restorePending && <UpdatePrompt />}
-      <LibraryUpdateDial />
+      {/* Only once the splash has gone: it covers the prompt, and the click that skips it
+          would otherwise land outside the prompt. */}
+      {splashDone && !restorePending && <UpdatePrompt />}
+      <div className="pointer-events-none fixed bottom-4 right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
+        <LibraryUpdateDial />
+        {/* The reader stays clear, and the downloads page already shows the queue. */}
+        {!isReaderPath && !pathname.startsWith('/downloads') && <DownloadDial />}
+      </div>
+      {!restorePending && !isReaderPath && <ConnectionBanner />}
       <Toaster />
     </div>
   );

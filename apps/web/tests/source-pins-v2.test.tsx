@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
   installed: [] as Array<{ source_key: string; repository_id: string; content_rating: null }>,
   repositories: [] as Array<{ id: string; url: string; name: string | null }>,
 }));
-vi.mock('@/lib/source-health-status', () => ({ useSourceHealthStatus: () => 'ok' }));
+vi.mock('@/lib/source-health-status', () => ({
+  useSourceHealthStatus: () => 'ok',
+  summarizeSourceHealth: () => 'ok',
+}));
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), back: vi.fn() }),
@@ -141,15 +144,17 @@ describe('Source pin ordering and device persistence', () => {
     mocks.languages = ['en', 'ja', 'en'];
     const user = userEvent.setup();
     render(<DiscoverPageClient />);
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Language' }), 'ja');
+    await user.click(screen.getByRole('button', { name: /^Language/ }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Japanese' }));
     expect(sourceOrder()).toEqual(['Source B']);
     expect(screen.getByRole('status')).toHaveTextContent('1 source');
     await user.click(screen.getByRole('button', { name: 'Reset filters' }));
     expect(sourceOrder()).toEqual(['Source A', 'Source C', 'Source B']);
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Content rating' }), 'nsfw');
+    await user.click(screen.getByRole('button', { name: /^Content rating/ }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Adult' }));
     expect(screen.queryAllByRole('article')).toHaveLength(0);
     // One place the sources come from, so no repository choice.
-    expect(screen.queryByRole('combobox', { name: 'Source repository' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Source repository/ })).toBeNull();
   });
 
   it('filters installed sources by the repository author they came from', async () => {
@@ -172,13 +177,10 @@ describe('Source pin ordering and device persistence', () => {
     ];
     const user = userEvent.setup();
     render(<DiscoverPageClient />);
-    const repository = screen.getByRole('combobox', { name: 'Source repository' });
-    expect([...repository.querySelectorAll('option')].map((option) => option.textContent)).toEqual([
-      'All',
-      'Alice',
-      'Bob',
-    ]);
-    await user.selectOptions(repository, 'repo:r2');
+    await user.click(screen.getByRole('button', { name: /^Source repository/ }));
+    const options = await screen.findAllByRole('menuitem');
+    expect(options.map((option) => option.textContent)).toEqual(['All', 'Alice', 'Bob']);
+    await user.click(options[2]);
     expect(sourceOrder()).toEqual(['Source B']);
   });
 });

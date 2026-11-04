@@ -3,17 +3,20 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { authorLine, type Manga } from '@/lib/manga-data';
-import { Cover, GRID_COVER_SIZES } from '@/components/cover';
+import { Cover } from '@/components/cover';
 import { useSetting } from '@/lib/app-store';
-import { BookOpen } from 'lucide-react';
+import { BookOpen, Download } from 'lucide-react';
 import { useHoldToSelect } from '@/hooks/use-hold-to-select';
 
 export function MangaCover({
   manga,
   chapterBadge = true,
   statusBadge = true,
+  downloaded = false,
 }: {
   manga: Manga;
+  /** Has downloaded chapters, so it can still be read without a connection. */
+  downloaded?: boolean;
   /** Pass false where the status already sits beside the title, so a screen reader
    * doesn't announce it twice. */
   statusBadge?: boolean;
@@ -34,11 +37,20 @@ export function MangaCover({
         src={manga.thumbnailUrl}
         alt={manga.title}
         rounded="rounded-xl"
-        sizes={GRID_COVER_SIZES}
         className="absolute inset-0 h-full w-full"
       />
       {/* Scrim so the status/chapter chips stay readable over light artwork. */}
       <div className="pointer-events-none absolute inset-0 bg-linear-to-b from-black/50 via-transparent to-transparent" />
+      {downloaded && (
+        <div
+          role="img"
+          className="absolute bottom-2 right-2 grid size-6 place-items-center rounded-full bg-black/60 text-white backdrop-blur"
+          title="Has downloaded chapters"
+          aria-label="Has downloaded chapters"
+        >
+          <Download size={13} aria-hidden="true" />
+        </div>
+      )}
 
       <div className="absolute inset-x-0 top-0 flex items-start justify-between p-3">
         {statusBadge ? (
@@ -83,8 +95,10 @@ export function MangaCard({
   onSelect,
   onOpenActions,
   compact = false,
+  downloaded = false,
 }: {
   manga: Manga;
+  downloaded?: boolean;
   selected?: boolean;
   selectionMode?: boolean;
   onSelect?: () => void;
@@ -128,10 +142,10 @@ export function MangaCard({
       onDragStart={(event) => {
         if (onSelect) event.preventDefault();
       }}
-      className={`flex flex-col gap-3 outline-none ${selectionMode ? '' : 'group'} ${onSelect ? 'select-none touch-pan-y' : ''}`}
+      className={`flex flex-col gap-3 rounded-xl outline-none ${selectionMode ? 'focus-visible:ring-2 focus-visible:ring-primary' : 'group'} ${onSelect ? 'select-none touch-pan-y' : ''}`}
     >
       <div className="relative transition-transform duration-500 group-hover:-translate-y-1">
-        <MangaCover manga={manga} />
+        <MangaCover manga={manga} downloaded={downloaded} />
         {selected && (
           <div className="pointer-events-none absolute inset-0 rounded-xl bg-primary/25 ring-2 ring-primary" />
         )}

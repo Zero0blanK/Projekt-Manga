@@ -5,6 +5,8 @@ import './configs/bootstrap.js';
 import { loadEnv } from './configs/env.js';
 import app from './app.js';
 import { disposeAllSandboxedSources } from './services/sandboxedSourceRegistry.service.js';
+import { closeAllLibraryEventStreams } from './routes/libraryEvents.route.js';
+import { closeAllDownloadEventClients } from './routes/download-events.route.js';
 import trackerService from './services/tracker.service.js';
 import downloadWorker from './workers/download.worker.js';
 import extensionRepositoryService from './services/extensionRepository.service.js';
@@ -205,6 +207,10 @@ function shutdown(signal: string) {
     if (error) console.warn('[server] Error while closing the HTTP server:', error);
     finish();
   });
+  // Long-lived event streams never finish by themselves, and would hold `close()` for the
+  // whole grace period.
+  closeAllLibraryEventStreams();
+  closeAllDownloadEventClients();
   // Idle keep-alive sockets hold `close()` open for their full timeout otherwise, which
   // for a browser that has finished loading the library is the common case.
   httpServer.closeIdleConnections();

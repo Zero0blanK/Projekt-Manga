@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { Download, Sparkles } from 'lucide-react';
 import { getHistory, type HistoryEntry } from '@projekt-manga/api-client';
 import { EmptyState, PageHeader, PageShell } from '@/components/page-shell';
@@ -122,18 +123,16 @@ export function YearInMangaClient() {
           stats && stats.chapters > 0 ? (
             <div className="flex items-center gap-2">
               {years.length > 1 && (
-                <select
-                  aria-label="Year"
-                  value={shown}
-                  onChange={(event) => setYear(Number(event.target.value))}
-                  className="h-9 rounded-lg border border-border/60 bg-background px-2 text-sm"
-                >
-                  {years.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
+                <SelectMenu
+                  label="Year"
+                  value={String(shown)}
+                  onChange={(option) => setYear(Number(option))}
+                  options={years.map((option) => ({
+                    value: String(option),
+                    label: String(option),
+                  }))}
+                  className="min-w-24"
+                />
               )}
               <button
                 type="button"

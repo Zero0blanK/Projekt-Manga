@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { useProfilePreference } from '@/lib/profile-preferences';
 import { actions } from '@/lib/app-store';
 import { useReaderSettings } from '@/lib/reader-settings';
@@ -133,19 +134,19 @@ function ReaderPresetsContent({ source, mangaId }: { source?: string; mangaId?: 
       >
         Save current settings
       </button>
-      <label className="block text-xs text-muted-foreground">
+      <div className="space-y-1 text-xs text-muted-foreground">
         Saved preset
-        <select
+        <SelectMenu
+          label="Saved preset"
           value={selected}
-          onChange={(event) => setSelected(event.target.value)}
-          className={PRESET_INPUT}
-        >
-          <option value="">Choose a preset</option>
-          {presets.map((item) => (
-            <option key={item.name}>{item.name}</option>
-          ))}
-        </select>
-      </label>
+          onChange={setSelected}
+          options={[
+            { value: '', label: 'Choose a preset' },
+            ...presets.map((item) => ({ value: item.name, label: item.name })),
+          ]}
+          className="w-full"
+        />
+      </div>
       <div className="flex flex-wrap gap-2">
         <button type="button" disabled={!preset} onClick={applyGlobal} className={PRESET_BUTTON}>
           Apply globally

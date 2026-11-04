@@ -92,6 +92,41 @@ function graphql(body: { query: string; variables: Record<string, unknown> }) {
       fetchExtensions: { extensions: [extension(false), { pkgName: '../bad', name: 'x' }] },
     };
   if (query.includes('extensions {')) return { extensions: { nodes: [extension(false)] } };
+  if (query.includes('mangas(condition')) {
+    return {
+      mangas: {
+        nodes: [
+          {
+            id: 10,
+            sourceId: '1234567890123',
+            title: 'In my library',
+            thumbnailUrl: '/api/v1/manga/10/thumbnail',
+            author: 'One',
+            artist: null,
+            description: null,
+            genre: ['Action'],
+            status: 'ONGOING',
+            chapters: {
+              nodes: [
+                {
+                  id: 5,
+                  name: 'Ch. 1',
+                  url: '/c',
+                  chapterNumber: 1,
+                  scanlator: null,
+                  uploadDate: 1700000000000,
+                  pageCount: 12,
+                  isRead: true,
+                  isBookmarked: false,
+                  lastPageRead: 11,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+  }
   if (query.includes('aboutServer')) return { aboutServer: { name: 'Suwayomi', version: 'v2.4' } };
   if (query.includes('sources {')) {
     return {
@@ -583,6 +618,38 @@ describe('Suwayomi extensions', () => {
       (await request(app).get('/api/suwayomi/extensions').set('X-Forwarded-For', '203.0.113.9'))
         .status,
     ).toBe(403);
+  });
+});
+
+describe('Suwayomi library import', () => {
+  beforeEach(async () => {
+    await connect();
+  });
+
+  it('builds a merge restore with Suwayomi ids and read state', async () => {
+    const { buildLibraryImport, fetchSuwayomiLibrary } =
+      await import('../src/services/suwayomi/libraryImport.js');
+    const backup = buildLibraryImport(await fetchSuwayomiLibrary(), null);
+    expect(backup.mode).toBe('merge');
+    expect(backup.manga[0]).toMatchObject({
+      source: SOURCE,
+      slug: '10',
+      thumbnail_url: `${base}/api/v1/manga/10/thumbnail`,
+    });
+    expect(backup.manga[0].chapters[0]).toMatchObject({
+      source_chapter_key: '5',
+      is_read: true,
+      last_page_read: 11,
+    });
+    expect(backup.library).toHaveLength(1);
+  });
+
+  it('needs the admin check', async () => {
+    process.env.ADMIN_TOKEN = 'a-sixteen-char-token';
+    const res = await request(app)
+      .post('/api/suwayomi/import')
+      .set('X-Forwarded-For', '203.0.113.9');
+    expect(res.status).toBe(403);
   });
 });
 

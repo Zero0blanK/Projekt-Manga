@@ -8,7 +8,7 @@ import { useDuplicateCheckedAdd } from '@/components/discover/duplicate-manga-di
 import { buildImageProxyUrl } from '@projekt-manga/api-client';
 import { useMangaLibrary } from '@/lib/library-store';
 import { isInLibrary } from '@/lib/library-titles';
-import { Cover, GRID_COVER_SIZES } from '@/components/cover';
+import { Cover } from '@/components/cover';
 import { Check, Plus } from 'lucide-react';
 
 export function SourceResultCard({ sourceId, item }: { sourceId: string; item: Mangas }) {
@@ -59,7 +59,6 @@ export function SourceResultCard({ sourceId, item }: { sourceId: string; item: M
           src={thumbnailUrl}
           alt={item.title}
           rounded="rounded-xl"
-          sizes={GRID_COVER_SIZES}
           className="absolute inset-0 h-full w-full"
         />
       </Link>

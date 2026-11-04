@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, Loader2, RefreshCw, RotateCcw } from 'lucide-react';
-import { Field, Group, ToggleSwitch } from '@/components/settings/field-controls';
+import { Field, Group } from '@/components/settings/field-controls';
 import { toast } from '@/hooks/use-toast';
 import {
   updateBridge,
@@ -115,7 +115,6 @@ export function UpdateControls() {
             Check for updates
           </button>
 
-          {/* Only reachable with auto-download off — otherwise it is already downloading. */}
           {state.status === 'available' && (
             <button
               type="button"
@@ -140,19 +139,6 @@ export function UpdateControls() {
             </button>
           )}
         </div>
-      </Field>
-
-      <Field
-        label="Download automatically"
-        nested
-        hint="When off, you choose when to download updates"
-      >
-        <ToggleSwitch
-          on={state.autoDownload}
-          disabled={busy}
-          label="Download updates automatically"
-          onToggle={() => bridge && void run(() => bridge.setAutoDownload(!state.autoDownload))}
-        />
       </Field>
     </>
   );

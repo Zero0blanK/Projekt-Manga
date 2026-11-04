@@ -1,3 +1,4 @@
+import { resizedThumbnail, thumbnailWidth } from '../utils/thumbnailResize.js';
 import { Request, Response, NextFunction } from 'express';
 import fs from 'node:fs/promises';
 import { HTTPSuccessResponse } from '../utils/responseHandlers.js';
@@ -71,6 +72,7 @@ export function coverCacheControl(req: Pick<Request, 'query'>, custom: boolean):
 const getThumbnail = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { manga_id } = req.params as { manga_id: string };
+    const width = thumbnailWidth(req.query.w);
     // This identity's custom cover wins over the cached source one. Clients version the
     // URL by the override's updated_at, so the short private cache never shows a stale one.
     let customCover: string | null = null;
@@ -83,7 +85,8 @@ const getThumbnail = async (req: Request, res: Response, next: NextFunction) => 
     }
     if (customCover) {
       res.setHeader('Cache-Control', coverCacheControl(req, true));
-      return res.sendFile(customCover, (error) => {
+      const sized = width ? await resizedThumbnail(customCover, width) : customCover;
+      return res.sendFile(sized, (error) => {
         if (error) next(error);
       });
     }
@@ -100,7 +103,8 @@ const getThumbnail = async (req: Request, res: Response, next: NextFunction) => 
       }
       if (file) {
         res.setHeader('Cache-Control', coverCacheControl(req, false));
-        return res.sendFile(file, (error) => {
+        const sized = width ? await resizedThumbnail(file, width) : file;
+        return res.sendFile(sized, (error) => {
           if (error) next(error);
         });
       }

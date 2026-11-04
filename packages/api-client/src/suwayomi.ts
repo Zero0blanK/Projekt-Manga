@@ -33,6 +33,10 @@ export const removeSuwayomiSettings = () =>
 export const testSuwayomiConnection = () =>
   request<SuwayomiConnectionTest>('/suwayomi/test', { method: 'POST' });
 
+/** Merges the Suwayomi server's library into this one, in the background. */
+export const importSuwayomiLibrary = () =>
+  request<{ id: string; titles: number }>('/suwayomi/import', { method: 'POST' });
+
 /** A Mihon extension the Suwayomi server can install, installed or not. */
 export interface SuwayomiExtension {
   pkg_name: string;

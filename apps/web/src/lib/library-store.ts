@@ -11,6 +11,7 @@ import {
   getSources,
   getSourceMangaPage,
   searchSourceMangaPage,
+  getAllSourceCapabilities,
   getSourceCapabilities,
   getSourceFilters,
   setMangaInLibrary,
@@ -21,7 +22,7 @@ import {
   type UpdateLibraryStatePayload,
 } from '@projekt-manga/api-client';
 import { toast } from '@/hooks/use-toast';
-import type { Mangas, MangaFilter, FilterValue } from '@projekt-manga/types';
+import type { Mangas, MangaFilter, FilterValue, SourceCapabilities } from '@projekt-manga/types';
 import { fromMangaListItem, type Manga } from './manga-data';
 import type { ShelfStatus } from './app-store';
 import { queryClient, queryKeys } from './query-client';
@@ -376,12 +377,44 @@ export function useSourceBrowsePaged(
  * its own filters (genre/status/sort/etc.); some have none. */
 const EMPTY_FILTERS: MangaFilter[] = [];
 
+/**
+ * Capabilities asked for in the same moment share one request: Discover renders a card per
+ * source, and each asks for its own. A source the shared answer leaves out gets its own
+ * call, which is what reports why it failed.
+ */
+const capabilityRequests = new Map<string, Array<(result: Promise<SourceCapabilities>) => void>>();
+
+function requestCapabilities(sourceId: string, signal: AbortSignal): Promise<SourceCapabilities> {
+  return new Promise((resolve) => {
+    const waiting = capabilityRequests.get(sourceId);
+    if (waiting) waiting.push(resolve);
+    else capabilityRequests.set(sourceId, [resolve]);
+    if (capabilityRequests.size > 1 || (waiting?.length ?? 0) > 0) return;
+    setTimeout(() => {
+      const batch = new Map(capabilityRequests);
+      capabilityRequests.clear();
+      if (batch.size === 1) {
+        for (const done of batch.values().next().value!)
+          done(getSourceCapabilities(sourceId, signal));
+        return;
+      }
+      const all = getAllSourceCapabilities().catch(
+        () => ({}) as Record<string, SourceCapabilities>,
+      );
+      for (const [id, waiters] of batch) {
+        const one = all.then((known) => known[id] ?? getSourceCapabilities(id));
+        for (const done of waiters) done(one);
+      }
+    }, 0);
+  });
+}
+
 export function useSourceCapabilities(sourceId: string | null) {
   const { data, isPending, error, refetch } = useQuery({
     queryKey: queryKeys.sourceCapabilities(sourceId),
     enabled: sourceId !== null,
     staleTime: 5 * 60_000,
-    queryFn: ({ signal }) => getSourceCapabilities(sourceId!, signal),
+    queryFn: ({ signal }) => requestCapabilities(sourceId!, signal),
     retry: 1,
   });
   return { capabilities: data, loading: sourceId !== null && isPending, error, retry: refetch };

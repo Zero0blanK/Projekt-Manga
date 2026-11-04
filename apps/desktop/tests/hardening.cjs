@@ -783,3 +783,74 @@ test('a source window the app opened by itself may close once the site shows pas
   assert.equal(policy.isChallengeTitle('Attention Required! | Cloudflare'), true);
   assert.equal(policy.isChallengeTitle('ManhuaUS - Read Manhua Online'), false);
 });
+
+test('release notes come from the changelog and the built files', async () => {
+  const { renderNotes, renderChecksums } = await import('../../../scripts/release-notes.mjs');
+  const files = [
+    { name: 'Projekt-Manga-Setup-2.0.0.exe', size: 345245947, sha256: 'aa' },
+    { name: 'latest.yml', size: 355, sha256: 'bb' },
+  ];
+  const notes = renderNotes(
+    {
+      version: '2.0.0',
+      date: '2027-01-01',
+      summary: 'A summary.',
+      changes: [
+        { type: 'fixed', text: 'A fix' },
+        { type: 'added', text: 'A feature' },
+      ],
+    },
+    '1.9.0',
+    files,
+  );
+  assert.ok(notes.startsWith('A summary.'));
+  assert.match(notes, /\*\*Version:\*\* 2\.0\.0/);
+  assert.match(notes, /329\.3 MB \| `aa`/);
+  assert.match(notes, /355 B \| `bb`/);
+  assert.ok(notes.indexOf('### Added') < notes.indexOf('### Fixed'));
+  assert.ok(!notes.includes('## Upgrading'));
+  assert.equal(renderChecksums(files), 'aa *Projekt-Manga-Setup-2.0.0.exe\nbb *latest.yml\n');
+});
+
+test('the anonymous library rescue carries local titles, progress and history, in merge mode', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const Module = require('node:module');
+  const load = Module._load;
+  Module._load = (request, ...rest) =>
+    request === 'electron' ? { app: { getPath: () => '' } } : load(request, ...rest);
+  const { buildRescuePayload } = require('../dist/main/library-rescue.js');
+  Module._load = load;
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE manga (id TEXT, slug TEXT, title TEXT, author TEXT, source TEXT, thumbnail_url TEXT,
+      artist TEXT, description TEXT, genres TEXT, status TEXT);
+    CREATE TABLE manga_state (manga_id TEXT, in_library INT, is_bookmarked INT, shelf_status TEXT,
+      notification_read INT);
+    CREATE TABLE chapter (id TEXT, manga_id TEXT, source_chapter_key TEXT, url TEXT, name TEXT,
+      scanlator TEXT, chapter_number REAL, release_date TEXT, page_count INT);
+    CREATE TABLE chapter_state (chapter_id TEXT, is_read INT, is_bookmark INT, last_page_read INT);
+    CREATE TABLE history (id TEXT, source TEXT, manga_slug TEXT, title TEXT, thumbnail_url TEXT,
+      chapter_id TEXT, read_at TEXT, last_read TEXT, pages_read INT, time_read INT, deleted_at TEXT);
+    INSERT INTO manga VALUES ('m1','slug','Title',NULL,'src',NULL,NULL,NULL,NULL,NULL);
+    INSERT INTO manga_state VALUES ('m1',1,0,NULL,0);
+    INSERT INTO chapter VALUES ('c1','m1','key-1','u','Ch 1',NULL,1,'not a date',NULL);
+    INSERT INTO chapter_state VALUES ('c1',1,0,12);
+    INSERT INTO history VALUES ('h1','src','slug','Title',NULL,'c1','2026-11-01T00:00:00Z',
+      '2026-11-01T00:00:00Z',12,60,NULL);
+    INSERT INTO history VALUES ('h2','src','slug','Gone',NULL,NULL,'2026-11-01T00:00:00Z',
+      '2026-11-01T00:00:00Z',1,1,'2026-11-02T00:00:00Z');
+  `);
+  const payload = buildRescuePayload(db);
+  assert.equal(payload.mode, 'merge');
+  assert.equal(payload.manga[0].chapters[0].source_chapter_key, 'key-1');
+  assert.equal(payload.manga[0].chapters[0].release_date, null);
+  assert.equal(payload.manga[0].thumbnail_url, 'none');
+  assert.deepEqual(
+    payload.library.map((row) => row.manga_id),
+    ['m1'],
+  );
+  assert.equal(payload.history.length, 1);
+  assert.equal(payload.history[0].source_chapter_key, 'key-1');
+  db.exec('DELETE FROM manga; DELETE FROM manga_state; DELETE FROM history;');
+  assert.equal(buildRescuePayload(db), null);
+});

@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react';
 import {
   getSuwayomiSettings,
+  importSuwayomiLibrary,
   removeSuwayomiSettings,
   saveSuwayomiSettings,
   testSuwayomiConnection,
   type SuwayomiSettings,
 } from '@projekt-manga/api-client';
 import { ActionButton } from '@/components/settings/field-controls';
+import { useConfirm } from '@/hooks/use-confirm';
 import { queryClient, queryKeys } from '@/lib/query-client';
 
 const DEFAULT_URL = 'http://127.0.0.1:4567';
@@ -41,6 +43,8 @@ export function SuwayomiServer() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const { confirm, dialog } = useConfirm();
   const [message, setMessage] = useState('');
 
   useEffect(() => {
@@ -109,15 +113,34 @@ export function SuwayomiServer() {
 
   const test = () =>
     act(async () => {
-      const found = await testSuwayomiConnection();
+      setTesting(true);
+      const found = await testSuwayomiConnection().finally(() => setTesting(false));
       setMessage(
         `Connected to ${found.name}${found.version ? ` ${found.version}` : ''}: ${found.sources} ${found.sources === 1 ? 'source' : 'sources'}.`,
       );
       await refreshSources();
     }, "Couldn't reach the Suwayomi server.");
 
-  const remove = () =>
+  const importLibrary = () =>
     act(async () => {
+      const { titles } = await importSuwayomiLibrary();
+      setMessage(
+        titles
+          ? `Importing ${titles} ${titles === 1 ? 'title' : 'titles'}, with their read progress. They appear in your library shortly.`
+          : 'Suwayomi has no library titles to import.',
+      );
+    }, "Couldn't import the Suwayomi library.");
+
+  const remove = async () => {
+    // Titles from this server use its own ids, so they stop opening without it.
+    const removing = await confirm({
+      title: 'Remove this Suwayomi server?',
+      description:
+        'Titles added from its sources stay in your library but can’t open until a server with the same data is connected. Reinstalling Suwayomi or wiping its data changes those ids too, so migrate them to another source first.',
+      confirmLabel: 'Remove server',
+    });
+    if (!removing) return;
+    await act(async () => {
       await removeSuwayomiSettings();
       setSaved(null);
       setEnabled(true);
@@ -126,6 +149,7 @@ export function SuwayomiServer() {
       setMessage('Removed.');
       await refreshSources();
     }, "Couldn't remove the Suwayomi server.");
+  };
 
   const passwordSaved = Boolean(saved?.has_password);
 
@@ -214,8 +238,13 @@ export function SuwayomiServer() {
             </ActionButton>
           )}
           {saved?.enabled && (
+            <ActionButton disabled={busy} onClick={() => void importLibrary()}>
+              Import library
+            </ActionButton>
+          )}
+          {saved?.enabled && (
             <ActionButton disabled={busy} onClick={() => void test()}>
-              Test connection
+              {testing ? 'Testing…' : 'Test connection'}
             </ActionButton>
           )}
           <button
@@ -223,7 +252,7 @@ export function SuwayomiServer() {
             disabled={busy}
             className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
           >
-            {busy ? 'Saving…' : 'Save'}
+            {busy && !testing ? 'Saving…' : 'Save'}
           </button>
         </div>
       </form>
@@ -232,6 +261,7 @@ export function SuwayomiServer() {
           {message}
         </p>
       )}
+      {dialog}
     </div>
   );
 }

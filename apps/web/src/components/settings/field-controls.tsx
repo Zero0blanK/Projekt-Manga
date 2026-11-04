@@ -6,13 +6,7 @@ import {
   type ReactNode,
 } from 'react';
 import { actions, useSetting, useNumberSetting } from '@/lib/app-store';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { ChevronDown } from 'lucide-react';
+import { SelectMenu } from '@/components/ui/select-menu';
 
 /** Settings > Appearance > Interface density — spacing scale for Panel/Field. */
 const DENSITY_CLASSES: Record<string, { panel: string; stack: string; field: string }> = {
@@ -201,23 +195,12 @@ export function Select({
 }) {
   const value = useSetting(settingKey, defaultValue ?? options[0]) as string;
   return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className="flex h-8 min-w-40 items-center justify-between gap-2 rounded-lg border border-border/60 bg-background px-3 py-1.5 text-xs text-foreground outline-none focus:border-primary/60">
-        {value}
-        <ChevronDown className="h-3.5 w-3.5 opacity-50" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-40">
-        {options.map((o) => (
-          <DropdownMenuItem
-            key={o}
-            onSelect={() => actions.setSetting(settingKey, o)}
-            className={`text-xs ${o === value ? 'text-primary' : ''}`}
-          >
-            {o}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <SelectMenu
+      value={value}
+      options={options.map((option) => ({ value: option, label: option }))}
+      onChange={(next) => actions.setSetting(settingKey, next)}
+      placeholder={value}
+    />
   );
 }
 
@@ -235,23 +218,11 @@ export function OptionSelect({
   const stored = String(useSetting(settingKey, defaultValue));
   const current = options.find((o) => o.value === stored) ?? options[0];
   return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className="flex h-8 min-w-40 items-center justify-between gap-2 rounded-lg border border-border/60 bg-background px-3 py-1.5 text-xs text-foreground outline-none focus:border-primary/60">
-        {current.label}
-        <ChevronDown className="h-3.5 w-3.5 opacity-50" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-40">
-        {options.map((o) => (
-          <DropdownMenuItem
-            key={o.value}
-            onSelect={() => actions.setSetting(settingKey, o.value)}
-            className={`text-xs ${o.value === current.value ? 'text-primary' : ''}`}
-          >
-            {o.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <SelectMenu
+      value={current.value}
+      options={options}
+      onChange={(next) => actions.setSetting(settingKey, next)}
+    />
   );
 }
 
@@ -269,23 +240,12 @@ export function NumberSelect({
 }) {
   const value = useNumberSetting(settingKey, defaultValue);
   return (
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger className="flex h-8 min-w-40 items-center justify-between gap-2 rounded-lg border border-border/60 bg-background px-3 py-1.5 text-xs text-foreground outline-none focus:border-primary/60">
-        {format(value)}
-        <ChevronDown className="h-3.5 w-3.5 opacity-50" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-40">
-        {options.map((o) => (
-          <DropdownMenuItem
-            key={o}
-            onSelect={() => actions.setSetting(settingKey, o)}
-            className={`text-xs ${o === value ? 'text-primary' : ''}`}
-          >
-            {format(o)}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <SelectMenu
+      value={String(value)}
+      options={options.map((option) => ({ value: String(option), label: format(option) }))}
+      onChange={(next) => actions.setSetting(settingKey, Number(next))}
+      placeholder={format(value)}
+    />
   );
 }
 

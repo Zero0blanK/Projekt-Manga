@@ -108,6 +108,7 @@ export function SplashIntro({ ready, onFinish }: { ready: boolean; onFinish?: ()
     if (document.documentElement.hasAttribute(SPLASH_SKIP_ATTR)) {
       finished.current = true;
       setPhase('done');
+      onFinish?.();
       return;
     }
 
@@ -117,7 +118,7 @@ export function SplashIntro({ ready, onFinish }: { ready: boolean; onFinish?: ()
       setTimeout(() => setPhase('hold'), BOOT_MS + GLITCH_MS + 260),
     ];
     return () => timers.forEach(clearTimeout);
-  }, []);
+  }, [onFinish]);
 
   // A click, tap or key press skips straight to the fade-out once the app can be shown.
   useEffect(() => {

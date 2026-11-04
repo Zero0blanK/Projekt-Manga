@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const { progress, cancelLibraryUpdate } = vi.hoisted(() => ({
@@ -58,6 +58,51 @@ describe('library update dial', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Stop checking for updates' }));
 
     expect(cancelLibraryUpdate).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['right', 60, 0],
+    ['up', 0, -60],
+    ['down-left', -40, 40],
+  ])('shrinks to the ring on a swipe %s, and comes back from it', async (_, x, y) => {
+    progress.value = { done: 4, total: 12, found: 0, title: 'Some title' };
+    render(<LibraryUpdateDial />);
+
+    const status = screen.getByRole('status');
+    fireEvent.pointerDown(status, { clientX: 100, clientY: 100, button: 0 });
+    fireEvent.pointerMove(status, { clientX: 100 + x, clientY: 100 + y });
+    fireEvent.pointerUp(status, { clientX: 100 + x, clientY: 100 + y });
+
+    expect(screen.queryByRole('button', { name: 'Stop checking for updates' })).toBeNull();
+    expect(screen.getByText('Some title').parentElement).toHaveClass('sr-only');
+    // Screen readers keep hearing the progress.
+    expect(screen.getByRole('status')).toHaveTextContent('Checking 4/12');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show library update details' }));
+    expect(screen.getByRole('button', { name: 'Stop checking for updates' })).toBeInTheDocument();
+  });
+
+  it('stays open after a short drag', () => {
+    progress.value = { done: 4, total: 12, found: 0, title: 'Some title' };
+    render(<LibraryUpdateDial />);
+
+    const status = screen.getByRole('status');
+    fireEvent.pointerDown(status, { clientX: 100, clientY: 100, button: 0 });
+    fireEvent.pointerMove(status, { clientX: 120, clientY: 100 });
+    fireEvent.pointerUp(status, { clientX: 120, clientY: 100 });
+
+    expect(screen.getByRole('button', { name: 'Stop checking for updates' })).toBeInTheDocument();
+  });
+
+  it('remembers being minimized when it next appears, and the ring works by keyboard', async () => {
+    progress.value = { done: 4, total: 12, found: 0, title: 'Some title' };
+    const first = render(<LibraryUpdateDial />);
+    await userEvent.click(screen.getByRole('button', { name: 'Minimize library update' }));
+    first.unmount();
+
+    render(<LibraryUpdateDial />);
+    await userEvent.click(screen.getByRole('button', { name: 'Show library update details' }));
+    expect(screen.getByRole('button', { name: 'Minimize library update' })).toBeInTheDocument();
   });
 
   it('does not divide by zero before the total is known', () => {

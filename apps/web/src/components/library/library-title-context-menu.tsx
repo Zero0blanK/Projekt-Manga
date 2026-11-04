@@ -7,6 +7,7 @@ import { queryClient, queryKeys } from '@/lib/query-client';
 import { useCurrentUser } from '@/lib/session-resource';
 import type { Manga } from '@/lib/manga-data';
 import { toast } from '@/hooks/use-toast';
+import { toastWithUndo } from '@/lib/undo-toast';
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -64,8 +65,14 @@ export function LibraryTitleContextMenu({
     try {
       if (action === 'bookmark')
         await libraryActions.setBookmark(target.id, !bookmarks.includes(target.id));
-      else if (action === 'remove') await setTitleInLibrary(target.id, false);
-      else if (action === 'category') {
+      else if (action === 'remove') {
+        const { id, title } = target;
+        await setTitleInLibrary(id, false);
+        toastWithUndo(`Removed ${title} from your library`, async () => {
+          await setTitleInLibrary(id, true);
+          refresh();
+        });
+      } else if (action === 'category') {
         if (
           category &&
           categories.includes(category) &&

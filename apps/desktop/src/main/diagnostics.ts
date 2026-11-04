@@ -76,7 +76,6 @@ export interface DesktopDiagnostics {
     status: string;
     availableVersion: string | null;
     error: string | null;
-    autoDownload: boolean;
   } | null;
   settings: {
     closeToTray: boolean;
@@ -207,7 +206,6 @@ export function collectDiagnostics(managedServers: boolean): DesktopDiagnostics 
       status: update.status,
       availableVersion: update.availableVersion,
       error: update.error,
-      autoDownload: update.autoDownload,
     },
     settings: preferences && {
       closeToTray: preferences.closeToTray,

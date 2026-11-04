@@ -2,6 +2,9 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { getSourceHealth } from '@projekt-manga/api-client';
+import { queryClient } from '@/lib/query-client';
 import { useSources } from '@/lib/library-store';
 import { useInstalledExtensions, useSourceCatalog } from '@/lib/extensions-store';
 import {
@@ -23,19 +26,26 @@ import {
   useSuwayomiExtensions,
 } from '@/components/discover/suwayomi-extensions';
 import { InstalledSourceCard } from '@/components/discover/installed-source-card';
+import { SourceBulkBar } from '@/components/discover/source-bulk-bar';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Pin, Puzzle, Search, X } from 'lucide-react';
 import type { DisplaySource } from '@/lib/manga-data';
-import { DiscoverFilterBar } from '@/components/discover/installed-source-filters';
+import { DiscoverFilterBar } from '@/components/discover/discover-filter-bar';
 import {
   EMPTY_DISCOVER_FILTERS,
   SUWAYOMI_ORIGIN,
   compareLanguageGroups,
   originRepositoryId,
+  readDiscoverFilters,
   repositoryOrigin,
+  writeDiscoverFilters,
   type DiscoverFilters,
 } from '@/lib/discover-filters';
+import { summarizeSourceHealth } from '@/lib/source-health-status';
 import { repositoryPublisher } from '@/lib/repository-url';
+
+/** The Extensions tab's filters in the URL, apart from Installed sources' own. */
+const EXTENSION_FILTER_PREFIX = 'x';
 
 export function DiscoverPageClient() {
   const params = useSearchParams(),
@@ -54,8 +64,13 @@ export function DiscoverPageClient() {
     EMPTY_IDS,
   );
   const [name, setName] = useState('');
-  const [filters, setFilters] = useState<DiscoverFilters>(EMPTY_DISCOVER_FILTERS);
-  const [extensionFilters, setExtensionFilters] = useState<DiscoverFilters>(EMPTY_DISCOVER_FILTERS);
+  // Null until "Select sources" is on; then the ticked source ids.
+  const [picked, setPicked] = useState<string[] | null>(null);
+  // Kept in the URL too, so Back from a source returns to the same filtered list.
+  const [filters, setFilters] = useState<DiscoverFilters>(() => readDiscoverFilters(params));
+  const [extensionFilters, setExtensionFilters] = useState<DiscoverFilters>(() =>
+    readDiscoverFilters(params, EXTENSION_FILTER_PREFIX),
+  );
   const [tab, setTab] = useState(params.get('tab') === 'extensions' ? 'extensions' : 'installed');
   const requestedTab = params.get('tab');
   useEffect(() => {
@@ -71,6 +86,31 @@ export function DiscoverPageClient() {
     const query = search.toString();
     router.replace(query ? `?${query}` : '?', { scroll: false });
   };
+  const keepFilters = (next: DiscoverFilters, prefix = '') => {
+    const search = new URLSearchParams(window.location.search);
+    writeDiscoverFilters(search, next, prefix);
+    const query = search.toString();
+    router.replace(query ? `?${query}` : '?', { scroll: false });
+  };
+  const changeFilters = (next: DiscoverFilters) => {
+    setFilters(next);
+    keepFilters(next);
+  };
+  const changeExtensionFilters = (next: DiscoverFilters) => {
+    setExtensionFilters(next);
+    keepFilters(next, EXTENSION_FILTER_PREFIX);
+  };
+  const { data: health } = useQuery(
+    {
+      queryKey: ['source-health'],
+      queryFn: ({ signal }) => getSourceHealth(signal),
+      staleTime: 60_000,
+      refetchOnWindowFocus: true,
+    },
+    queryClient,
+  );
+  const isFailing = (source: DisplaySource) =>
+    summarizeSourceHealth(health?.find((entry) => entry.sourceId === source.id)) === 'failing';
   const { user } = useCurrentUser();
   const visible = allSources.filter(
     (source) =>
@@ -83,13 +123,28 @@ export function DiscoverPageClient() {
       : repositoryOrigin(installedByKey.get(source.id)?.repository_id ?? '');
   const ratingOf = (source: DisplaySource) =>
     installedByKey.get(source.id)?.content_rating ?? (source.isNSFW ? 'nsfw' : 'safe');
+  // A site available both ways shows as one card: the extension, with a link to the other.
+  const siteKey = (source: DisplaySource) =>
+    `${source.name.toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu, '')}:${sourceLanguageGroup(source.lang)}`;
+  const suwayomiBySite = new Map(
+    visible.filter((source) => source.provider === 'suwayomi').map((s) => [siteKey(s), s]),
+  );
+  const extensionSites = new Set(
+    visible.filter((source) => source.provider !== 'suwayomi').map(siteKey),
+  );
+  const isFoldedDuplicate = (source: DisplaySource) =>
+    source.provider === 'suwayomi' &&
+    extensionSites.has(siteKey(source)) &&
+    filters.origin !== SUWAYOMI_ORIGIN;
   const sources = visible
     .filter(
       (source) =>
+        !isFoldedDuplicate(source) &&
         source.name.toLocaleLowerCase().includes(name.trim().toLocaleLowerCase()) &&
         (!filters.language || sourceLanguageGroup(source.lang) === filters.language) &&
         (!filters.origin || originOf(source) === filters.origin) &&
-        (!filters.rating || ratingOf(source) === filters.rating),
+        (!filters.rating || ratingOf(source) === filters.rating) &&
+        (!filters.health || isFailing(source)),
     )
     .sort((a, b) => a.name.localeCompare(b.name));
   const byLanguage = compareLanguageGroups;
@@ -117,7 +172,9 @@ export function DiscoverPageClient() {
     new Set(installed.map((row) => row.repository_id)),
     visible.some((source) => source.provider === 'suwayomi'),
   );
-  const filtered = Boolean(name.trim() || filters.language || filters.origin || filters.rating);
+  const filtered = Boolean(
+    name.trim() || filters.language || filters.origin || filters.rating || filters.health,
+  );
   const extensionOrigins = originChoices(
     repositories.map((repository) => repository.id),
     suwayomi.enabled,
@@ -149,6 +206,7 @@ export function DiscoverPageClient() {
       key={source.id}
       source={source}
       record={installedByKey.get(source.id)}
+      alternate={source.provider === 'suwayomi' ? undefined : suwayomiBySite.get(siteKey(source))}
       listingIconUrl={
         catalogueEntries.find(
           (item) =>
@@ -173,6 +231,8 @@ export function DiscoverPageClient() {
         shownPins.indexOf(source.id) >= 0 && shownPins.indexOf(source.id) < shownPins.length - 1
       }
       onMovePin={(direction) => reorder(source.id, direction)}
+      picked={picked?.includes(source.id)}
+      onPick={picked ? () => setPicked((current) => toggle(current ?? [], source.id)) : undefined}
     />
   );
   const section = (key: string, label: string, list: DisplaySource[], icon?: ReactNode) => (
@@ -251,9 +311,10 @@ export function DiscoverPageClient() {
           <DiscoverFilterBar
             label="Installed source filters"
             value={filters}
-            onChange={setFilters}
+            onChange={changeFilters}
             languages={filterLanguages}
             origins={installedOrigins}
+            showHealth
             count={sources.length}
             filtered={filtered}
           />
@@ -267,11 +328,11 @@ export function DiscoverPageClient() {
                   : 'Install an extension to start reading.'}
               </p>
               <button
-                className="mt-4 text-sm text-primary"
+                className="mt-4 text-sm text-primary pointer-coarse:min-h-11"
                 onClick={() => {
                   if (allSources.length) {
                     setName('');
-                    setFilters(EMPTY_DISCOVER_FILTERS);
+                    changeFilters(EMPTY_DISCOVER_FILTERS);
                   } else changeTab('extensions');
                 }}
               >
@@ -280,6 +341,14 @@ export function DiscoverPageClient() {
             </div>
           ) : (
             <div className="space-y-8">
+              <button
+                type="button"
+                aria-pressed={picked !== null}
+                className="text-sm text-primary pointer-coarse:min-h-11"
+                onClick={() => setPicked((current) => (current ? null : []))}
+              >
+                {picked ? 'Cancel selection' : 'Select sources'}
+              </button>
               {pinnedSources.length > 0 &&
                 section(
                   'pinned',
@@ -296,12 +365,23 @@ export function DiscoverPageClient() {
               )}
             </div>
           )}
+          {picked && (
+            <SourceBulkBar
+              ids={picked}
+              records={picked.flatMap((id) => installedByKey.get(id) ?? [])}
+              onPin={() => {
+                setPins((current) => [...new Set([...current, ...picked])]);
+                setPicked([]);
+              }}
+              onClose={() => setPicked(null)}
+            />
+          )}
         </TabsContent>
         <TabsContent value="extensions" className="mt-6">
           <DiscoverFilterBar
             label="Extension filters"
             value={extensionFilters}
-            onChange={setExtensionFilters}
+            onChange={changeExtensionFilters}
             languages={extensionLanguages}
             origins={extensionOrigins}
             filtered={false}

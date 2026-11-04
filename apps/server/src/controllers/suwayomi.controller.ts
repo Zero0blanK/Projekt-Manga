@@ -17,6 +17,8 @@ import {
 } from '../services/suwayomi/settings.js';
 import { SuwayomiError, suwayomiGraphql } from '../services/suwayomi/client.js';
 import { fetchSuwayomiSourceInfos } from '../services/suwayomi/registry.js';
+import { buildLibraryImport, fetchSuwayomiLibrary } from '../services/suwayomi/libraryImport.js';
+import { startRestore } from '../services/restore.service.js';
 import {
   changeSuwayomiExtension,
   listSuwayomiExtensions,
@@ -89,6 +91,20 @@ const toHttpError = (error: unknown) =>
       ? new UnauthorizedError(error.message)
       : new ServiceUnavailableError(error.message)
     : error;
+
+/** Queues a merge of the Suwayomi server's library into this one. */
+export const importLibrary = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const backup = buildLibraryImport(await fetchSuwayomiLibrary(), req.user?.id ?? null);
+    const job = await startRestore(backup, req.user?.id);
+    return HTTPSuccessResponse(res, 202, 'Suwayomi library import queued', {
+      id: job.id,
+      titles: backup.manga.length,
+    });
+  } catch (error) {
+    return next(toHttpError(error));
+  }
+};
 
 export const getExtensions = async (req: Request, res: Response, next: NextFunction) => {
   try {

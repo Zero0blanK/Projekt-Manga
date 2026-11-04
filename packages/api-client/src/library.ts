@@ -51,8 +51,20 @@ export const getReleaseEstimates = (signal?: AbortSignal) =>
  * unsubscribe function. Browser-only (relies on the global EventSource), which reconnects
  * on its own after a dropped connection.
  */
-export function subscribeToLibraryChanges(onChange: () => void): () => void {
+export function subscribeToLibraryChanges(
+  onChange: (scope: 'library' | 'progress') => void,
+): () => void {
   const source = new EventSource(buildApiUrl('/library-events/stream'), { withCredentials: true });
-  source.addEventListener('change', () => onChange());
+  source.addEventListener('change', (event) => {
+    let scope: 'library' | 'progress' = 'library';
+    try {
+      if ((JSON.parse((event as MessageEvent).data) as { scope?: unknown }).scope === 'progress') {
+        scope = 'progress';
+      }
+    } catch {
+      // An unreadable frame still means something changed; refresh everything.
+    }
+    onChange(scope);
+  });
   return () => source.close();
 }

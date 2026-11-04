@@ -16,6 +16,7 @@ import {
   getAllDownloads,
 } from '@projekt-manga/api-client';
 import { toast } from '@/hooks/use-toast';
+import { toastWithUndo } from '@/lib/undo-toast';
 import {
   formatRelative,
   knownGroup,
@@ -259,6 +260,14 @@ export function SourceChapterList({
       .then(() => saved);
   };
 
+  /** Undoes a bulk mark: only `targets`, which are the chapters it changed. */
+  const revertRead = async (targets: Chapters[], read: boolean) => {
+    for (const target of targets) {
+      if (readIdsRef.current.has(target.id) === read && !(await toggleRead(target)))
+        throw new Error('Chapter state was not restored');
+    }
+  };
+
   /** Inclusive of the chapter acted on, matching "I've read up to here". */
   const markPrevious = (c: Chapters, read: boolean) => {
     const requestGeneration = generation.current;
@@ -300,11 +309,12 @@ export function SourceChapterList({
     })
       .then(() => {
         if (!requestCurrent(requestGeneration)) return;
-        toast({
-          description: `Marked ${targets.length} chapter${targets.length === 1 ? '' : 's'} as ${
+        toastWithUndo(
+          `Marked ${targets.length} chapter${targets.length === 1 ? '' : 's'} as ${
             read ? 'read' : 'unread'
           }`,
-        });
+          () => revertRead(targets, read),
+        );
       })
       .catch(() => {
         if (!requestCurrent(requestGeneration)) return;
@@ -389,11 +399,20 @@ export function SourceChapterList({
     const failed: string[] = [];
     try {
       const ids = new Set(selected);
+      const changed: Chapters[] = [];
       for (const c of chapters.filter((c) => ids.has(c.id))) {
         if (!requestCurrent(version)) return;
-        if (readIdsRef.current.has(c.id) !== read && !(await toggleRead(c))) failed.push(c.id);
+        if (readIdsRef.current.has(c.id) === read) continue;
+        if (await toggleRead(c)) changed.push(c);
+        else failed.push(c.id);
       }
-      if (requestCurrent(version)) setSelected(failed);
+      if (!requestCurrent(version)) return;
+      setSelected(failed);
+      if (changed.length && !failed.length)
+        toastWithUndo(
+          `Marked ${changed.length} chapter${changed.length === 1 ? '' : 's'} as ${read ? 'read' : 'unread'}`,
+          () => revertRead(changed, read),
+        );
     } finally {
       if (requestCurrent(version)) setBatchBusy(false);
     }

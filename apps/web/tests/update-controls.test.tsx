@@ -20,7 +20,6 @@ interface FakeState {
   availableVersion: string | null;
   downloadPercent: number | null;
   error: string | null;
-  autoDownload: boolean;
 }
 
 function installBridge(state: Partial<FakeState>) {
@@ -31,14 +30,12 @@ function installBridge(state: Partial<FakeState>) {
     availableVersion: null,
     downloadPercent: null,
     error: null,
-    autoDownload: true,
     ...state,
   };
   const bridge = {
     getState: vi.fn(async () => ({ success: true, data: full })),
     check: vi.fn(async () => ({ success: true, data: full })),
     download: vi.fn(async () => ({ success: true, data: full })),
-    setAutoDownload: vi.fn(async () => ({ success: true, data: full })),
     installNow: vi.fn(async () => ({ success: true, data: null })),
   };
   (window as unknown as { desktop?: unknown }).desktop = { update: bridge };
@@ -66,16 +63,13 @@ describe('UpdateControls', () => {
     await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
 
-  it('shows the current state and the auto-download toggle once supported', async () => {
-    installBridge({ supported: true, status: 'up-to-date', autoDownload: true });
+  it('shows the current state once supported, with no background download option', async () => {
+    installBridge({ supported: true, status: 'up-to-date' });
 
     render(<UpdateControls />);
 
     expect(await screen.findByText(/up to date/i)).toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: /download updates automatically/i })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
+    expect(screen.queryByRole('switch')).toBeNull();
   });
 
   it('offers a restart action only once an update has finished downloading', async () => {

@@ -10,11 +10,17 @@ import {
 import type { PublicUser } from '@projekt-manga/api-client';
 import { MoreVertical, X, Bookmark, Folder, Trash2, BookOpen } from 'lucide-react';
 import { actions, getAppState, useAppState } from '@/lib/app-store';
-import { libraryActions, setTitleInLibrary, useLibraryState } from '@/lib/library-store';
+import {
+  libraryActions,
+  refreshLibrary,
+  setTitleInLibrary,
+  useLibraryState,
+} from '@/lib/library-store';
 import type { Manga } from '@/lib/manga-data';
 import { useCurrentUser } from '@/lib/session-resource';
 import { queryClient, queryKeys } from '@/lib/query-client';
 import { toast } from '@/hooks/use-toast';
+import { toastWithUndo } from '@/lib/undo-toast';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -138,6 +144,17 @@ export function LibrarySelectionBar({
         ...new Set([...existing.filter((id) => !processed.has(id)), ...failed]),
       ]);
       refresh();
+      if (operation === 'remove' && !failed.length) {
+        toastWithUndo(
+          `${ids.length} ${ids.length === 1 ? 'title' : 'titles'} removed.`,
+          async () => {
+            await Promise.all(ids.map((id) => setTitleInLibrary(id, true, { refresh: false })));
+            await refreshLibrary();
+            refresh();
+          },
+        );
+        return;
+      }
       toast({
         description: failed.length
           ? `${failed.length} ${failed.length === 1 ? 'title' : 'titles'} could not be updated. Retry the remaining selection.`

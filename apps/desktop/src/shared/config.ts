@@ -49,7 +49,6 @@ export const DESKTOP_CHANNELS = {
   updateGetState: 'desktop:update:get-state',
   updateCheck: 'desktop:update:check',
   updateDownload: 'desktop:update:download',
-  updateSetAutoDownload: 'desktop:update:set-auto-download',
   updateInstallNow: 'desktop:update:install-now',
   /** "Update now" from the launch prompt: downloads if needed, then restarts into it. */
   updateNow: 'desktop:update:now',

@@ -12,26 +12,25 @@ import {
 import { updateBridge, type UpdateState } from '@/lib/desktop-update';
 
 const POLL_MS = 2000;
-/** The launch check runs in the background; stop waiting for it after this long. */
-const GIVE_UP_AFTER_MS = 3 * 60 * 1000;
+/** While nothing is happening: the desktop app keeps checking, so a release can turn up later. */
+const IDLE_POLL_MS = 60_000;
 
 /**
- * Desktop only: when the launch update check finds a new version, shows its changelog and asks
- * whether to update now, later (asked again next launch) or never for this version.
+ * Desktop only: when the update check finds a new version, shows its changelog and asks whether
+ * to update now, later (asked again next launch) or never for this version. Nothing downloads
+ * until "Update now".
  *
  * Polls the desktop bridge rather than subscribing, like Settings → About: the bridge is
- * invoke-only. Polling stops once the check settles with nothing to offer, or after a few
- * minutes, so nothing ticks in the background for the rest of the session.
+ * invoke-only.
  */
 export function UpdatePrompt() {
   const [state, setState] = useState<UpdateState | null>(null);
   const [updating, setUpdating] = useState(false);
-  const [closed, setClosed] = useState(false);
+  const [closedVersion, setClosedVersion] = useState<string | null>(null);
 
   useEffect(() => {
     const bridge = updateBridge();
     if (!bridge?.dismiss || !bridge.updateNow) return;
-    const started = Date.now();
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
@@ -39,14 +38,11 @@ export function UpdatePrompt() {
       if (cancelled) return;
       const next = result?.data ?? null;
       if (next) setState(next);
-      const settledWithNothing =
-        next &&
-        (!next.supported ||
-          next.status === 'up-to-date' ||
-          next.status === 'error' ||
-          (next.availableVersion && !next.prompt && !updating));
-      if (settledWithNothing || Date.now() - started > GIVE_UP_AFTER_MS) return;
-      timer = setTimeout(poll, POLL_MS);
+      if (next && !next.supported) return;
+      // A failed download comes back as the same offer, with the reason.
+      if (next?.status === 'available' && next.error) setUpdating(false);
+      const busy = !next || next.status === 'idle' || next.status === 'checking' || updating;
+      timer = setTimeout(poll, busy ? POLL_MS : IDLE_POLL_MS);
     };
     void poll();
     return () => {
@@ -57,14 +53,14 @@ export function UpdatePrompt() {
   }, [updating]);
 
   const open =
-    !closed &&
     !!state?.prompt &&
     !!state.availableVersion &&
+    state.availableVersion !== closedVersion &&
     ['available', 'downloading', 'downloaded'].includes(state.status);
   if (!state || (!open && !updating)) return null;
 
   const dismiss = (choice: 'later' | 'skip') => {
-    setClosed(true);
+    setClosedVersion(state.availableVersion);
     void updateBridge()?.dismiss?.(choice);
   };
   const updateNow = () => {
@@ -74,7 +70,8 @@ export function UpdatePrompt() {
 
   return (
     <Dialog open={open || updating} onOpenChange={(next) => !next && !updating && dismiss('later')}>
-      <DialogContent className="max-w-lg">
+      {/* Only the buttons or Escape answer it; a stray click shouldn't count as "Later". */}
+      <DialogContent className="max-w-lg" onInteractOutside={(event) => event.preventDefault()}>
         <DialogHeader>
           <DialogTitle>Version {state.availableVersion} is available</DialogTitle>
           <DialogDescription>
@@ -89,6 +86,12 @@ export function UpdatePrompt() {
         >
           {state.releaseNotes ?? 'No release notes were published for this version.'}
         </div>
+
+        {state.error && !updating && (
+          <p role="alert" className="text-sm text-destructive">
+            {state.error}
+          </p>
+        )}
 
         {updating ? (
           <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">

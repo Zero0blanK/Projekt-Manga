@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { subscribeToLibraryChanges } from '@projekt-manga/api-client';
-import { queryClient } from '@/lib/query-client';
+import { invalidateSavedReadingProgress, queryClient, queryKeys } from '@/lib/query-client';
 import { useCurrentUser } from '@/lib/session-resource';
 
 /** Query keys that describe sources and extensions, not library data. */
@@ -28,7 +28,20 @@ export function LibraryLiveUpdates() {
   const userId = user?.id ?? null;
   useEffect(() => {
     if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
-    return subscribeToLibraryChanges(() => {
+    return subscribeToLibraryChanges((scope) => {
+      if (scope === 'progress') {
+        // Reading writes constantly: refresh what's on screen, and leave the big library
+        // list to the same rule as this window's own reading.
+        invalidateSavedReadingProgress();
+        void queryClient.invalidateQueries({
+          refetchType: 'active',
+          predicate: (query) => {
+            const key = String(query.queryKey[0]);
+            return !NOT_LIBRARY.has(key) && key !== queryKeys.mangaLibrary[0];
+          },
+        });
+        return;
+      }
       void queryClient.invalidateQueries({
         predicate: (query) => !NOT_LIBRARY.has(String(query.queryKey[0])),
       });

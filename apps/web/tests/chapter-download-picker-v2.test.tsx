@@ -41,14 +41,19 @@ beforeEach(() => {
 });
 
 describe('Chapter download admission', () => {
-  it('previews an inclusive decimal range and rejects empty or reversed bounds', () => {
+  const chooseMode = async (name: string) => {
+    fireEvent.keyDown(screen.getByRole('button', { name: /^Choose chapters/ }), { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('menuitem', { name }));
+  };
+
+  it('previews an inclusive decimal range and rejects empty or reversed bounds', async () => {
     render(
       <ChapterDownloadPicker
         {...props()}
         chapters={[...chapters, { id: 'half', n: 2.5, title: 'Half', read: false }]}
       />,
     );
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'range' } });
+    await chooseMode('Chapter range');
     expect(screen.getByRole('button', { name: 'Queue 0 chapters' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('from'), { target: { value: '2.5' } });
     fireEvent.change(screen.getByLabelText('to'), { target: { value: '3' } });
@@ -66,7 +71,7 @@ describe('Chapter download admission', () => {
         excludedIds={new Set(['chapter-2'])}
       />,
     );
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'next' } });
+    await chooseMode('Next five unread');
     fireEvent.click(screen.getByRole('button', { name: 'Queue 5 chapters' }));
     await screen.findByText('Queued 5 of 5 available chapters.');
     expect(mocks.initiateDownload.mock.calls.map(([payload]) => payload.chapter.id)).toEqual([

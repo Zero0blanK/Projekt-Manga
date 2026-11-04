@@ -6,6 +6,7 @@ const getSuwayomiSettings = vi.fn();
 const saveSuwayomiSettings = vi.fn();
 const removeSuwayomiSettings = vi.fn();
 const testSuwayomiConnection = vi.fn();
+const importSuwayomiLibrary = vi.fn();
 const invalidateQueries = vi.fn();
 
 vi.mock('@projekt-manga/api-client', () => ({
@@ -13,6 +14,10 @@ vi.mock('@projekt-manga/api-client', () => ({
   saveSuwayomiSettings: (...args: unknown[]) => saveSuwayomiSettings(...args),
   removeSuwayomiSettings: (...args: unknown[]) => removeSuwayomiSettings(...args),
   testSuwayomiConnection: (...args: unknown[]) => testSuwayomiConnection(...args),
+  importSuwayomiLibrary: (...args: unknown[]) => importSuwayomiLibrary(...args),
+}));
+vi.mock('@/hooks/use-confirm', () => ({
+  useConfirm: () => ({ confirm: async () => true, dialog: null }),
 }));
 vi.mock('@/lib/query-client', () => ({
   queryClient: { invalidateQueries: (...args: unknown[]) => invalidateQueries(...args) },
@@ -112,6 +117,15 @@ describe('Suwayomi server settings', () => {
     await screen.findByText(
       "Saved, but the server didn't answer: The Suwayomi server is not reachable",
     );
+  });
+
+  it('imports the server library and says how much is coming', async () => {
+    const user = userEvent.setup();
+    getSuwayomiSettings.mockResolvedValue(savedWithPassword);
+    importSuwayomiLibrary.mockResolvedValue({ id: 'job', titles: 3 });
+    render(<SuwayomiServer />);
+    await user.click(await screen.findByRole('button', { name: 'Import library' }));
+    await screen.findByText(/Importing 3 titles/);
   });
 
   it('removes the connection', async () => {

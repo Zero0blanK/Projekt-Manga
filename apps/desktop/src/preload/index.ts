@@ -30,7 +30,6 @@ const INIT_GET_STATE_CHANNEL = 'desktop:init:get-state';
 const UPDATE_GET_STATE_CHANNEL = 'desktop:update:get-state';
 const UPDATE_CHECK_CHANNEL = 'desktop:update:check';
 const UPDATE_DOWNLOAD_CHANNEL = 'desktop:update:download';
-const UPDATE_SET_AUTO_DOWNLOAD_CHANNEL = 'desktop:update:set-auto-download';
 const UPDATE_INSTALL_NOW_CHANNEL = 'desktop:update:install-now';
 const UPDATE_NOW_CHANNEL = 'desktop:update:now';
 const UPDATE_DISMISS_CHANNEL = 'desktop:update:dismiss';
@@ -123,8 +122,6 @@ contextBridge.exposeInMainWorld('desktop', {
     getState: () => ipcRenderer.invoke(UPDATE_GET_STATE_CHANNEL),
     check: () => ipcRenderer.invoke(UPDATE_CHECK_CHANNEL),
     download: () => ipcRenderer.invoke(UPDATE_DOWNLOAD_CHANNEL),
-    setAutoDownload: (enabled: boolean) =>
-      ipcRenderer.invoke(UPDATE_SET_AUTO_DOWNLOAD_CHANNEL, enabled),
     installNow: () => ipcRenderer.invoke(UPDATE_INSTALL_NOW_CHANNEL),
     updateNow: () => ipcRenderer.invoke(UPDATE_NOW_CHANNEL),
     dismiss: (choice: 'later' | 'skip') => ipcRenderer.invoke(UPDATE_DISMISS_CHANNEL, choice),

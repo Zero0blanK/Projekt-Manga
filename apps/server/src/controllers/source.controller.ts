@@ -34,8 +34,8 @@ import { ValidationError } from '../utils/customErrors.js';
 import { createByteLimitStream } from '../utils/byteLimitStream.js';
 import { MAX_IMAGE_BYTES, detectRasterImageType } from '../utils/imageContent.js';
 import {
-  fetchSuwayomiImage,
   isSuwayomiImageUrl,
+  openSuwayomiImage,
   SuwayomiError,
 } from '../services/suwayomi/client.js';
 
@@ -152,6 +152,19 @@ const getSources = async (_req: Request, res: Response, next: NextFunction) => {
 
 const getSourceHealth = (_req: Request, res: Response) =>
   HTTPSuccessResponse(res, 200, 'Source health retrieved', getSourceHealthSnapshot());
+
+const getAllCapabilities = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    return HTTPSuccessResponse(
+      res,
+      200,
+      'Source capabilities retrieved',
+      await sourceService.getAllCapabilities(),
+    );
+  } catch (error) {
+    next(error);
+  }
+};
 
 const getCapabilities = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -310,11 +323,46 @@ const checkLibraryUpdates = async (_req: Request, res: Response, next: NextFunct
 
 const proxySuwayomiImage = async (req: Request, res: Response, url: string) => {
   try {
-    const image = await fetchSuwayomiImage(url);
-    res.setHeader('Content-Type', image.contentType);
-    res.setHeader('Content-Length', String(image.bytes.length));
+    const { stream, size } = await openSuwayomiImage(url);
+    if (size !== null && size > MAX_PROXY_IMAGE_BYTES) {
+      stream.destroy();
+      return proxyError(req, res, 413, 'Image response is too large');
+    }
+    // Checked before anything is sent: only the first bytes say what this really is.
+    const iterator = stream[Symbol.asyncIterator]();
+    const head: Buffer[] = [];
+    let headSize = 0;
+    while (headSize < 32) {
+      const part = await iterator.next();
+      if (part.done) break;
+      const bytes = Buffer.from(part.value as Uint8Array);
+      head.push(bytes);
+      headSize += bytes.length;
+    }
+    const contentType = detectRasterImageType(Buffer.concat(head, headSize));
+    if (!contentType) {
+      stream.destroy();
+      return proxyError(req, res, 502, 'Suwayomi did not return an image');
+    }
+    res.setHeader('Content-Type', contentType);
+    if (size !== null) res.setHeader('Content-Length', String(size));
     res.setHeader('Cache-Control', 'private, max-age=86400');
-    return res.status(200).end(image.bytes);
+    res.status(200);
+    const body = Readable.from(
+      (async function* () {
+        yield* head;
+        for (;;) {
+          const part = await iterator.next();
+          if (part.done) break;
+          yield part.value as Uint8Array;
+        }
+      })(),
+    );
+    await pipeline(
+      body,
+      createByteLimitStream(MAX_PROXY_IMAGE_BYTES, 'Image response is too large'),
+      res,
+    );
   } catch (error) {
     if (!(error instanceof SuwayomiError)) throw error;
     if (error.code === 'NOT_FOUND') return proxyError(req, res, 404, MISSING_IMAGE_MESSAGE);
@@ -543,6 +591,7 @@ const clearBrowserSession = async (req: Request, res: Response, next: NextFuncti
 
 const sourceController = {
   getCapabilities,
+  getAllCapabilities,
   getCataloguePage,
   searchMangaPage,
   getSources,

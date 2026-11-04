@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   getMangaChapters,
@@ -1160,13 +1161,13 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
                 format={(value) => `${value}×`}
               />
             )}
-            <label>
-              Translation group{' '}
-              <select
-                aria-label="Translation group"
+            <div className="flex items-center gap-2">
+              Translation group
+              <SelectMenu
+                label="Translation group"
                 value={currentRecord?.id ?? ''}
-                onChange={(event) => {
-                  const record = chapters.find((item) => item.id === event.target.value);
+                onChange={(id) => {
+                  const record = chapters.find((item) => item.id === id);
                   if (!record) return;
                   flushProgress();
                   setPreferredGroup(record.scanlator ?? '');
@@ -1175,17 +1176,14 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
                     `/reader/${manga.id}?ch=${record.chapter_number}&page=1&chapterId=${encodeURIComponent(record.id)}`,
                   );
                 }}
-                className="rounded border border-white/20 bg-black p-1"
-              >
-                {chapters
+                options={chapters
                   .filter((record) => record.chapter_number === chapter)
-                  .map((record) => (
-                    <option key={record.id} value={record.id}>
-                      {record.scanlator || 'Unknown group'}
-                    </option>
-                  ))}
-              </select>
-            </label>
+                  .map((record) => ({
+                    value: record.id,
+                    label: record.scanlator || 'Unknown group',
+                  }))}
+              />
+            </div>
             {preferredGroup && currentRecord && currentRecord.scanlator !== preferredGroup && (
               <span role="status">
                 {preferredGroup} has no release here; using{' '}

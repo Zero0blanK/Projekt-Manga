@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { initiateDownload, getAllDownloads } from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
 import { refreshDownloads } from './row-data';
@@ -124,19 +125,20 @@ export function ChapterDownloadPicker({
   return (
     <div className="mt-4 rounded-xl border border-border p-4">
       <h3 className="text-sm font-semibold">Download chapters</h3>
-      <label className="mt-2 block text-xs">
+      <div className="mt-2 flex items-center gap-2 text-xs">
         Choose chapters
-        <select
+        <SelectMenu
+          label="Choose chapters"
           value={mode}
           disabled={busy}
-          onChange={(event) => setMode(event.target.value)}
-          className="ml-2 rounded-lg border border-border bg-background px-2 py-1"
-        >
-          <option value="selected">Selected chapters</option>
-          <option value="next">Next five unread</option>
-          <option value="range">Chapter range</option>
-        </select>
-      </label>
+          onChange={setMode}
+          options={[
+            { value: 'selected', label: 'Selected chapters' },
+            { value: 'next', label: 'Next five unread' },
+            { value: 'range', label: 'Chapter range' },
+          ]}
+        />
+      </div>
       {mode === 'range' && (
         <div className="mt-2 flex flex-wrap gap-3">
           {[

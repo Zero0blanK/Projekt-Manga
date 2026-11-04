@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useState } from 'react';
+import { SelectMenu } from '@/components/ui/select-menu';
 import type { MangaFilter } from '@projekt-manga/types';
 import type { FilterValue, TriStateFilterValue } from '@projekt-manga/types';
 import { countActiveFilters, isTriState, type FilterValues } from '@/lib/filter-values';
@@ -240,19 +241,13 @@ export function FilterPanel({
           if (field.type === 'select') {
             return (
               <FilterSection key={field.value} label={field.label}>
-                <select
-                  aria-label={field.label}
+                <SelectMenu
+                  label={field.label}
                   value={typeof value === 'string' ? value : ''}
-                  onChange={(e) => set(field.value, e.target.value || undefined)}
-                  className="h-9 w-full rounded-lg border border-border/60 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/60"
-                >
-                  <option value="">Any</option>
-                  {(field.options ?? []).map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(next) => set(field.value, next || undefined)}
+                  options={[{ value: '', label: 'Any' }, ...(field.options ?? [])]}
+                  className="w-full"
+                />
               </FilterSection>
             );
           }

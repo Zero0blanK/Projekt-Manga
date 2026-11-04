@@ -92,7 +92,6 @@ export interface DesktopDiagnostics {
     status: string;
     availableVersion: string | null;
     error: string | null;
-    autoDownload: boolean;
   } | null;
   settings?: {
     closeToTray: boolean;
@@ -353,7 +352,7 @@ function desktopSection(d: DesktopDiagnostics | null): string[] {
   }
   if (d.update)
     lines.push(
-      `- Updates: ${d.update.status}${d.update.availableVersion ? ` (offering ${d.update.availableVersion})` : ''}, auto-download ${yesNo(d.update.autoDownload)}${d.update.error ? `, last error: ${scrubText(d.update.error)}` : ''}`,
+      `- Updates: ${d.update.status}${d.update.availableVersion ? ` (offering ${d.update.availableVersion})` : ''}${d.update.error ? `, last error: ${scrubText(d.update.error)}` : ''}`,
     );
   if (d.settings)
     lines.push(

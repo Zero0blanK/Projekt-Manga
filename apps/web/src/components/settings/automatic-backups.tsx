@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { SelectMenu } from '@/components/ui/select-menu';
 import {
   createBackupNow,
   getBackupFile,
@@ -26,9 +27,6 @@ const INTERVAL_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 24 * 7, label: 'Weekly' },
 ];
 const KEEP_OPTIONS = [3, 5, 7, 14, 30];
-
-const selectClass =
-  'h-8 min-w-40 rounded-lg border border-border/60 bg-background px-3 py-1.5 text-xs text-foreground outline-none focus:border-primary/60 disabled:opacity-50';
 
 function isBackupStatus(value: unknown): value is BackupStatus {
   const status = value as Partial<BackupStatus> | null;
@@ -182,41 +180,26 @@ export function AutomaticBackups({
       </Field>
       <Field label="Schedule" hint="Applies to every profile on this server">
         <div className="flex flex-wrap gap-2">
-          <select
-            aria-label="Backup interval"
-            className={selectClass}
-            value={status?.config.intervalHours ?? ''}
+          <SelectMenu
+            label="Backup interval"
+            value={String(status?.config.intervalHours ?? '')}
             disabled={!status || busy !== null}
-            onChange={(event) => saveConfig({ intervalHours: Number(event.target.value) })}
-          >
-            {/* Keeps a server value set through env visible even if it is not a preset. */}
-            {status && !INTERVAL_OPTIONS.some((o) => o.value === status.config.intervalHours) && (
-              <option value={status.config.intervalHours}>
-                Every {status.config.intervalHours} hours
-              </option>
-            )}
-            {INTERVAL_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Backups to keep"
-            className={selectClass}
-            value={status?.config.keep ?? ''}
+            onChange={(hours) => saveConfig({ intervalHours: Number(hours) })}
+            // Keeps a server value set through env visible even if it is not a preset.
+            placeholder={status ? `Every ${status.config.intervalHours} hours` : ''}
+            options={INTERVAL_OPTIONS.map((option) => ({
+              value: String(option.value),
+              label: option.label,
+            }))}
+          />
+          <SelectMenu
+            label="Backups to keep"
+            value={String(status?.config.keep ?? '')}
             disabled={!status || busy !== null}
-            onChange={(event) => saveConfig({ keep: Number(event.target.value) })}
-          >
-            {status && !KEEP_OPTIONS.includes(status.config.keep) && (
-              <option value={status.config.keep}>Keep {status.config.keep}</option>
-            )}
-            {KEEP_OPTIONS.map((keep) => (
-              <option key={keep} value={keep}>
-                Keep {keep}
-              </option>
-            ))}
-          </select>
+            onChange={(keep) => saveConfig({ keep: Number(keep) })}
+            placeholder={status ? `Keep ${status.config.keep}` : ''}
+            options={KEEP_OPTIONS.map((keep) => ({ value: String(keep), label: `Keep ${keep}` }))}
+          />
         </div>
       </Field>
       {status && status.files.length > 0 && (

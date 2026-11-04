@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { ActionButton, Field, Group, ToggleSwitch } from '@/components/settings/field-controls';
 import { toast } from '@/hooks/use-toast';
 
@@ -194,20 +195,19 @@ export function DesktopPrivacyControls() {
                   className={INPUT}
                 />
               </label>
-              <label className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                 Lock
-                <select
-                  value={idleMinutes}
-                  onChange={(event) => setIdleMinutes(Number(event.target.value))}
-                  className={INPUT}
-                >
-                  {IDLE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <SelectMenu
+                  label="Lock"
+                  value={String(idleMinutes)}
+                  onChange={(minutes) => setIdleMinutes(Number(minutes))}
+                  options={IDLE_OPTIONS.map((option) => ({
+                    value: String(option.value),
+                    label: option.label,
+                  }))}
+                  className="w-full sm:w-56"
+                />
+              </div>
               <p className="text-[11px] text-muted-foreground">
                 There is no way to recover a forgotten PIN from inside the app. The app also locks
                 when the computer's screen locks.

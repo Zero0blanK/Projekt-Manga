@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { RefreshCw, Server } from 'lucide-react';
 import {
@@ -12,7 +12,7 @@ import {
 } from '@projekt-manga/api-client';
 import { queryClient as client, queryKeys } from '@/lib/query-client';
 import { sourceLanguageGroup, sourceLanguageName } from '@/lib/source-language';
-import type { DiscoverFilters } from '@/lib/discover-filters';
+import { compareLanguageGroups, type DiscoverFilters } from '@/lib/discover-filters';
 import { isProxyPlaceholder, sourceIconUrl } from '@/lib/source-url';
 import { toast } from '@/hooks/use-toast';
 import { useContentPrivacy } from './content-privacy';
@@ -36,6 +36,52 @@ function ExtensionIcon({ url }: { url: string | null }) {
       onLoad={(event) => setFailed(isProxyPlaceholder(event.currentTarget))}
       className="size-5 shrink-0 rounded object-contain"
     />
+  );
+}
+
+/** Rows added at a time: a server can list well over a thousand extensions. */
+const ROW_STEP = 60;
+
+/** Renders the first rows of a long list and adds more as the end nears the screen. */
+function GrowingList<T>({
+  rows,
+  render,
+  className,
+}: {
+  rows: T[];
+  render: (row: T) => ReactNode;
+  className?: string;
+}) {
+  const [shown, setShown] = useState(ROW_STEP);
+  const end = useRef<HTMLLIElement>(null);
+  const more = shown < rows.length;
+  useEffect(() => {
+    const element = end.current;
+    if (!more || !element) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      setShown(rows.length);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShown((current) => current + ROW_STEP);
+        }
+      },
+      { rootMargin: '600px' },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [more, rows.length, shown]);
+  return (
+    <ul className={className}>
+      {rows.slice(0, shown).map(render)}
+      {more && (
+        <li ref={end} className="px-5 py-3 text-xs text-muted-foreground">
+          {rows.length - shown} more…
+        </li>
+      )}
+    </ul>
   );
 }
 
@@ -90,26 +136,28 @@ export function SuwayomiExtensions({
   filters: Pick<DiscoverFilters, 'language' | 'rating'>;
 }) {
   const [privacy] = useContentPrivacy();
-  const [busy, setBusy] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  // Per row, so one install doesn't freeze every other row.
+  const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const { enabled, list } = useSuwayomiExtensions();
   if (!enabled) return null;
 
   const refresh = async () => {
-    setBusy('refresh');
+    setRefreshing(true);
     try {
       client.setQueryData(EXTENSIONS_KEY, await getSuwayomiExtensions(true));
       toast({ description: 'Suwayomi extension list refreshed.' });
     } catch (error) {
       toast({ description: errorText(error, "Couldn't refresh Suwayomi's extensions.") });
     } finally {
-      setBusy(null);
+      setRefreshing(false);
     }
   };
   const change = async (
     extension: SuwayomiExtension,
     action: 'install' | 'update' | 'uninstall',
   ) => {
-    setBusy(extension.pkg_name);
+    setBusy((current) => new Set(current).add(extension.pkg_name));
     try {
       const next = await changeSuwayomiExtension(extension.pkg_name, action);
       client.setQueryData<SuwayomiExtension[]>(EXTENSIONS_KEY, (current) =>
@@ -127,22 +175,32 @@ export function SuwayomiExtensions({
     } catch (error) {
       toast({ description: errorText(error, `Couldn't change ${extension.name} on Suwayomi.`) });
     } finally {
-      setBusy(null);
+      setBusy((current) => {
+        const next = new Set(current);
+        next.delete(extension.pkg_name);
+        return next;
+      });
     }
   };
 
   const needle = name.trim().toLocaleLowerCase();
-  const visible = (list.data ?? []).filter(
-    (extension) =>
-      (!privacy.hideAdult || !extension.is_nsfw) &&
-      extension.name.toLocaleLowerCase().includes(needle) &&
-      (!filters.language || sourceLanguageGroup(extension.lang) === filters.language) &&
-      // Suwayomi only says whether an extension is adult; it has no "mixed".
-      (!filters.rating ||
-        (filters.rating === 'nsfw'
-          ? extension.is_nsfw
-          : filters.rating === 'safe' && !extension.is_nsfw)),
-  );
+  const visible = (list.data ?? [])
+    .filter(
+      (extension) =>
+        (!privacy.hideAdult || !extension.is_nsfw) &&
+        extension.name.toLocaleLowerCase().includes(needle) &&
+        (!filters.language || sourceLanguageGroup(extension.lang) === filters.language) &&
+        // Suwayomi only says whether an extension is adult; it has no "mixed".
+        (!filters.rating ||
+          (filters.rating === 'nsfw'
+            ? extension.is_nsfw
+            : filters.rating === 'safe' && !extension.is_nsfw)),
+    )
+    .sort(
+      (a, b) =>
+        compareLanguageGroups(sourceLanguageGroup(a.lang), sourceLanguageGroup(b.lang)) ||
+        a.name.localeCompare(b.name),
+    );
   const groups = [
     { label: 'Updates', rows: visible.filter((item) => item.installed && item.has_update) },
     { label: 'Installed', rows: visible.filter((item) => item.installed && !item.has_update) },
@@ -163,11 +221,11 @@ export function SuwayomiExtensions({
           <button
             type="button"
             onClick={() => void refresh()}
-            disabled={busy !== null}
+            disabled={refreshing}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 px-2.5 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
           >
-            <RefreshCw className={`h-3 w-3 ${busy === 'refresh' ? 'animate-spin' : ''}`} />
-            {busy === 'refresh' ? 'Refreshing…' : 'Refresh'}
+            <RefreshCw className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
       </div>
@@ -196,8 +254,10 @@ export function SuwayomiExtensions({
                   {label}{' '}
                   <span className="text-xs font-normal text-muted-foreground">{rows.length}</span>
                 </h3>
-                <ul className="divide-y divide-border/60 overflow-hidden rounded-2xl border border-border/60 bg-surface/40">
-                  {rows.map((extension) => (
+                <GrowingList
+                  rows={rows}
+                  className="divide-y divide-border/60 overflow-hidden rounded-2xl border border-border/60 bg-surface/40"
+                  render={(extension) => (
                     <li
                       key={extension.pkg_name}
                       className="flex items-center justify-between gap-4 px-5 py-3"
@@ -219,7 +279,7 @@ export function SuwayomiExtensions({
                         {extension.installed && extension.has_update && (
                           <button
                             type="button"
-                            disabled={busy !== null}
+                            disabled={busy.has(extension.pkg_name)}
                             onClick={() => void change(extension, 'update')}
                             className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
                           >
@@ -229,26 +289,26 @@ export function SuwayomiExtensions({
                         {extension.installed ? (
                           <button
                             type="button"
-                            disabled={busy !== null}
+                            disabled={busy.has(extension.pkg_name)}
                             onClick={() => void change(extension, 'uninstall')}
                             className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
                           >
-                            {busy === extension.pkg_name ? 'Working…' : 'Uninstall'}
+                            {busy.has(extension.pkg_name) ? 'Working…' : 'Uninstall'}
                           </button>
                         ) : (
                           <button
                             type="button"
-                            disabled={busy !== null || extension.obsolete}
+                            disabled={busy.has(extension.pkg_name) || extension.obsolete}
                             onClick={() => void change(extension, 'install')}
                             className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
                           >
-                            {busy === extension.pkg_name ? 'Installing…' : 'Install'}
+                            {busy.has(extension.pkg_name) ? 'Installing…' : 'Install'}
                           </button>
                         )}
                       </div>
                     </li>
-                  ))}
-                </ul>
+                  )}
+                />
               </section>
             ),
           )}

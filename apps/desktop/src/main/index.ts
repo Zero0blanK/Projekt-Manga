@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, clipboard, dialog, Menu } from 'electron';
 import { createMainWindow } from './window';
+import { rescueAnonymousLibrary } from './library-rescue';
 import { registerIpcHandlers } from './ipc';
 import { getDb } from './db/connection';
 import { localStore } from './db/local-store';
@@ -14,7 +15,7 @@ import { resolveServerPaths, shouldManageServers, startServers, stopServers } fr
 import { resolveServerTokenKey } from './server-secrets';
 import { captureConsole } from './log-buffer';
 import { recordStartupError } from './diagnostics';
-import { checkForUpdates, initUpdater } from './updater';
+import { checkForUpdates, initUpdater, startPeriodicUpdateChecks } from './updater';
 import {
   markLocalDataPresence,
   markSeedFailed,
@@ -216,6 +217,8 @@ if (!gotLock) {
     let apiBaseUrl: string | undefined;
     try {
       apiBaseUrl = await startManagedServers();
+      // Only the app's own server: a remote one's library isn't this device's to merge into.
+      if (apiBaseUrl) void rescueAnonymousLibrary(apiBaseUrl);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[main] Failed to start bundled servers:', message);
@@ -247,6 +250,7 @@ if (!gotLock) {
     // never rejects, so there is nothing here to catch.
     initUpdater();
     void checkForUpdates();
+    startPeriodicUpdateChecks();
 
     // Best-effort, non-blocking catalog seed so a fresh install has something to browse
     // offline. Signed-in account changes use the bidirectional sync protocol from the

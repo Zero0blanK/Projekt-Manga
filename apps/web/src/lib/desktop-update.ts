@@ -22,7 +22,6 @@ export interface UpdateState {
   availableVersion: string | null;
   downloadPercent: number | null;
   error: string | null;
-  autoDownload: boolean;
   /** Plain-text release notes for the version on offer (older desktop builds omit it). */
   releaseNotes?: string | null;
   /** Whether the launch prompt should show for the version on offer. */
@@ -39,7 +38,6 @@ export interface UpdateBridge {
   getState: () => Promise<Envelope<UpdateState>>;
   check: () => Promise<Envelope<UpdateState>>;
   download: () => Promise<Envelope<UpdateState>>;
-  setAutoDownload: (enabled: boolean) => Promise<Envelope<UpdateState>>;
   installNow: () => Promise<Envelope<null>>;
   /** Present from the desktop build that added the launch prompt. */
   updateNow?: () => Promise<Envelope<UpdateState>>;

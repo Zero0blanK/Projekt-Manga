@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { toast } from '@/hooks/use-toast';
+import { toastWithUndo } from '@/lib/undo-toast';
 import {
   getMangaChapters,
   markChapterAsRead,
@@ -535,12 +536,28 @@ export function ChapterList({ manga }: { manga: Manga }) {
             ),
           );
         }
-        toast({
-          description:
-            result.failed_source_chapter_keys.length > 0
-              ? `Updated ${result.count} chapters; ${result.failed_source_chapter_keys.length} failed`
-              : `Marked ${targets.length} chapter${targets.length === 1 ? '' : 's'} as ${read ? 'read' : 'unread'}`,
-        });
+        if (result.failed_source_chapter_keys.length > 0) {
+          toast({
+            description: `Updated ${result.count} chapters; ${result.failed_source_chapter_keys.length} failed`,
+          });
+          return;
+        }
+        toastWithUndo(
+          `Marked ${targets.length} chapter${targets.length === 1 ? '' : 's'} as ${read ? 'read' : 'unread'}`,
+          async () => {
+            const changed = new Set(targets.map((target) => target.id));
+            await (read ? markPreviousChaptersAsUnread : markPreviousChaptersAsRead)(
+              manga.slug,
+              payload,
+              { manga_id: manga.id, title: manga.title },
+            );
+            if (generation.current !== requestGeneration) return;
+            setRecords((current) =>
+              current.map((row) => (changed.has(row.id) ? { ...row, is_read: !read } : row)),
+            );
+            invalidateSavedReadingProgress();
+          },
+        );
       })
       .catch(() => {
         if (generation.current !== requestGeneration) return;
@@ -604,6 +621,8 @@ export function ChapterList({ manga }: { manga: Manga }) {
     );
     const targets = chapters.filter((c) => ids.has(c.id));
     if (!targets.length) return;
+    // Taken now: the rows change as each one is marked.
+    const changing = targets.filter((c) => c.read !== (action === 'read'));
     setBatchBusy(true);
     const failed: string[] = [];
     try {
@@ -645,6 +664,23 @@ export function ChapterList({ manga }: { manga: Manga }) {
         setSelected(failed);
         refreshDownloads();
         invalidateSavedReadingProgress();
+        if (action !== 'download' && !failed.length && changing.length) {
+          const read = action === 'read';
+          toastWithUndo(
+            `Marked ${changing.length} chapter${changing.length === 1 ? '' : 's'} as ${read ? 'read' : 'unread'}`,
+            async () => {
+              const mark = read ? markChapterAsUnread : markChapterAsRead;
+              for (const c of changing) await mark(manga.slug, c.key, { source: manga.source });
+              if (!current()) return;
+              const changed = new Set(changing.map((c) => c.id));
+              setRecords((existing) =>
+                existing.map((row) => (changed.has(row.id) ? { ...row, is_read: !read } : row)),
+              );
+              invalidateSavedReadingProgress();
+            },
+          );
+          return;
+        }
         toast({
           description: failed.length
             ? `${failed.length} chapters could not be processed. They remain selected for retry.`

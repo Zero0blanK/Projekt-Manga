@@ -1,10 +1,14 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { EMPTY_IDS, useProfilePreference } from '@/lib/profile-preferences';
 import { extensionActions, useExtensionRepositories } from '@/lib/extensions-store';
 import { toast } from '@/hooks/use-toast';
 type Setup = { step: number; languages: string[]; dismissed: boolean };
 const defaults: Setup = { step: 0, languages: [], dismissed: false };
+const STEPS = ['Languages', 'Repository', 'Sources', 'First title'];
+const NEXT_BUTTON =
+  'rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50';
 function parseSetup(value: unknown): Setup {
   if (!value || typeof value !== 'object') return defaults;
   const data = value as Partial<Setup>;
@@ -82,6 +86,21 @@ export function FirstUseSetup({
       <p className="mt-1 text-xs text-muted-foreground">
         Step {setup.step + 1} of 4 · No account required. You can leave and resume later.
       </p>
+      <ol className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-4">
+        {STEPS.map((label, index) => (
+          <li
+            key={label}
+            aria-current={index === setup.step ? 'step' : undefined}
+            className={`border-t-2 pt-1 text-xs ${
+              index <= setup.step
+                ? 'border-primary text-foreground'
+                : 'border-border text-muted-foreground'
+            }`}
+          >
+            {label}
+          </li>
+        ))}
+      </ol>
       {setup.step === 0 && (
         <>
           <p className="mt-3 text-sm">Choose your reading languages.</p>
@@ -113,7 +132,7 @@ export function FirstUseSetup({
           </div>
           <button
             type="button"
-            className="mt-3 text-sm text-primary"
+            className={`mt-3 ${NEXT_BUTTON}`}
             onClick={() => {
               setSetup((current) => ({ ...current, step: 1 }));
             }}
@@ -137,11 +156,11 @@ export function FirstUseSetup({
               className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
             />
           </label>
-          <div className="mt-3 flex gap-4">
+          <div className="mt-3 flex flex-wrap items-center gap-4">
             <button
               type="button"
               disabled={busy || !url.trim()}
-              className="text-sm text-primary disabled:opacity-50"
+              className={NEXT_BUTTON}
               onClick={() => void addRepository()}
             >
               {busy ? 'Adding…' : 'Add repository'}
@@ -170,7 +189,7 @@ export function FirstUseSetup({
           <button
             type="button"
             disabled={installedCount === 0}
-            className="ml-4 text-sm text-primary disabled:opacity-50"
+            className={`ml-4 ${NEXT_BUTTON}`}
             onClick={() => setSetup((current) => ({ ...current, step: 3 }))}
           >
             Continue with {installedCount} installed
@@ -180,16 +199,21 @@ export function FirstUseSetup({
       {setup.step === 3 && (
         <>
           <p className="mt-3 text-sm">
-            Open Popular or Latest on a source below, or select sources for a search. Add your first
-            title from its preview.
+            Open Popular or Latest on an installed source, then add your first title from its
+            preview.
           </p>
-          <button
-            type="button"
-            className="mt-2 text-sm text-primary"
-            onClick={() => setSetup((current) => ({ ...current, dismissed: true }))}
-          >
-            Finish setup
-          </button>
+          <div className="mt-3 flex flex-wrap items-center gap-4">
+            <Link href="/discover?tab=installed" className={NEXT_BUTTON}>
+              Browse installed sources
+            </Link>
+            <button
+              type="button"
+              className="text-sm text-primary"
+              onClick={() => setSetup((current) => ({ ...current, dismissed: true }))}
+            >
+              Finish setup
+            </button>
+          </div>
         </>
       )}
       {setup.step > 0 && (

@@ -9,6 +9,7 @@ import {
   changeExtension,
   deleteSettings,
   getExtensions,
+  importLibrary,
   getSettings,
   putSettings,
   testConnection,
@@ -22,6 +23,7 @@ router.get('/settings', getSettings);
 router.put('/settings', validateBody(suwayomiSettingsBodySchema), putSettings);
 router.delete('/settings', deleteSettings);
 router.post('/test', testConnection);
+router.post('/import', importLibrary);
 router.get('/extensions', getExtensions);
 router.post(
   '/extensions/:pkg_name',

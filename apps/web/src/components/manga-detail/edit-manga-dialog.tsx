@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { SelectMenu } from '@/components/ui/select-menu';
 import { useRouter } from 'next/navigation';
 import { Pencil } from 'lucide-react';
 import {
@@ -307,19 +308,14 @@ export function EditMangaDialog({ manga }: { manga: Manga }) {
               edited={override?.status != null}
             >
               {(id) => (
-                <select
+                <SelectMenu
                   id={id}
-                  className={`${inputClass} h-9`}
                   value={form.status}
                   disabled={busy !== null}
-                  onChange={set('status')}
-                >
-                  {STATUS_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => set('status')({ target: { value } })}
+                  options={STATUS_OPTIONS}
+                  className="w-full"
+                />
               )}
             </EditField>
             <EditField

@@ -5,8 +5,10 @@
  * `publish` block, which makes the build emit `latest.yml` (the feed) and `.exe.blockmap`
  * (the per-block diff) alongside the installer.
  *
- * Three constraints here are easy to undo by accident:
+ * Four constraints here are easy to undo by accident:
  *
+ * - **Nothing downloads or installs unless the user asks.** A new version only raises the prompt;
+ *   `autoDownload` and `autoInstallOnAppQuit` stay off, so quitting never applies an update.
  * - **Everything is gated on `app.isPackaged`.** electron-updater has no `app-update.yml` in a dev
  *   run and throws on the first call, so an ungated check would make `npm run dev:desktop` fail on
  *   startup for a feature that cannot work there anyway.
@@ -20,7 +22,7 @@
 import { app } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { appendLog } from './log-buffer';
-import { getUpdatePreferences, setAutoDownload, setSkippedVersion } from './update-preferences';
+import { getUpdatePreferences, setSkippedVersion } from './update-preferences';
 
 export type UpdateStatus =
   | 'unsupported'
@@ -44,7 +46,6 @@ export interface UpdateState {
   downloadPercent: number | null;
   /** Last failure, in the user's words rather than a stack trace. */
   error: string | null;
-  autoDownload: boolean;
   /** What changed in the version on offer, as plain text (from the GitHub release notes). */
   releaseNotes: string | null;
   /** True when the launch prompt should be shown for the version on offer: not skipped, and
@@ -59,13 +60,15 @@ let state: UpdateState = {
   availableVersion: null,
   downloadPercent: null,
   error: null,
-  autoDownload: true,
   releaseNotes: null,
   prompt: false,
 };
 
-/** "Later" was chosen during this run. */
-let promptDismissed = false;
+/** How often a running app looks for a release, since it can stay up in the tray for days. */
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** The version "Later" was chosen for during this run; a newer one still gets asked about. */
+let dismissedVersion: string | null = null;
 /** "Update now" was chosen before the download finished: restart as soon as it does. */
 let installWhenDownloaded = false;
 
@@ -104,7 +107,7 @@ export function releaseNotesToText(notes: unknown): string | null {
 }
 
 function shouldPrompt(version: string): boolean {
-  return !promptDismissed && getUpdatePreferences().skippedVersion !== version;
+  return dismissedVersion !== version && getUpdatePreferences().skippedVersion !== version;
 }
 
 function log(message: string): void {
@@ -161,7 +164,13 @@ function recordFailure(error: unknown, context: string): void {
     log('this build has no update feed (app-update.yml absent) — self-update is unavailable');
     return;
   }
-  patch({ status: 'error', downloadPercent: null, error: describeError(error) });
+  installWhenDownloaded = false;
+  // A failed download leaves the version on offer, so the prompt can show why and retry.
+  patch({
+    status: state.availableVersion ? 'available' : 'error',
+    downloadPercent: null,
+    error: describeError(error),
+  });
   log(`${context}: ${raw}`);
 }
 
@@ -172,19 +181,15 @@ function recordFailure(error: unknown, context: string): void {
  * fire it without blocking, and the Settings button can reuse the same path.
  */
 export function initUpdater(): void {
-  const preferences = getUpdatePreferences();
-
   if (!app.isPackaged) {
-    patch({ supported: false, status: 'unsupported', autoDownload: preferences.autoDownload });
+    patch({ supported: false, status: 'unsupported' });
     return;
   }
 
-  patch({ supported: true, status: 'idle', autoDownload: preferences.autoDownload });
+  patch({ supported: true, status: 'idle' });
 
-  autoUpdater.autoDownload = preferences.autoDownload;
-  // The half of "installs when you next quit" that electron-updater owns: it stages the installer
-  // and runs it on exit, so there is no second prompt and no separate install step.
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
 
   // Routed into the same buffer as everything else rather than left on its default console
   // logger, so internal detail (which URL, which version, why a check failed) lands in the
@@ -202,12 +207,10 @@ export function initUpdater(): void {
   });
 
   autoUpdater.on('update-available', (info) => {
-    // `autoDownload` decides what happens next: electron-updater starts the download itself when
-    // it is on, and otherwise waits here until downloadUpdate() is called from the UI.
     patch({
-      status: autoUpdater.autoDownload ? 'downloading' : 'available',
+      status: 'available',
       availableVersion: info.version,
-      downloadPercent: autoUpdater.autoDownload ? 0 : null,
+      downloadPercent: null,
       releaseNotes: releaseNotesToText(info.releaseNotes),
       prompt: shouldPrompt(info.version),
     });
@@ -230,7 +233,7 @@ export function initUpdater(): void {
       downloadPercent: 100,
       releaseNotes: releaseNotesToText(info.releaseNotes) ?? state.releaseNotes,
     });
-    log(`update downloaded: ${info.version} (installs on quit)`);
+    log(`update downloaded: ${info.version}`);
     if (installWhenDownloaded) installNow();
   });
 
@@ -240,6 +243,8 @@ export function initUpdater(): void {
 /** Resolves once the check has been *started and settled*; never rejects. */
 export async function checkForUpdates(): Promise<UpdateState> {
   if (!state.supported) return state;
+  // A new check would reset a download under way, or one waiting to be installed.
+  if (state.status === 'downloading' || state.status === 'downloaded') return state;
   try {
     await autoUpdater.checkForUpdates();
   } catch (error) {
@@ -250,11 +255,19 @@ export async function checkForUpdates(): Promise<UpdateState> {
   return state;
 }
 
-/** Only meaningful when auto-download is off and an update is waiting. */
+/** Keeps looking while the app stays open. Leaves a prompt on screen undisturbed. */
+export function startPeriodicUpdateChecks(): void {
+  if (!state.supported) return;
+  setInterval(() => {
+    if (!state.prompt) void checkForUpdates();
+  }, CHECK_INTERVAL_MS).unref();
+}
+
+/** Starts downloading the update on offer. */
 export async function downloadUpdate(): Promise<UpdateState> {
   if (!state.supported || state.status !== 'available') return state;
   try {
-    patch({ status: 'downloading', downloadPercent: 0 });
+    patch({ status: 'downloading', downloadPercent: 0, error: null });
     await autoUpdater.downloadUpdate();
   } catch (error) {
     recordFailure(error, 'download threw');
@@ -273,8 +286,6 @@ export async function downloadUpdate(): Promise<UpdateState> {
  */
 export function installNow(): void {
   if (!state.supported || state.status !== 'downloaded') return;
-  // A manual install from Settings counts as choosing to update.
-  autoUpdater.autoInstallOnAppQuit = true;
   log('restarting to install');
   autoUpdater.quitAndInstall();
 }
@@ -285,8 +296,6 @@ export function installNow(): void {
  */
 export async function updateNow(): Promise<UpdateState> {
   if (!state.supported) return state;
-  // Choosing to update undoes an earlier "Later" in this run.
-  autoUpdater.autoInstallOnAppQuit = true;
   if (state.status === 'downloaded') {
     installNow();
     return state;
@@ -298,31 +307,17 @@ export async function updateNow(): Promise<UpdateState> {
 }
 
 /**
- * "Later" or "Skip this version" from the launch prompt. Either way the update is not installed
- * on quit behind the user's back: they said not now. "Later" asks again on the next launch;
- * "Skip" stays quiet until a newer version is published. Settings → About can still install.
+ * "Later" or "Skip this version" from the prompt. "Later" asks again on the next launch; "Skip"
+ * stays quiet until a newer version is published. Settings → About can still install either.
  */
 export function dismissUpdatePrompt(choice: 'later' | 'skip'): UpdateState {
-  promptDismissed = true;
+  dismissedVersion = state.availableVersion;
   installWhenDownloaded = false;
-  if (state.supported) autoUpdater.autoInstallOnAppQuit = false;
   if (choice === 'skip' && state.availableVersion) {
     setSkippedVersion(state.availableVersion);
   }
   patch({ prompt: false });
   log(`launch prompt dismissed (${choice}) for ${state.availableVersion ?? 'unknown version'}`);
-  return state;
-}
-
-/** Persists the preference and applies it to the live updater, so turning it off mid-session
- * stops the *next* check from downloading without needing a restart. */
-export function setAutoDownloadPreference(autoDownload: boolean): UpdateState {
-  const saved = setAutoDownload(autoDownload);
-  if (state.supported) {
-    autoUpdater.autoDownload = saved.autoDownload;
-  }
-  patch({ autoDownload: saved.autoDownload });
-  log(`auto-download ${saved.autoDownload ? 'enabled' : 'disabled'}`);
   return state;
 }
 

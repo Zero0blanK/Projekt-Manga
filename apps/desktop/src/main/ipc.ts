@@ -31,7 +31,6 @@ import {
   downloadUpdate,
   getUpdateState,
   installNow,
-  setAutoDownloadPreference,
   updateNow,
   dismissUpdatePrompt,
 } from './updater';
@@ -437,14 +436,6 @@ export function registerIpcHandlers(
   handleFromApp(DESKTOP_CHANNELS.updateGetState, async () => ok(getUpdateState()));
   handleFromApp(DESKTOP_CHANNELS.updateCheck, async () => ok(await checkForUpdates()));
   handleFromApp(DESKTOP_CHANNELS.updateDownload, async () => ok(await downloadUpdate()));
-  handleFromApp(DESKTOP_CHANNELS.updateSetAutoDownload, async (_event, value: unknown) => {
-    // Validated like every other renderer-supplied argument here: this one is written to disk,
-    // and a non-boolean would persist a preference that reads back as neither on nor off.
-    if (typeof value !== 'boolean') {
-      throw new Error('autoDownload must be a boolean');
-    }
-    return ok(setAutoDownloadPreference(value));
-  });
   handleFromApp(DESKTOP_CHANNELS.updateInstallNow, async () => {
     installNow();
     return ok(null);

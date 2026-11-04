@@ -19,6 +19,9 @@ function CardStandIn({ manga, selected, onSelect }: CardProps) {
     </div>
   );
 }
+vi.mock('@/components/downloads/row-data', () => ({
+  useDownloadedTitleIds: () => new Set<string>(),
+}));
 vi.mock('@/components/manga-card', () => ({ MangaCard: CardStandIn }));
 vi.mock('@/components/library/library-list-row', () => ({ LibraryListRow: CardStandIn }));
 vi.mock('@/components/library/library-title-context-menu', () => ({

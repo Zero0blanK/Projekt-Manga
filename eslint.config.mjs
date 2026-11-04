@@ -23,6 +23,8 @@ export default tseslint.config(
       // downloaded. All generated, none of it hand-written. `.gitignore` already excludes
       // it from commits, but ESLint's flat config doesn't read .gitignore on its own.
       '**/release/**',
+      // The packaging step's staged copy of the app, with the minified OCR engine in it.
+      '**/staging/**',
       // Downloaded source bundles for installed extensions (server data dir, and its
       // equivalent under a packaged build's resources/) — untrusted, minified third-party
       // code fetched at runtime, not part of this repo. Same .gitignore-doesn't-reach-

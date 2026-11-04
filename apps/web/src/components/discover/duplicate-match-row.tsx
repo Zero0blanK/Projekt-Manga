@@ -23,7 +23,6 @@ export function MatchRow({
         src={match.manga.thumbnailUrl}
         alt=""
         className="h-16 w-11 shrink-0"
-        sizes="44px"
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-foreground">{match.manga.title}</p>

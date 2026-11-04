@@ -63,13 +63,39 @@ test('a new version prompts once per launch, and "Skip" silences that version', 
 
   first.updater.dismissUpdatePrompt('skip');
   assert.equal(first.updater.getUpdateState().prompt, false);
-  // "Not now" also means not installing behind the user's back on quit.
-  assert.equal(first.autoUpdater.autoInstallOnAppQuit, false);
+});
+
+test('a new version only prompts: nothing downloads or installs unasked', () => {
+  const { updater, listeners, autoUpdater } = loadUpdater();
+  assert.equal(autoUpdater.autoDownload, false);
+  assert.equal(autoUpdater.autoInstallOnAppQuit, false);
+  listeners['update-available']({ version: '1.1.0', releaseNotes: '' });
+  assert.equal(updater.getUpdateState().status, 'available');
+  assert.equal(updater.getUpdateState().prompt, true);
+});
+
+test('"Later" quiets that version, but a newer release still prompts', () => {
+  const { updater, listeners } = loadUpdater();
+  listeners['update-available']({ version: '1.1.0', releaseNotes: '' });
+  updater.dismissUpdatePrompt('later');
+  listeners['update-available']({ version: '1.1.0', releaseNotes: '' });
+  assert.equal(updater.getUpdateState().prompt, false);
+  listeners['update-available']({ version: '1.2.0', releaseNotes: '' });
+  assert.equal(updater.getUpdateState().prompt, true);
+});
+
+test('a failed download stays on offer with its reason', async () => {
+  const { updater, listeners } = loadUpdater();
+  listeners['update-available']({ version: '1.1.0', releaseNotes: '' });
+  await updater.updateNow();
+  listeners['error'](new Error('ENOTFOUND github.com'));
+  const state = updater.getUpdateState();
+  assert.equal(state.status, 'available');
+  assert.match(state.error, /Could not reach GitHub/);
 });
 
 test('"Update now" installs as soon as the download finishes', async () => {
   const { updater, listeners, autoUpdater } = loadUpdater();
-  autoUpdater.autoDownload = false;
   listeners['update-available']({ version: '1.2.0', releaseNotes: '' });
   await updater.updateNow();
   assert.equal(autoUpdater.installed, 0);

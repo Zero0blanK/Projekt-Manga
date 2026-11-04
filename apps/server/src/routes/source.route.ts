@@ -51,6 +51,7 @@ router.get(
 
 router.get('/sources', sourceController.getSources);
 router.get('/health', sourceController.getSourceHealth);
+router.get('/capabilities', sourceController.getAllCapabilities);
 /**
  * Deliberately not behind requireAuth: an account is optional, so anonymous visitors must
  * be able to update their library. Each sweep scrapes an upstream source per library

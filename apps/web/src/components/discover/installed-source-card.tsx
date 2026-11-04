@@ -71,6 +71,7 @@ export function InstalledSourceCard({
   source,
   record,
   listingIconUrl,
+  alternate,
   editionEntries = [],
   pinned,
   privateReading,
@@ -79,11 +80,15 @@ export function InstalledSourceCard({
   canMoveUp,
   canMoveDown,
   onMovePin,
+  picked,
+  onPick,
 }: {
   source: DisplaySource;
   record?: InstalledExtension;
   /** The icon its repository lists now, for a source installed before it had one. */
   listingIconUrl?: string | null;
+  /** The same site through the Suwayomi server, shown on this card rather than as its own. */
+  alternate?: DisplaySource;
   editionEntries?: CatalogEntry[];
   pinned: boolean;
   privateReading: boolean;
@@ -92,6 +97,9 @@ export function InstalledSourceCard({
   canMoveUp: boolean;
   canMoveDown: boolean;
   onMovePin: (direction: number) => void;
+  /** Whether it's ticked for a bulk action; left out when the list isn't selecting. */
+  picked?: boolean;
+  onPick?: () => void;
 }) {
   const [installing, setInstalling] = useState<string | null>(null);
   const pendingInstall = useRef(false);
@@ -159,6 +167,15 @@ export function InstalledSourceCard({
   return (
     <article className="flex flex-col rounded-2xl border border-border/60 bg-surface/40 p-3 transition hover:border-primary/30">
       <div className="mb-3 flex items-start gap-3">
+        {onPick && (
+          <input
+            type="checkbox"
+            aria-label={`Select ${source.name}`}
+            checked={picked === true}
+            onChange={onPick}
+            className="mt-1 size-4 shrink-0 accent-primary pointer-coarse:size-6"
+          />
+        )}
         <SourceAvatar key={iconSrc} name={source.name} accent={source.accent} url={iconSrc} />
         <div className="min-w-0 flex-1">
           <h2 className="truncate font-semibold">{source.name}</h2>
@@ -174,6 +191,14 @@ export function InstalledSourceCard({
               {record ? `v${record.version}` : suwayomi ? 'Suwayomi' : 'Version unavailable'}
             </span>
           </p>
+          {alternate && (
+            <Link
+              href={`/discover/popular?source=${encodeURIComponent(alternate.id)}`}
+              className="mt-0.5 block truncate text-xs text-primary hover:underline"
+            >
+              Also on Suwayomi
+            </Link>
+          )}
           {(rating === 'nsfw' ||
             rating === 'mixed' ||
             health === 'failing' ||

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import {
   getAllDownloads,
   subscribeToDownloadEvents,
@@ -204,6 +204,15 @@ export function useDownloadQueueCount(): number {
   return data.filter((r) => r.status !== 'done' && r.status !== 'failed').length;
 }
 
+/** Titles with at least one finished download, so something of them reads offline. */
+export function useDownloadedTitleIds(): ReadonlySet<string> {
+  const { data } = useRawRows();
+  return useMemo(
+    () => new Set(data.filter((r) => r.status === 'done').map((r) => r.mangaId)),
+    [data],
+  );
+}
+
 /**
  * How far the download queue has got, 0–1, across chapters still queued or downloading
  * (each counts the same), or null when nothing is. For the taskbar button.
@@ -213,6 +222,19 @@ export function useDownloadQueueProgress(): number | null {
   const working = data.filter((r) => r.status === 'queued' || r.status === 'downloading');
   if (working.length === 0) return null;
   return working.reduce((sum, r) => sum + r.progress, 0) / working.length;
+}
+
+/** The running queue for the corner dial: its overall progress, and what's being fetched. */
+export function useDownloadQueueSummary() {
+  const { data } = useRawRows();
+  const working = data.filter((r) => r.status === 'queued' || r.status === 'downloading');
+  if (working.length === 0) return null;
+  const current = working.find((r) => r.status === 'downloading') ?? working[0];
+  return {
+    fraction: working.reduce((sum, r) => sum + r.progress, 0) / working.length,
+    remaining: working.length,
+    title: current.title,
+  };
 }
 
 export function useDownloadRows() {

@@ -1,6 +1,7 @@
 import type { Source } from '@projekt-manga/types';
 import type { download, chapter as Chapter, manga } from '@prisma/client';
 import { resolveSource } from '../services/sourceResolver.service.js';
+import { announceLibraryChange, EVERYONE } from '../utils/libraryChanges.js';
 import downloadService from '../services/download.service.js';
 import { recordDiagnosticEvent } from '../utils/diagnosticLog.js';
 import { withRequestId } from '../utils/requestContext.js';
@@ -565,6 +566,7 @@ export class DownloadWorker extends EventEmitter {
       this.retryCounts.delete(downloadId);
 
       this.emit('complete', downloadId);
+      announceLibraryChange(EVERYONE, 'library');
       recordDiagnosticEvent({
         level: failureCount > 0 ? 'warn' : 'info',
         area: 'download',

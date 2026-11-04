@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
+import { SelectMenu } from '@/components/ui/select-menu';
 import {
   ApiError,
   getSources,
@@ -42,9 +43,6 @@ import {
 
 /** Compressed backups above this are refused before they are read. */
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
-
-const selectClass =
-  'h-8 w-full rounded-lg border border-border/60 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/60 disabled:opacity-50 sm:w-48';
 
 type Step =
   | { kind: 'closed' }
@@ -372,24 +370,22 @@ export function MihonImport({
                               : ''}
                         </span>
                       </span>
-                      <select
-                        aria-label={`Installed source for ${source.name}`}
-                        className={selectClass}
+                      <SelectMenu
+                        label={`Installed source for ${source.name}`}
+                        className="w-full sm:w-48"
                         value={value}
                         disabled={!!busy}
-                        onChange={(event) =>
-                          setChoices((current) =>
-                            new Map(current).set(source.id, event.target.value || null),
-                          )
+                        onChange={(next) =>
+                          setChoices((current) => new Map(current).set(source.id, next || null))
                         }
-                      >
-                        <option value="">No match</option>
-                        {options.map((installed) => (
-                          <option key={installed.id} value={installed.id}>
-                            {sourceLabel(installed)}
-                          </option>
-                        ))}
-                      </select>
+                        options={[
+                          { value: '', label: 'No match' },
+                          ...options.map((installed) => ({
+                            value: installed.id,
+                            label: sourceLabel(installed),
+                          })),
+                        ]}
+                      />
                       {!value && (
                         <div className="basis-full space-y-1.5 sm:pt-1">
                           {customOrders.has(source.id) ? (
