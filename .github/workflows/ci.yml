@@ -376,3 +376,7 @@ jobs:
         run: npm run package --workspace=@projekt-manga/desktop -- --publish never
         env:
           DATABASE_URL: file:./data/ci-generate.db
+
+      - name: Build — release notes
+        if: github.workflow != 'Release'
+        run: node scripts/release-notes.mjs apps/desktop/release

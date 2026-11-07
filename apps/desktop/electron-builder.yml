@@ -106,6 +106,9 @@ win:
   # The name must match the certificate's subject exactly.
   # publisherName: Your Name As On The Certificate
 nsis:
+  # scripts/release-notes.mjs and every release's download links expect this name, and the
+  # default has spaces in the local file, then hyphens once uploaded.
+  artifactName: Projekt-Manga-Setup-${version}.${ext}
   # electron-builder's own default is oneClick: true — a minimal installer with no wizard
   # at all: no directory page, no visible per-step progress, it just extracts to a fixed
   # location and launches. That default was never overridden, which is why neither showed

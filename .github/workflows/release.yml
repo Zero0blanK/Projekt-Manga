@@ -64,6 +64,18 @@ jobs:
         env:
           DATABASE_URL: file:./data/ci-generate.db
 
+      # With no release to find, the parallel uploads below can each create one, and 1.1.0
+      # ended up with two drafts holding different files.
+      - name: Create the draft release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "Projekt Manga ${GITHUB_REF_NAME#v}" --notes ""
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
       # RELEASE_TOKEN is only needed when electron-builder.yml publishes to a different
       # repository (for example a public releases repo); this repo's own token covers itself.
       - name: Package and upload to a draft release
