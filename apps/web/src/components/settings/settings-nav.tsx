@@ -73,6 +73,7 @@ export function SettingsNav({
         const isActive = active === s.id;
         return (
           <button
+            type="button"
             key={s.id}
             onClick={() => onChange(s.id)}
             // aria-current so the active tab is not conveyed by tint alone.

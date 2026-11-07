@@ -532,8 +532,10 @@ describe('bulk mark-read pushes to linked trackers', () => {
   // mark-read never reached the tracker at all.
   function mockBulkPrisma() {
     prismaMock.manga.findFirst.mockResolvedValueOnce({ id: 'manga-1' }).mockResolvedValueOnce(null);
+    prismaMock.chapter.findMany.mockResolvedValue([]);
     prismaMock.chapter.findUnique.mockResolvedValue({ id: 'existing' });
-    prismaMock.user_chapter_state.upsert.mockResolvedValue({});
+    prismaMock.user_chapter_state.findMany.mockResolvedValue([]);
+    prismaMock.history.findMany.mockResolvedValue([]);
   }
 
   // Clients always say which source a chapter key belongs to.

@@ -283,7 +283,7 @@ export function DiscoverPageClient() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <TabsList>
             <TabsTrigger value="installed">Installed sources</TabsTrigger>
-            <TabsTrigger value="extensions">Extensions</TabsTrigger>
+            <TabsTrigger value="extensions">Add sources</TabsTrigger>
           </TabsList>
           <div className="flex w-full min-w-0 flex-none items-center gap-2 rounded-xl border border-border bg-surface/40 px-3 py-2 sm:w-auto sm:flex-1 sm:max-w-sm">
             <Search size={18} className="shrink-0 text-muted-foreground" />
@@ -298,6 +298,7 @@ export function DiscoverPageClient() {
             />
             {name && (
               <button
+                type="button"
                 aria-label="Clear source search"
                 onClick={() => setName('')}
                 className="inline-flex shrink-0 items-center justify-center pointer-coarse:min-h-6 pointer-coarse:min-w-6"
@@ -325,9 +326,10 @@ export function DiscoverPageClient() {
               <p className="text-sm text-muted-foreground">
                 {allSources.length
                   ? 'No sources match your search, filters or content preferences.'
-                  : 'Install an extension to start reading.'}
+                  : 'Install a source to start reading.'}
               </p>
               <button
+                type="button"
                 className="mt-4 text-sm text-primary pointer-coarse:min-h-11"
                 onClick={() => {
                   if (allSources.length) {
@@ -336,7 +338,7 @@ export function DiscoverPageClient() {
                   } else changeTab('extensions');
                 }}
               >
-                {allSources.length ? 'Clear search and filters' : 'Browse extensions'}
+                {allSources.length ? 'Clear search and filters' : 'Browse sources'}
               </button>
             </div>
           ) : (

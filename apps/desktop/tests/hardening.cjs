@@ -854,3 +854,47 @@ test('the anonymous library rescue carries local titles, progress and history, i
   db.exec('DELETE FROM manga; DELETE FROM manga_state; DELETE FROM history;');
   assert.equal(buildRescuePayload(db), null);
 });
+
+test('a pulled category with a new id takes over the local one of that name', async () => {
+  await withStore((store, db) => {
+    store.upsertManga({ id: 'manga-1', slug: 'slug-1', title: 'A', source: 'source-a' });
+    const stamp = '2026-01-01T00:00:00.000Z';
+    db.prepare('INSERT INTO category (id, name, updated_at) VALUES (?, ?, ?)').run(
+      'action',
+      'Action',
+      stamp,
+    );
+    db.prepare(
+      'INSERT INTO manga_category (manga_id, category_id, updated_at) VALUES (?, ?, ?)',
+    ).run('manga-1', 'action', stamp);
+
+    store.applyPulledChanges(pullFixture({ categories: [{ id: 'c-own', name: 'Action' }] }));
+
+    assert.deepEqual(
+      db
+        .prepare('SELECT id, name FROM category')
+        .all()
+        .map(({ id, name }) => [id, name]),
+      [['c-own', 'Action']],
+    );
+    assert.equal(db.prepare('SELECT category_id FROM manga_category').get().category_id, 'c-own');
+  });
+});
+
+test('state copied from the server is not pushed back as a new edit', async () => {
+  await withStore((store) => {
+    store.upsertManga({ id: 'manga-1', slug: 'slug-1', title: 'A', source: 'source-a' });
+    store.upsertChapter({
+      id: 'chapter-1',
+      ...CHAPTER,
+      manga_id: 'manga-1',
+      chapter_number: 1,
+      is_read: true,
+    });
+
+    const pending = store.getPendingChanges();
+
+    assert.equal(pending.manga_state.length, 0);
+    assert.equal(pending.chapter_state.length, 0);
+  });
+});

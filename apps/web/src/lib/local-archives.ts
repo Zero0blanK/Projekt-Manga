@@ -1,5 +1,7 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
+
 export type LocalArchive = {
   id: string;
   title: string;
@@ -29,7 +31,7 @@ export type LocalArchiveBridge = {
 };
 export function localArchiveBridge(): LocalArchiveBridge | undefined {
   if (typeof window === 'undefined') return;
-  return (window as unknown as { desktop?: { archives?: LocalArchiveBridge } }).desktop?.archives;
+  return desktopBridge<{ archives: LocalArchiveBridge }>()?.archives;
 }
 
 /** Strips Electron's "Error invoking remote method" wrapper from a main-process error. */

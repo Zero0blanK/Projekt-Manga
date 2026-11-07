@@ -12,7 +12,7 @@ describe('POST /api/category/add (real DB)', () => {
   });
 
   it('409s on a real case-insensitive duplicate', async () => {
-    await prisma.category.create({ data: { id: 'action', name: 'Action' } });
+    await prisma.category.create({ data: { key: 'action', name: 'Action' } });
 
     const res = await request(app).post('/api/category/add').send({ category_name: 'action' });
 
@@ -20,19 +20,19 @@ describe('POST /api/category/add (real DB)', () => {
     expect(await prisma.category.count()).toBe(1);
   });
 
-  it('derives the id from the name', async () => {
+  it('derives the key from the name', async () => {
     const res = await request(app)
       .post('/api/category/add')
       .send({ category_name: 'Slice of Life' });
 
     expect(res.status).toBe(201);
-    expect(res.body.data.id).toBe('slice-of-life');
+    expect(res.body.data.key).toBe('slice-of-life');
   });
 });
 
 describe('PUT /api/category/update/:category_id (real DB, real FK cascade)', () => {
-  it('renaming a category cascades the id change to linked manga_category rows', async () => {
-    await prisma.category.create({ data: { id: 'action', name: 'Action' } });
+  it('renaming a category keeps its id, so linked rows stay attached', async () => {
+    await prisma.category.create({ data: { id: 'action', key: 'action', name: 'Action' } });
     const manga = await prisma.manga.create({
       data: {
         slug: 'linked-manga',
@@ -49,13 +49,11 @@ describe('PUT /api/category/update/:category_id (real DB, real FK cascade)', () 
       .send({ category_name: 'Action Adventure' });
 
     expect(res.status).toBe(200);
-    expect(res.body.data.id).toBe('action-adventure');
+    expect(res.body.data.id).toBe('action');
+    expect(res.body.data.key).toBe('action-adventure');
 
-    // The old id should be gone, and the link should have followed the rename via the
-    // database's own ON UPDATE CASCADE rather than needing app code to fix it up.
-    expect(await prisma.category.findUnique({ where: { id: 'action' } })).toBeNull();
     const link = await prisma.manga_category.findFirst({ where: { manga_id: manga.id } });
-    expect(link?.category_id).toBe('action-adventure');
+    expect(link?.category_id).toBe('action');
   });
 });
 

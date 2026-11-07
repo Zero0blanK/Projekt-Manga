@@ -51,6 +51,7 @@ router.post(
 // What a library update found, sent once at the end of the run.
 router.post(
   '/alert',
+  anonymousNeedsAdmin,
   validateBody(chapterAlertBodySchema),
   run((req) => notificationChannelService.alert(req.validated as ChapterAlertBody, owner(req))),
 );

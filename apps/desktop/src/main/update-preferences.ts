@@ -6,7 +6,8 @@
  * renderer exists. So it gets its own file next to the local database.
  */
 import { app } from 'electron';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { writeFileAtomic } from './atomic-file';
 import path from 'node:path';
 
 export interface UpdatePreferences {
@@ -41,6 +42,6 @@ export function setSkippedVersion(skippedVersion: string | null): UpdatePreferen
 }
 
 function savePreferences(next: UpdatePreferences): UpdatePreferences {
-  writeFileSync(preferencesFilePath(), JSON.stringify(next, null, 2), 'utf-8');
+  writeFileAtomic(preferencesFilePath(), JSON.stringify(next, null, 2), 'utf-8');
   return next;
 }

@@ -139,6 +139,21 @@ function buildUrl(path: string, query?: QueryParams, base = resolveRequestBaseUr
 
 export type QueryParams = Record<string, string | number | boolean | undefined | null>;
 
+/** The most a list endpoint gives at once (MAX_PAGE_LIMIT in packages/schemas). */
+const LIST_PAGE_SIZE = 200;
+
+/** A whole list, a page at a time, so no single response has to carry all of it. */
+export async function fetchAllPages<T>(
+  fetchPage: (page: { limit: number; offset: number }) => Promise<T[]>,
+): Promise<T[]> {
+  const all: T[] = [];
+  for (;;) {
+    const page = await fetchPage({ limit: LIST_PAGE_SIZE, offset: all.length });
+    all.push(...page);
+    if (page.length < LIST_PAGE_SIZE) return all;
+  }
+}
+
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   query?: QueryParams;

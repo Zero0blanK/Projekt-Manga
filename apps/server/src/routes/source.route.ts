@@ -1,5 +1,6 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
+import { rateLimitBody } from '../utils/responseHandlers.js';
 import sourceController from '../controllers/source.controller.js';
 import { validateQuery, validateBody } from '../middleware/validate.middleware.js';
 import { requireAdmin } from '../middleware/admin.middleware.js';
@@ -26,7 +27,7 @@ const malformedImageProxyRateLimit = rateLimit({
   skip: (req) => hasImageUrl(req.query.url),
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: 'Too many image requests — please try again shortly.' },
+  message: rateLimitBody('Too many image requests — please try again shortly.'),
 });
 
 // Next's optimizer reaches this route from one server IP for many covers and users.
@@ -38,7 +39,7 @@ const imageProxyRateLimit = rateLimit({
   skip: (req) => !hasImageUrl(req.query.url),
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: 'Too many image requests — please try again shortly.' },
+  message: rateLimitBody('Too many image requests — please try again shortly.'),
 });
 
 router.get(
@@ -64,13 +65,11 @@ const librarySweepRateLimit = rateLimit({
   limit: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  message: {
-    success: false,
-    message: 'Library updates were checked very recently — please wait a few minutes.',
-  },
+  message: rateLimitBody('Library updates were checked very recently — please wait a few minutes.'),
 });
 
 router.post('/library/check-updates', librarySweepRateLimit, sourceController.checkLibraryUpdates);
+router.get('/library/check-updates', sourceController.getLibraryUpdateStatus);
 router.get('/:source_id/capabilities', sourceController.getCapabilities);
 router.get(
   '/:source_id/catalogue',
@@ -108,7 +107,7 @@ const urlKeysRateLimit = rateLimit({
   limit: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: 'Too many key requests — please try again shortly.' },
+  message: rateLimitBody('Too many key requests — please try again shortly.'),
 });
 router.post(
   '/:source_id/keys-from-urls',

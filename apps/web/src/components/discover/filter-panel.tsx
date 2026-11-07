@@ -48,7 +48,7 @@ function FilterSection({
         <span id={labelId} className="text-xs font-semibold text-foreground">
           {label}
         </span>
-        {hint && <span className="text-[10px] text-muted-foreground">{hint}</span>}
+        {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
       </div>
       {children}
     </section>
@@ -81,7 +81,7 @@ function PillGroup<T>({
   const [expanded, setExpanded] = useState(false);
 
   if (options.length === 0) {
-    return <p className="text-[11px] text-muted-foreground">No options available.</p>;
+    return <p className="text-xs text-muted-foreground">No options available.</p>;
   }
 
   const visible = expanded
@@ -152,9 +152,10 @@ export function FilterPanel({
           Filters{activeCount > 0 && ` · ${activeCount} active`}
         </span>
         <button
+          type="button"
           onClick={() => setDraft({})}
           disabled={activeCount === 0}
-          className="flex items-center gap-1 text-[11px] text-muted-foreground transition hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          className="flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
         >
           <RotateCcw className="h-3 w-3" /> Clear all
         </button>
@@ -266,10 +267,9 @@ export function FilterPanel({
       </div>
 
       <div className="flex items-center justify-end gap-3 border-t border-border/50 px-4 py-3">
-        {dirty && (
-          <span className="mr-auto text-[11px] text-muted-foreground">Unapplied changes</span>
-        )}
+        {dirty && <span className="mr-auto text-xs text-muted-foreground">Unapplied changes</span>}
         <button
+          type="button"
           onClick={() => setDraft(values)}
           disabled={!dirty}
           className="text-xs text-muted-foreground transition hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
@@ -277,6 +277,7 @@ export function FilterPanel({
           Cancel
         </button>
         <button
+          type="button"
           onClick={() => onApply(draft)}
           disabled={!dirty}
           className="rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground shadow-glow transition hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"

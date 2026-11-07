@@ -13,18 +13,17 @@ permissions:
   contents: read
 
 # A second push to the same branch makes the first run's result irrelevant — cancel it
-# rather than paying for both and waiting behind the stale one.
+# rather than paying for both and waiting behind the stale one. Only for branches: called
+# from the Release workflow this runs on a tag, and a re-run must not cancel a release.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
 
-env:
-  # Node 25+ is a hard requirement, not a preference: apps/extensions' sandboxed source
-  # runner refuses to start below it (see spawnSandboxedSource.ts's
-  # assertNodeSupportsNetworkPermission) because earlier versions don't gate network
-  # access under --permission, so a "sandboxed" extension would get real, unrestricted
-  # network access. Kept in sync with .nvmrc and the root package.json "engines" field.
-  NODE_VERSION: '25'
+# Node comes from .nvmrc. 25+ is a hard requirement, not a preference: apps/extensions'
+# sandboxed source runner refuses to start below it (see spawnSandboxedSource.ts's
+# assertNodeSupportsNetworkPermission) because earlier versions don't gate network access
+# under --permission, so a "sandboxed" extension would get real, unrestricted network
+# access.
 
 jobs:
   # ── Split into independent jobs so a typecheck error surfaces without waiting behind a
@@ -39,7 +38,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
@@ -70,12 +69,14 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: Zero0blanK/projektmanga-sources
-          ref: main
+          # Pinned, so a change over there can't fail this repository's pull requests. Move
+          # it forward deliberately, in a change of its own.
+          ref: a58309b13f48a7b31a6eb1b793dce2787484f9a0
           path: projektmanga-sources
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
@@ -123,7 +124,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
@@ -147,7 +148,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
@@ -181,7 +182,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
@@ -257,7 +258,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
@@ -290,7 +291,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
@@ -315,7 +316,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
@@ -324,6 +325,12 @@ jobs:
         run: npm run db:generate --workspace=@projekt-manga/server
         env:
           DATABASE_URL: file:./data/ci-generate.db
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Chromium for Playwright
         run: npx --workspace=@projekt-manga/extensions playwright install --with-deps chromium
@@ -342,7 +349,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci

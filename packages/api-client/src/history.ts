@@ -1,62 +1,12 @@
 import type { MangaHistory } from '@projekt-manga/types';
-import { request } from './client.js';
+import { fetchAllPages, request } from './client.js';
 import { localInvoke, usesLocalFirstData } from './runtime.js';
-
-/** Row shape returned by GET /history (flattened, with manga title/thumbnail resolved). */
-export interface HistoryEntry {
-  id: string;
-  source: string;
-  manga_id?: string;
-  /** Whether this title is in the current account's library (or the anonymous library). */
-  in_library?: boolean;
-  manga_slug: string;
-  source_manga_id?: string;
-  /** The stored chapter's own id, for library reader links. */
-  chapter_id?: string;
-  /** The source's id for the chapter, for source (preview) reader links. */
-  source_chapter_key?: string;
-  pages_read: number;
-  time_read: number;
-  last_read: string;
-  read_at: string;
-  title?: string;
-  thumbnail_url?: string;
-  chapter_number?: number;
-  name?: string;
-  is_read?: boolean;
-  last_page_read: number;
-  page_count: number;
-}
-
-export interface HistoryRecord {
-  id: string;
-  source: string;
-  manga_id: string | null;
-  manga_slug: string;
-  source_manga_id?: string | null;
-  chapter_id: string | null;
-  thumbnail_url: string | null;
-  read_at: string;
-  last_read: string;
-  pages_read: number;
-  time_read: number;
-}
-
-export interface HistoryByMangaSlugEntry extends HistoryRecord {
-  chapter: {
-    id: string;
-    source_chapter_key: string;
-    chapter_number: number;
-    name: string | null;
-    is_read: boolean;
-    last_page_read: number;
-    page_count: number | null;
-  } | null;
-}
+import type { HistoryEntry, HistoryRecord, HistoryByMangaSlugEntry } from '@projekt-manga/types';
+export type { HistoryEntry, HistoryRecord, HistoryByMangaSlugEntry } from '@projekt-manga/types';
 
 /** HTTP-only history for the current server session, including on desktop. */
 export const getServerHistory = (signal?: AbortSignal) =>
-  request<HistoryEntry[]>('/history', { signal });
+  fetchAllPages((page) => request<HistoryEntry[]>('/history', { signal, query: page }));
 
 export const getHistory = async (signal?: AbortSignal) => {
   if (await usesLocalFirstData()) {

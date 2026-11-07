@@ -1,4 +1,5 @@
 'use client';
+import { desktopBridge } from '@/lib/desktop-bridge';
 import { useEffect, useState } from 'react';
 import type { SectionId } from './settings-nav';
 type Match = { section: SectionId; label: string; description: string; desktop?: boolean };
@@ -206,7 +207,7 @@ export function SettingsSearch({
   query?: string;
 }) {
   const [desktop, setDesktop] = useState(false);
-  useEffect(() => setDesktop(Boolean((window as unknown as { desktop?: unknown }).desktop)), []);
+  useEffect(() => setDesktop(desktopBridge() !== null), []);
   const normalized = query.trim().toLocaleLowerCase();
   const results = normalized
     ? matches.filter((match) =>

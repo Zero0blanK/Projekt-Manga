@@ -1,23 +1,15 @@
 import type { SuwayomiSettingsBody } from '@projekt-manga/schemas';
 import { request } from './client.js';
-
-/** The host's Suwayomi server connection. The password is never sent back: only
- * `has_password`. */
-export interface SuwayomiSettings {
-  enabled: boolean;
-  url: string;
-  username: string | null;
-  has_password: boolean;
-  /** False when the saved password can no longer be decrypted and has to be entered again. */
-  password_readable: boolean;
-}
-
-/** What a connection test found on the server. */
-export interface SuwayomiConnectionTest {
-  name: string;
-  version: string;
-  sources: number;
-}
+import type {
+  SuwayomiSettings,
+  SuwayomiConnectionTest,
+  SuwayomiExtension,
+} from '@projekt-manga/types';
+export type {
+  SuwayomiSettings,
+  SuwayomiConnectionTest,
+  SuwayomiExtension,
+} from '@projekt-manga/types';
 
 export const getSuwayomiSettings = (signal?: AbortSignal) =>
   request<SuwayomiSettings | null>('/suwayomi/settings', { signal, cache: 'no-store' });
@@ -36,19 +28,6 @@ export const testSuwayomiConnection = () =>
 /** Merges the Suwayomi server's library into this one, in the background. */
 export const importSuwayomiLibrary = () =>
   request<{ id: string; titles: number }>('/suwayomi/import', { method: 'POST' });
-
-/** A Mihon extension the Suwayomi server can install, installed or not. */
-export interface SuwayomiExtension {
-  pkg_name: string;
-  name: string;
-  lang: string;
-  version: string;
-  icon_url: string | null;
-  is_nsfw: boolean;
-  installed: boolean;
-  has_update: boolean;
-  obsolete: boolean;
-}
 
 /** Every extension in the server's repositories. `refresh` re-reads those repositories. */
 export const getSuwayomiExtensions = (refresh = false, signal?: AbortSignal) =>

@@ -60,6 +60,7 @@ export function ChangelogPanel() {
 
       {hiddenCount > 0 && (
         <button
+          type="button"
           onClick={() => setExpanded(true)}
           className="w-full rounded-lg border border-border/60 py-2 text-xs text-muted-foreground transition hover:bg-accent hover:text-foreground"
         >

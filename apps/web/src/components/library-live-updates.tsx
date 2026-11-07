@@ -37,7 +37,11 @@ export function LibraryLiveUpdates() {
           refetchType: 'active',
           predicate: (query) => {
             const key = String(query.queryKey[0]);
-            return !NOT_LIBRARY.has(key) && key !== queryKeys.mangaLibrary[0];
+            return (
+              !NOT_LIBRARY.has(key) &&
+              key !== queryKeys.mangaLibrary[0] &&
+              key !== queryKeys.categories[0]
+            );
           },
         });
         return;

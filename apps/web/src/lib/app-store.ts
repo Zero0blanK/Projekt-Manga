@@ -27,11 +27,30 @@ export type AppState = {
   view: 'grid' | 'compact' | 'list';
   sort: 'latest' | 'title' | 'rating' | 'progress' | 'lastRead';
   sortDir: 'asc' | 'desc';
-  /** User-created library categories, e.g. "Favorites". */
+  /** The current identity's library categories, e.g. "Favorites". They live on the server
+   * (see lib/category-sync.ts): this is what's on screen, and it's never stored here. */
   customCategories: string[];
   /** Category name -> manga ids in it. */
   categoryMembers: Record<string, string[]>;
+  /** Categories an older version kept in this browser, until they reach the server. */
+  pendingCategoryImport?: LocalCategories;
 };
+
+type LocalCategories = Pick<AppState, 'customCategories' | 'categoryMembers'>;
+
+/** Where category edits go; set by lib/category-sync.ts. */
+type CategoryBackend = {
+  add(name: string): void;
+  remove(name: string): void;
+  rename(name: string, nextName: string): void;
+  setMember(name: string, mangaId: string, member: boolean): void;
+  merge(categories: Array<{ name: string; ids: string[] }>): void;
+};
+let categoryBackend: CategoryBackend | null = null;
+
+export function setCategoryBackend(backend: CategoryBackend) {
+  categoryBackend = backend;
+}
 
 const initial: AppState = {
   settings: {},
@@ -51,7 +70,8 @@ const listeners = new Set<() => void>();
 
 function persist() {
   try {
-    localStorage.setItem(KEY, JSON.stringify(state));
+    const { customCategories: _names, categoryMembers: _members, ...stored } = state;
+    localStorage.setItem(KEY, JSON.stringify(stored));
     return true;
   } catch {
     /* storage unavailable — keep in memory */
@@ -81,27 +101,33 @@ function sanitizeStoredState(parsed: unknown): Partial<AppState> {
   if (raw.view === 'grid' || raw.view === 'compact' || raw.view === 'list') out.view = raw.view;
   if (typeof raw.sort === 'string') out.sort = raw.sort as AppState['sort'];
   if (raw.sortDir === 'asc' || raw.sortDir === 'desc') out.sortDir = raw.sortDir;
-  if (
-    Array.isArray(raw.customCategories) &&
-    raw.customCategories.every((c) => typeof c === 'string')
-  ) {
-    out.customCategories = raw.customCategories as string[];
+  const pending = readLocalCategories(raw.pendingCategoryImport) ?? readLocalCategories(raw);
+  if (pending) out.pendingCategoryImport = pending;
+
+  return out;
+}
+
+/** Categories as an older version stored them, or null if there are none worth keeping. */
+function readLocalCategories(raw: unknown): LocalCategories | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const { customCategories, categoryMembers } = raw as Record<string, unknown>;
+  if (!Array.isArray(customCategories) || !customCategories.every((c) => typeof c === 'string')) {
+    return undefined;
   }
+  const members: Record<string, string[]> = {};
   if (
-    typeof raw.categoryMembers === 'object' &&
-    raw.categoryMembers !== null &&
-    !Array.isArray(raw.categoryMembers)
+    typeof categoryMembers === 'object' &&
+    categoryMembers !== null &&
+    !Array.isArray(categoryMembers)
   ) {
-    const members: Record<string, string[]> = {};
-    for (const [name, ids] of Object.entries(raw.categoryMembers as Record<string, unknown>)) {
+    for (const [name, ids] of Object.entries(categoryMembers as Record<string, unknown>)) {
       if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) {
         members[name] = ids as string[];
       }
     }
-    out.categoryMembers = members;
   }
-
-  return out;
+  const names = [...new Set([...(customCategories as string[]), ...Object.keys(members)])];
+  return names.length > 0 ? { customCategories: names, categoryMembers: members } : undefined;
 }
 
 function hydrate() {
@@ -116,6 +142,7 @@ function hydrate() {
 }
 
 export function setState(patch: Partial<AppState> | ((s: AppState) => Partial<AppState>)) {
+  hydrate();
   const next = typeof patch === 'function' ? patch(state) : patch;
   state = { ...state, ...next };
   const persisted = persist();
@@ -162,12 +189,9 @@ export const actions = {
   },
   addCategory(name: string) {
     const trimmed = name.trim();
-    if (!trimmed) return;
-    setState((s) =>
-      s.customCategories.includes(trimmed)
-        ? {}
-        : { customCategories: [...s.customCategories, trimmed] },
-    );
+    if (!trimmed || state.customCategories.includes(trimmed)) return;
+    setState((s) => ({ customCategories: [...s.customCategories, trimmed] }));
+    categoryBackend?.add(trimmed);
   },
   removeCategory(name: string) {
     setState((s) => {
@@ -178,12 +202,12 @@ export const actions = {
         categoryMembers,
       };
     });
+    categoryBackend?.remove(name);
   },
   renameCategory(name: string, nextName: string) {
     const trimmed = nextName.trim();
+    if (!trimmed || trimmed === name || state.customCategories.includes(trimmed)) return;
     setState((s) => {
-      if (!trimmed || trimmed === name) return {};
-      if (s.customCategories.includes(trimmed)) return {};
       const categoryMembers = { ...s.categoryMembers };
       categoryMembers[trimmed] = categoryMembers[name] ?? [];
       delete categoryMembers[name];
@@ -192,19 +216,39 @@ export const actions = {
         categoryMembers,
       };
     });
+    categoryBackend?.rename(name, trimmed);
   },
   toggleCategoryMember(category: string, mangaId: string) {
+    const list = state.categoryMembers[category] ?? [];
+    const member = !list.includes(mangaId);
+    setState((s) => ({
+      categoryMembers: {
+        ...s.categoryMembers,
+        [category]: member ? [...list, mangaId] : list.filter((id) => id !== mangaId),
+      },
+    }));
+    categoryBackend?.setMember(category, mangaId, member);
+  },
+  /** Adds titles to categories in bulk. An existing category of the same name (any case) is
+   * reused, never duplicated. */
+  mergeCategories(categories: Array<{ name: string; ids: string[] }>) {
+    const merged = categories.map(({ name, ids }) => ({
+      name:
+        state.customCategories.find(
+          (existing) => existing.trim().toLowerCase() === name.toLowerCase(),
+        ) ?? name,
+      ids,
+    }));
     setState((s) => {
-      const list = s.categoryMembers[category] ?? [];
-      return {
-        categoryMembers: {
-          ...s.categoryMembers,
-          [category]: list.includes(mangaId)
-            ? list.filter((id) => id !== mangaId)
-            : [...list, mangaId],
-        },
-      };
+      const categoryMembers = { ...s.categoryMembers };
+      const customCategories = [...s.customCategories];
+      for (const { name, ids } of merged) {
+        if (!customCategories.includes(name)) customCategories.push(name);
+        categoryMembers[name] = [...new Set([...(categoryMembers[name] ?? []), ...ids])];
+      }
+      return { customCategories, categoryMembers };
     });
+    categoryBackend?.merge(merged);
   },
   resetAll() {
     state = initial;
@@ -216,6 +260,24 @@ export const actions = {
 export function useSetting(key: string, fallback: SettingValue) {
   const value = useAppState((s) => s.settings[key]);
   return value === undefined ? fallback : value;
+}
+
+/** Shows what the server holds for the current identity. */
+export function setServerCategories(categories: Array<{ name: string; manga_ids: string[] }>) {
+  hydrate();
+  setState({
+    customCategories: categories.map(({ name }) => name),
+    categoryMembers: Object.fromEntries(categories.map(({ name, manga_ids }) => [name, manga_ids])),
+  });
+}
+
+export function getPendingCategoryImport(): LocalCategories | undefined {
+  hydrate();
+  return state.pendingCategoryImport;
+}
+
+export function clearPendingCategoryImport() {
+  setState({ pendingCategoryImport: undefined });
 }
 
 /** The whole state, for callers outside React (see lib/migrate-manga.ts). Hydrates from

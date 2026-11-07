@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
-import { getHistory, type HistoryEntry as ApiHistoryEntry } from '@projekt-manga/api-client';
+import { type HistoryEntry as ApiHistoryEntry } from '@projekt-manga/api-client';
 import { formatRelative } from '@/lib/manga-data';
 import { historyThumbnailUrl } from '@/lib/history-thumbnail';
 import { useMangaLibrary } from '@/lib/library-store';
@@ -21,6 +21,7 @@ import { RowListSkeleton, MangaGridSkeleton } from '@/components/skeletons';
 import { Clock3, Play, RefreshCw, ChevronRight } from 'lucide-react';
 import { reportError } from '@/lib/report-error';
 import { historyResumeHref, historyTitleHref } from '@/lib/history-navigation';
+import { useHistory } from '@/lib/shared-queries';
 
 /** How many history rows to preview here — the full list, with filtering and bulk
  * clearing, stays on /history rather than being duplicated. */
@@ -70,29 +71,14 @@ function toRecentRead(e: ApiHistoryEntry): RecentRead {
  */
 export function RecentsPageClient() {
   const { manga, loading: libraryLoading } = useMangaLibrary();
-  const [reads, setReads] = useState<RecentRead[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(true);
-  const [historyError, setHistoryError] = useState(false);
-  const [retryToken, setRetryToken] = useState(0);
+  const { data, isPending: historyLoading, error: historyFailure, refetch } = useHistory();
+  const historyError = historyFailure !== null;
+  const reads = useMemo(() => (data ?? []).map(toRecentRead), [data]);
 
+  // Surfaced so a failed load isn't mistaken for "nothing read yet".
   useEffect(() => {
-    const controller = new AbortController();
-    setHistoryLoading(true);
-    setHistoryError(false);
-    getHistory(controller.signal)
-      .then((rows) => setReads(rows.map(toRecentRead)))
-      // Surfaced so a failed load isn't mistaken for "nothing read yet".
-      .catch((error) => {
-        if (!controller.signal.aborted) {
-          setHistoryError(true);
-          reportError(error, "Couldn't load your reading history.");
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setHistoryLoading(false);
-      });
-    return () => controller.abort();
-  }, [retryToken]);
+    if (historyFailure) reportError(historyFailure, "Couldn't load your reading history.");
+  }, [historyFailure]);
 
   const recentlyUpdated = [...manga]
     .filter((m) => m.chapters > 0)
@@ -134,7 +120,7 @@ export function RecentsPageClient() {
               Couldn't load recent reading.
               <button
                 type="button"
-                onClick={() => setRetryToken((value) => value + 1)}
+                onClick={() => void refetch()}
                 className="mt-3 block text-xs text-primary hover:underline"
               >
                 Try again
@@ -171,12 +157,12 @@ export function RecentsPageClient() {
                           style={{ width: `${r.progress * 100}%` }}
                         />
                       </div>
-                      <span className="text-[10px] tabular-nums text-muted-foreground">
+                      <span className="text-xs tabular-nums text-muted-foreground">
                         {r.progressLabel}
                       </span>
                     </div>
                   </div>
-                  <div className="hidden shrink-0 text-right text-[11px] text-muted-foreground md:block">
+                  <div className="hidden shrink-0 text-right text-xs text-muted-foreground md:block">
                     {formatRelative(r.readAt)}
                   </div>
                   <Link

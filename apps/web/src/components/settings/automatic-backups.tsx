@@ -1,5 +1,6 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
 import { useCallback, useEffect, useState } from 'react';
 import { SelectMenu } from '@/components/ui/select-menu';
 import {
@@ -14,10 +15,7 @@ import { Field, Group, ActionButton } from '@/components/settings/field-controls
 
 /** Optional desktop bridge, the same probe open-folder-button.tsx uses. */
 type DesktopBridge = { openPath?: (path: string) => Promise<unknown> };
-function desktopBridge(): DesktopBridge | null {
-  if (typeof window === 'undefined') return null;
-  return (window as unknown as { desktop?: DesktopBridge }).desktop ?? null;
-}
+const desktop = () => desktopBridge<DesktopBridge>();
 
 const INTERVAL_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 0, label: 'Off' },
@@ -138,7 +136,7 @@ export function AutomaticBackups({
       "Couldn't read that backup.",
     );
 
-  const bridge = desktopBridge();
+  const bridge = desktop();
   const openFolder = () => {
     if (!status || !bridge?.openPath) return;
     bridge.openPath(status.folder).catch(() => toast({ description: "Couldn't open the folder." }));

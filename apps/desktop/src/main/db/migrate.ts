@@ -7,6 +7,7 @@
  * in `schema_migrations`. Never edit an applied migration — append a new one, same
  * convention as apps/server's Prisma migrations.
  */
+import { rmSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 
 interface Migration {
@@ -227,6 +228,23 @@ function ensureMigrationsTable(db: DatabaseSync): void {
   `);
 }
 
+/**
+ * Copies the database aside before its schema changes. Migrations roll back on failure,
+ * but not from one that succeeds and turns out to have lost something. Best effort: a full
+ * disk shouldn't stop the app opening, and the migration is still transactional.
+ */
+function backupBeforeMigrating(db: DatabaseSync, version: number): void {
+  const location = db.location();
+  if (!location) return;
+  const backup = `${location}.before-v${version + 1}.bak`;
+  try {
+    rmSync(backup, { force: true });
+    db.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+  } catch {
+    console.warn('[db] Could not back up the local database before migrating');
+  }
+}
+
 export function runMigrations(db: DatabaseSync): void {
   ensureMigrationsTable(db);
 
@@ -251,6 +269,8 @@ export function runMigrations(db: DatabaseSync): void {
   const pending = MIGRATIONS.filter((m) => !appliedVersions.has(m.version)).sort(
     (a, b) => a.version - b.version,
   );
+
+  if (pending.length > 0 && appliedVersions.size > 0) backupBeforeMigrating(db, newest);
 
   for (const migration of pending) {
     // SQLite's documented procedure for rebuilding a table (ALTER TABLE cannot relax a

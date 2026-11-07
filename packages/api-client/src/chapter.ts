@@ -3,38 +3,26 @@ import { request } from './client.js';
 import { localInvoke, usesLocalFirstData } from './runtime.js';
 import { addHistory } from './history.js';
 import type { MangaChapterRecord, MangaWithDetails } from './manga.js';
-
-/** Chapter payloads name a chapter the way its source does: `id` is the source's key (a
- * stored record's `source_chapter_key`), never a stored row id. */
-export type ChapterBulkPayload = Partial<Chapters> & { source?: string };
-export type ChapterProgressMeta = Partial<Chapters> & { source: string };
-
-export interface UpdateResult {
-  count: number;
-}
-
-export interface BulkMarkResult {
-  count: number;
-  failed_source_chapter_keys: string[];
-}
-
-export interface ChapterProgress {
-  last_page_read: number;
-  is_read: boolean;
-}
-
-export interface ChapterReadStatus {
-  is_read: boolean;
-}
-
-export interface RecentChapter extends MangaChapterRecord {
-  manga: {
-    id: string;
-    slug: string;
-    title: string;
-    thumbnail_url: string;
-  };
-}
+import type {
+  ChapterBulkPayload,
+  ChapterProgressMeta,
+  UpdateResult,
+  BulkMarkResult,
+  ChapterProgress,
+  ChapterReadStatus,
+  RecentChapter,
+  BulkMarkMangaMeta,
+} from '@projekt-manga/types';
+export type {
+  ChapterBulkPayload,
+  ChapterProgressMeta,
+  UpdateResult,
+  BulkMarkResult,
+  ChapterProgress,
+  ChapterReadStatus,
+  RecentChapter,
+  BulkMarkMangaMeta,
+} from '@projekt-manga/types';
 
 const encode = (value: string) => encodeURIComponent(value);
 
@@ -100,16 +88,6 @@ export const markChapterByLastPage = async (
     { method: 'POST', body: chapterMeta },
   );
 };
-
-/** Manga-level fields recorded on the history rows a bulk mark writes. Only needed for
- * titles that have no library row to join a title/cover from. */
-export interface BulkMarkMangaMeta {
-  /** Used by desktop's local chapter/history rows; ignored by the server schema. */
-  manga_id?: string;
-  source_manga_id?: string;
-  title?: string;
-  thumbnail_url?: string;
-}
 
 const markChaptersBulk = async (
   mangaSlug: string,

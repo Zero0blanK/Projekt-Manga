@@ -16,12 +16,15 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
+import { writeFileAtomic } from './atomic-file';
 import path from 'node:path';
 
 const SCRYPT = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const KEY_LENGTH = 64;
-export const PIN_MIN = 4;
+/** For a new PIN. One set before this was raised from 4 keeps working: see validPin. */
+export const PIN_MIN = 6;
+const PIN_MIN_EXISTING = 4;
 export const PIN_MAX = 64;
 export const IDLE_CHOICES = [0, 1, 5, 15, 30, 60] as const;
 /** Free attempts before each wait, then the wait doubles up to the cap. */
@@ -101,7 +104,7 @@ function write(value: Stored | null): void {
   const body = safeStorage.isEncryptionAvailable()
     ? { encrypted: safeStorage.encryptString(json).toString('base64') }
     : value;
-  writeFileSync(lockFile(), JSON.stringify(body), 'utf8');
+  writeFileAtomic(lockFile(), JSON.stringify(body), 'utf8');
 }
 
 export interface AppLockState {
@@ -124,8 +127,8 @@ export function whenUnlocked(callback: () => void): void {
   else unlockListeners.push(callback);
 }
 
-function validPin(pin: unknown): pin is string {
-  return typeof pin === 'string' && pin.length >= PIN_MIN && pin.length <= PIN_MAX;
+function validPin(pin: unknown, min = PIN_MIN_EXISTING): pin is string {
+  return typeof pin === 'string' && pin.length >= min && pin.length <= PIN_MAX;
 }
 
 // Attempts run one at a time: the wait is checked before the (slow) hash and a failure
@@ -169,7 +172,7 @@ async function checkPinNow(pin: unknown): Promise<boolean> {
 /** Sets a new PIN, or changes it (then the current one is required). */
 export async function setAppLock(input: unknown): Promise<AppLockState> {
   const { currentPin, newPin, idleMinutes } = (input ?? {}) as Record<string, unknown>;
-  if (!validPin(newPin))
+  if (!validPin(newPin, PIN_MIN))
     throw new Error(`The PIN or password must be ${PIN_MIN}–${PIN_MAX} characters.`);
   if (!(IDLE_CHOICES as readonly number[]).includes(idleMinutes as number))
     throw new Error('Choose how long the app may be idle before it locks.');

@@ -1,81 +1,28 @@
-import { request, buildApiUrl } from './client.js';
-
-export interface InitiateDownloadChapter {
-  /** The source's own id for the chapter (a stored record's `source_chapter_key`). */
-  id: string;
-  name?: string;
-  chapter_number: number;
-}
-
-export interface InitiateDownloadInput {
-  sourceId: string;
-  mangaSlug: string;
-  mangaTitle: string;
-  chapter: InitiateDownloadChapter;
-  downloadPath?: string;
-}
-
-export interface InitiateDownloadResult {
-  id: string;
-  status: string;
-  progress: number;
-  message: string;
-}
-
-export interface DownloadStatusResponse {
-  id: string;
-  status: string;
-  mangaTitle: string;
-  chapterTitle: string;
-  filePath: string;
-  completedAt: string | null;
-}
-
-export interface DownloadSummary {
-  id: string;
-  manga_id: string;
-  chapter_id: string;
-  /** The source's own id for the chapter, for matching against a source listing. */
-  source_chapter_key: string;
-  source_id: string;
-  mangaSlug: string;
-  status: string;
-  mangaTitle: string;
-  chapterTitle: string;
-  chapterNumber: number;
-  pages_total: number;
-  pages_downloaded: number;
-  current_page: number;
-  filePath: string;
-  downloaded_path: string;
-  createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-}
-
-export interface DownloadStats {
-  total: number;
-  completed: number;
-  inProgress: number;
-  failed: number;
-  totalSize: number;
-  storageLimit: number;
-  freeBytes: number | null;
-}
-
-export interface OrphanedDownloadFolder {
-  id: string;
-  title: string;
-  chapterFolder: string;
-  pageCount: number;
-  sizeBytes: number;
-  modifiedAt: string;
-}
-
-export interface DownloadedPage {
-  index: number;
-  retryable: boolean;
-}
+import { fetchAllPages, request, buildApiUrl } from './client.js';
+import type {
+  InitiateDownloadChapter,
+  InitiateDownloadInput,
+  InitiateDownloadResult,
+  DownloadStatusResponse,
+  DownloadSummary,
+  DownloadStats,
+  OrphanedDownloadFolder,
+  DownloadedPage,
+  DownloadWorkerStatus,
+  DownloadProgressEvent,
+} from '@projekt-manga/types';
+export type {
+  InitiateDownloadChapter,
+  InitiateDownloadInput,
+  InitiateDownloadResult,
+  DownloadStatusResponse,
+  DownloadSummary,
+  DownloadStats,
+  OrphanedDownloadFolder,
+  DownloadedPage,
+  DownloadWorkerStatus,
+  DownloadProgressEvent,
+} from '@projekt-manga/types';
 
 export const initiateDownload = (input: InitiateDownloadInput, signal?: AbortSignal) =>
   request<InitiateDownloadResult>('/downloads/chapter', { method: 'POST', body: input, signal });
@@ -84,7 +31,7 @@ export const getDownloadStatus = (downloadId: string, signal?: AbortSignal) =>
   request<DownloadStatusResponse>(`/downloads/${encodeURIComponent(downloadId)}`, { signal });
 
 export const getAllDownloads = (signal?: AbortSignal) =>
-  request<DownloadSummary[]>('/downloads', { signal });
+  fetchAllPages((page) => request<DownloadSummary[]>('/downloads', { signal, query: page }));
 
 export const getDownloadDirectory = (signal?: AbortSignal) =>
   request<{ path: string }>('/downloads/directory', { signal });
@@ -145,21 +92,6 @@ export const downloadedChapterCbzUrl = (chapterId: string) =>
   buildApiUrl(`/downloads/chapter/${encodeURIComponent(chapterId)}/cbz`);
 
 // ─── Live progress (SSE) ─────────────────────────────────────────────────────
-
-export interface DownloadWorkerStatus {
-  queueLength: number;
-  activeDownloads: number;
-  pausedDownloads: number;
-  maxConcurrent: number;
-  threadCount: number;
-}
-
-export interface DownloadProgressEvent {
-  downloadId: string;
-  currentPage: number;
-  totalPages: number;
-  pagesDownloaded: number;
-}
 
 export interface DownloadEventHandlers {
   onConnected?: (status: DownloadWorkerStatus) => void;

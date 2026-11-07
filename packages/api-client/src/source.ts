@@ -13,48 +13,22 @@ import type {
 } from '@projekt-manga/types';
 import type { SourceBrowserSessionBody } from '@projekt-manga/schemas';
 import { request, buildApiUrl } from './client.js';
-
-export interface SourceSummary {
-  id: string;
-  name: string;
-  lang: string;
-  base_url: string;
-  isNSFW: boolean;
-  /** Where the source runs: an installed extension, or a connected Suwayomi server. Older
-   * servers omit it, which means an extension. */
-  provider?: 'extension' | 'suwayomi';
-  /** The source's own icon, for sources without an installed extension record. */
-  icon_url?: string | null;
-}
-
-export interface SourceOperationHealth {
-  lastAttemptAt: string;
-  lastSuccessAt: string | null;
-  lastErrorCode: string | null;
-  retryAfterAt: string | null;
-}
-
-export interface SourceHealth {
-  sourceId: string;
-  browse: SourceOperationHealth | null;
-  update: SourceOperationHealth | null;
-}
-
-export interface FetchMangaUpdatesResult {
-  newChapters: number;
-  /** The new chapters, for auto-download. Absent from older servers. */
-  newChapterList?: Array<{
-    source_chapter_key: string;
-    chapter_number: number;
-    name: string | null;
-  }>;
-  /** Stored chapters relinked to a new source id, updated or removed — changes to the
-   * list that are not new chapters. Older servers omit it. */
-  changedChapters?: number;
-  thumbnail_url: string;
-  /** Older servers omit this field; only true identifies a failed source check. */
-  failed?: boolean;
-}
+import type {
+  SourceSummary,
+  SourceOperationHealth,
+  SourceHealth,
+  FetchMangaUpdatesResult,
+  CheckLibraryUpdatesResult,
+  SourceUrlKeys,
+} from '@projekt-manga/types';
+export type {
+  SourceSummary,
+  SourceOperationHealth,
+  SourceHealth,
+  FetchMangaUpdatesResult,
+  CheckLibraryUpdatesResult,
+  SourceUrlKeys,
+} from '@projekt-manga/types';
 
 const encode = (value: string) => encodeURIComponent(value);
 
@@ -186,15 +160,16 @@ export const fetchSourceMangaUpdates = (
     },
   );
 
-export interface CheckLibraryUpdatesResult {
-  checked: number;
-  mangaWithNewChapters: number;
-  totalNewChapters: number;
-}
-
 /** Checks every manga currently in the library against its source for new chapters. */
 export const checkLibraryUpdates = () =>
-  request<CheckLibraryUpdatesResult>('/source/library/check-updates', { method: 'POST' });
+  request<{ started: boolean }>('/source/library/check-updates', { method: 'POST' });
+
+/** Whether a check is running, and how the last one went. */
+export const getLibraryUpdateStatus = (signal?: AbortSignal) =>
+  request<{ running: boolean; last: (CheckLibraryUpdatesResult & { finished_at: string }) | null }>(
+    '/source/library/check-updates',
+    { signal },
+  );
 
 /** URL for an <img src> — not fetched through request(), the response body is the image
  * itself, not a JSON envelope. */
@@ -217,15 +192,6 @@ export const saveSourceBrowserSession = (sourceId: string, body: SourceBrowserSe
 /** Forgets the cookies saved for this source. Admin-only. */
 export const clearSourceBrowserSession = (sourceId: string) =>
   request<null>(`/source/${encode(sourceId)}/browser-session`, { method: 'DELETE' });
-
-export interface SourceUrlKeys {
-  /** False when the source cannot convert Mihon URLs at all. */
-  supported: boolean;
-  /** One title slug per requested manga URL, in order; null where unrecognised. */
-  manga: Array<string | null>;
-  /** One chapter key per requested chapter URL, in order; null where unrecognised. */
-  chapters: Array<string | null>;
-}
 
 /** Converts Mihon/Tachiyomi URLs into this source's slugs and chapter keys. At most
  * `SOURCE_URL_KEYS_LIMIT` URLs per call. */

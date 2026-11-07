@@ -67,9 +67,9 @@ describe('UpdatePrompt', () => {
   });
 
   it('shows why a download failed and offers it again', async () => {
-    installBridge({ status: 'available', error: 'Could not reach GitHub to check for updates.' });
+    installBridge({ status: 'available', error: "Couldn't reach GitHub to check for updates." });
     render(<UpdatePrompt />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach GitHub');
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't reach GitHub");
     expect(screen.getByRole('button', { name: 'Update now' })).toBeInTheDocument();
   });
 

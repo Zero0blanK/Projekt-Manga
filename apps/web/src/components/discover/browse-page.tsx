@@ -1,5 +1,6 @@
 'use client';
 
+import { useLatest } from '@/lib/use-latest';
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -94,7 +95,10 @@ export function DiscoverBrowsePage({
   const [sortValue, setSortValue] = useState<string>('');
   const lastSourceId = useRef<string | null>(sourceId);
 
+  // Restoring belongs to arriving at this page, not to the category or source changing.
+  const restoreFor = useLatest({ category, requestedSource });
   useEffect(() => {
+    const { category, requestedSource } = restoreFor.current;
     const snapshot = readBrowseSnapshot(browseKey, category, requestedSource);
     // An explicit ?source= is a deliberate navigation and outranks a stale snapshot.
     if (snapshot && (!requestedSource || snapshot.sourceId === requestedSource)) {
@@ -107,20 +111,22 @@ export function DiscoverBrowsePage({
       setQueryDraft(snapshot.query);
     }
     setRestoreChecked(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [browseKey]);
+  }, [browseKey, restoreFor]);
 
   // App Router can retain this component while only the query string changes.
   useEffect(() => {
     if (restoreChecked && requestedSource) setSourceId(requestedSource);
   }, [requestedSource, restoreChecked]);
 
+  // Only when the list changes: a deep link may name a source that isn't in it yet.
+  const displaySourceIds = displaySources.map((s) => s.id).join(',');
+  const fallbackFor = useLatest({ displaySources, sourceId });
   useEffect(() => {
+    const { displaySources, sourceId } = fallbackFor.current;
     if (displaySources.length === 0) return;
     if (sourceId && displaySources.some((s) => s.id === sourceId)) return;
     setSourceId(displaySources[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displaySources.map((s) => s.id).join(',')]);
+  }, [displaySourceIds, fallbackFor]);
 
   const active = displaySources.find((s) => s.id === sourceId);
   const {
@@ -393,6 +399,7 @@ export function DiscoverBrowsePage({
             )}
             {availableFilters.length > 0 && (
               <button
+                type="button"
                 onClick={() => setShowFilters((v) => !v)}
                 aria-expanded={showFilters}
                 className={`flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs transition ${
@@ -446,6 +453,7 @@ export function DiscoverBrowsePage({
       {sortOptions.length > 0 && (
         <div className="mt-5 flex flex-wrap items-center gap-1.5">
           <button
+            type="button"
             onClick={() => setSortValue('')}
             className={`rounded-full px-3 py-1.5 text-xs transition ${
               sortValue === ''
@@ -457,6 +465,7 @@ export function DiscoverBrowsePage({
           </button>
           {sortOptions.map((o) => (
             <button
+              type="button"
               key={o.value}
               onClick={() => setSortValue(o.value)}
               className={`rounded-full px-3 py-1.5 text-xs transition ${
@@ -527,9 +536,7 @@ export function DiscoverBrowsePage({
           <div className="mt-12 rounded-2xl border border-destructive/40 bg-destructive/5 p-8 text-center">
             <p className="text-sm font-medium text-foreground">Couldn&apos;t reach this source</p>
             <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-              {error instanceof ApiError
-                ? error.message
-                : 'Something went wrong loading titles from this source.'}
+              {error instanceof ApiError ? error.message : "Couldn't load titles from this source."}
             </p>
             {isChallengeRequired(error) && active && (
               <SourceChallengeNotice
@@ -539,6 +546,7 @@ export function DiscoverBrowsePage({
               />
             )}
             <button
+              type="button"
               onClick={retry}
               className="mt-4 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
             >
@@ -568,6 +576,7 @@ export function DiscoverBrowsePage({
         {hasMore && (
           <div className="mt-10 flex justify-center">
             <button
+              type="button"
               onClick={() => (loadMoreError ? retryLoadMore() : loadMore())}
               disabled={loadingMore}
               className="rounded-full border border-border/60 bg-surface/40 px-5 py-2 text-xs font-medium text-foreground transition hover:border-primary/50 hover:text-primary disabled:opacity-60"
@@ -575,7 +584,7 @@ export function DiscoverBrowsePage({
               {loadingMore
                 ? 'Loading…'
                 : loadMoreError
-                  ? 'Could not load more · Retry'
+                  ? "Couldn't load more · Retry"
                   : 'Load more'}
             </button>
           </div>

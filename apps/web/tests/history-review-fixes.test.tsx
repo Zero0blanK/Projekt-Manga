@@ -6,6 +6,9 @@ const { getHistory, deleteHistory } = vi.hoisted(() => ({
   getHistory: vi.fn(),
   deleteHistory: vi.fn(),
 }));
+vi.mock('@/lib/session-resource', () => ({
+  useCurrentUser: () => ({ user: null, loading: false }),
+}));
 vi.mock('@projekt-manga/api-client', () => ({
   getHistory,
   deleteHistory,

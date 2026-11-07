@@ -1,5 +1,6 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
 import { useCallback, useEffect, useState } from 'react';
 
 /**
@@ -59,7 +60,7 @@ interface InitBridge {
 
 function initBridge(): InitBridge | null {
   if (typeof window === 'undefined') return null;
-  return (window as unknown as { desktop?: { init?: InitBridge } }).desktop?.init ?? null;
+  return desktopBridge<{ init: InitBridge }>()?.init ?? null;
 }
 
 /** Fast enough that the splash lifts promptly once the seed lands, cheap enough to be

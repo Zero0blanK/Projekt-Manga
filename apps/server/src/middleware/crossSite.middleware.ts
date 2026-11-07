@@ -23,11 +23,12 @@ function originOf(value: string | undefined): string | null {
  *   it cannot set `application/json`. Requests without a body (most action endpoints)
  *   carry no Content-Type and pass.
  * - **The request must come from this app.** Browsers send `Sec-Fetch-Site`; `cross-site`
- *   is refused, while `same-origin` (the desktop's single-origin proxy) and `same-site`
- *   (web :3000 → API :4000 in development) pass. Older browsers without it fall back to
- *   comparing `Origin` with CLIENT_URL or this request's own host. Requests without
- *   either header come from non-browser clients (the desktop main process, scripts) and
- *   pass, since no website can make them.
+ *   is refused and `same-origin` (the desktop's single-origin proxy) passes. `same-site`
+ *   (web :3000 → API :4000 in development) isn't enough alone: a sibling subdomain or
+ *   another app on localhost is same-site too, so it goes through the `Origin` check that
+ *   older browsers without the header also get, against CLIENT_URL or this request's own
+ *   host. Requests without either header come from non-browser clients (the desktop main
+ *   process, scripts) and pass, since no website can make them.
  */
 export default function rejectCrossSiteWrites(
   req: Request,
@@ -42,11 +43,10 @@ export default function rejectCrossSiteWrites(
   }
 
   const fetchSite = req.get('sec-fetch-site');
-  if (fetchSite) {
-    return fetchSite === 'cross-site'
-      ? next(new ForbiddenError('Requests from other websites are not allowed'))
-      : next();
+  if (fetchSite === 'cross-site') {
+    return next(new ForbiddenError('Requests from other websites are not allowed'));
   }
+  if (fetchSite && fetchSite !== 'same-site') return next();
 
   const origin = req.get('origin');
   if (!origin) return next();

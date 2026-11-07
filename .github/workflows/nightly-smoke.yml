@@ -13,9 +13,6 @@ permissions:
   # Only to open the failure issue below.
   issues: write
 
-env:
-  NODE_VERSION: '25'
-
 jobs:
   desktop-smoke:
     name: Desktop and restore smoke
@@ -28,7 +25,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
@@ -37,6 +34,12 @@ jobs:
         run: npm run db:generate --workspace=@projekt-manga/server
         env:
           DATABASE_URL: file:./data/ci-generate.db
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Chromium for Playwright
         run: npx --workspace=@projekt-manga/extensions playwright install chromium

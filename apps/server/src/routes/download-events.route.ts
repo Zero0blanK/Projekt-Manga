@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import downloadWorker from '../workers/download.worker.js';
+import { StreamLimiter } from '../utils/streamLimiter.js';
+import { HTTPErrorResponse } from '../utils/responseHandlers.js';
 
 const router = Router();
 
@@ -8,6 +10,7 @@ const router = Router();
 const MAX_EVENT_CLIENTS = 20;
 
 const clients = new Set<Response>();
+const perClient = new StreamLimiter();
 
 /**
  * Each connection adds one listener per event name, and Node warns past ten, which a few
@@ -18,11 +21,8 @@ const clients = new Set<Response>();
 downloadWorker.setMaxListeners(MAX_EVENT_CLIENTS + 5);
 
 router.get('/events', (_req: Request, res: Response) => {
-  if (clients.size >= MAX_EVENT_CLIENTS) {
-    res.status(503).json({
-      success: false,
-      message: 'Too many open download event streams',
-    });
+  if (clients.size >= MAX_EVENT_CLIENTS || !perClient.acquire(_req.ip)) {
+    HTTPErrorResponse(res, 503, 'Too many open download event streams');
     return;
   }
 
@@ -63,6 +63,7 @@ router.get('/events', (_req: Request, res: Response) => {
     downloadWorker.off('complete', onComplete);
     downloadWorker.off('failed', onFailed);
     clients.delete(res);
+    perClient.release(_req.ip);
   });
 });
 

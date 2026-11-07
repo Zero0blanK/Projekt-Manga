@@ -61,12 +61,13 @@ export function ReaderHeader({
       </ExitReaderButton>
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold text-white">{manga.title}</div>
-        <div className="truncate text-[11px] text-white/50">
+        <div className="truncate text-xs text-white/50">
           Chapter {chapter} · {title}
         </div>
       </div>
       <div className="relative ml-auto flex items-center gap-1">
         <button
+          type="button"
           onClick={() => setChapterListOpen((v) => !v)}
           aria-expanded={chapterListOpen}
           aria-label="Chapter list"
@@ -80,6 +81,7 @@ export function ReaderHeader({
         </button>
         {onToggleBookmark && (
           <button
+            type="button"
             onClick={onToggleBookmark}
             aria-pressed={!!bookmarked}
             aria-label={bookmarked ? 'Remove chapter bookmark' : 'Bookmark chapter'}
@@ -93,6 +95,7 @@ export function ReaderHeader({
         )}
         <div className="flex items-center gap-0.5 rounded-lg border border-white/10 px-0.5">
           <button
+            type="button"
             onClick={onZoomOut}
             disabled={zoom <= zoomMin}
             aria-label="Zoom out"
@@ -101,6 +104,7 @@ export function ReaderHeader({
             <ZoomOut className="h-4 w-4" />
           </button>
           <button
+            type="button"
             onClick={onZoomReset}
             aria-label="Reset zoom"
             title="Reset zoom"
@@ -109,6 +113,7 @@ export function ReaderHeader({
             {Math.round(zoom * 100)}%
           </button>
           <button
+            type="button"
             onClick={onZoomIn}
             disabled={zoom >= zoomMax}
             aria-label="Zoom in"

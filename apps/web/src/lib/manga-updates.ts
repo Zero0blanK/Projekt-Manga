@@ -125,9 +125,10 @@ export function useMangaUpdateCheck(manga: UpdatableManga) {
     () => IDLE,
   );
 
+  const { id, slug, source } = manga;
   const check = useCallback(
-    (options?: { force?: boolean }) => checkMangaUpdates(manga, options),
-    [manga.id, manga.slug, manga.source], // eslint-disable-line react-hooks/exhaustive-deps
+    (options?: { force?: boolean }) => checkMangaUpdates({ id, slug, source }, options),
+    [id, slug, source],
   );
 
   return { ...snapshot, check };
@@ -187,6 +188,7 @@ export function useCheckOnManualReload(
   // re-running it would mean a second scrape.
   const report = useRef(onResult);
   report.current = onResult;
+  const { id, slug, source } = manga;
 
   useEffect(() => {
     if (!enabled) return;
@@ -197,7 +199,10 @@ export function useCheckOnManualReload(
 
     let entry = reloadChecks.get(path);
     if (!entry) {
-      entry = { promise: checkMangaUpdates(manga, { force: true }), reported: false };
+      entry = {
+        promise: checkMangaUpdates({ id, slug, source }, { force: true }),
+        reported: false,
+      };
       reloadChecks.set(path, entry);
     }
 
@@ -206,14 +211,13 @@ export function useCheckOnManualReload(
       const current = reloadChecks.get(path);
       if (cancelled || !current || current.reported) return;
       current.reported = true;
-      report.current?.(found, get(manga.id).error);
+      report.current?.(found, get(id).error);
     });
 
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, manga.id, manga.slug, manga.source]);
+  }, [enabled, id, slug, source]);
 }
 
 /** Increments when a check brings in new chapters for this title. */

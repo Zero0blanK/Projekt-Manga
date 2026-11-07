@@ -25,7 +25,7 @@ export function MangaSourceBadges({ manga }: { manga: Manga }) {
   if (!manga.source) return null;
 
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+    <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
       From
       <span
         className="flex items-center gap-1 rounded-full border border-border/60 bg-surface/60 px-2 py-0.5 font-medium text-foreground"

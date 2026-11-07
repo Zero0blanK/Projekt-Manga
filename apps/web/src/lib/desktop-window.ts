@@ -1,5 +1,6 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
 import { useCallback, useEffect, useState } from 'react';
 
 type Envelope<T> = { success: boolean; message: string; data?: T };
@@ -11,7 +12,7 @@ type WindowBridge = {
 /** The desktop app's window controls; null in a plain browser. */
 function windowBridge(): WindowBridge | null {
   if (typeof window === 'undefined') return null;
-  return (window as unknown as { desktop?: { window?: WindowBridge } }).desktop?.window ?? null;
+  return desktopBridge<{ window: WindowBridge }>()?.window ?? null;
 }
 
 /** "Keep window on top" for the desktop reader. `available` is false in a browser, which

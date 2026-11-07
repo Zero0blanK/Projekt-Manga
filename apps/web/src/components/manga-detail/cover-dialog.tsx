@@ -8,6 +8,7 @@ export function MangaCoverDialog({ manga }: { manga: Manga }) {
     <Dialog>
       <DialogTrigger asChild>
         <button
+          type="button"
           className="block w-full max-w-[220px] cursor-zoom-in text-left transition hover:opacity-90"
           aria-label={`View cover for ${manga.title}`}
         >

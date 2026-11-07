@@ -12,6 +12,7 @@ export function SortMenu() {
   return (
     <div className="relative">
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
@@ -33,6 +34,7 @@ export function SortMenu() {
               const active = sort === s.value;
               return (
                 <button
+                  type="button"
                   key={s.value}
                   onClick={() => {
                     if (active) actions.setSortDir(sortDir === 'asc' ? 'desc' : 'asc');

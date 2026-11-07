@@ -33,6 +33,7 @@ const downloadImage = async (url: string) => {
     headers: createImageRequestHeaders(undefined, {}, url),
     // Validates the address every hop actually connects to, which beforeRedirect
     // (hostname only) and a pre-flight DNS check (TOCTOU) both miss.
+    proxy: false,
     httpAgent: guardedHttpAgent,
     httpsAgent: guardedHttpsAgent,
     beforeRedirect: (options) => {

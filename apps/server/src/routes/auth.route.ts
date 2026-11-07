@@ -1,9 +1,11 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
+import { rateLimitBody } from '../utils/responseHandlers.js';
 import authController from '../controllers/auth.controller.js';
 import { validateBody } from '../middleware/validate.middleware.js';
 import { requireAuth } from '../middleware/auth.middleware.js';
 import {
+  changePasswordBodySchema,
   registerBodySchema,
   loginBodySchema,
   deleteAccountBodySchema,
@@ -19,7 +21,7 @@ const authRateLimit = rateLimit({
   limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: 'Too many attempts — please wait and try again.' },
+  message: rateLimitBody('Too many attempts — please wait and try again.'),
 });
 
 router.post('/register', authRateLimit, validateBody(registerBodySchema), authController.register);
@@ -32,6 +34,13 @@ router.delete(
   authRateLimit,
   validateBody(deleteAccountBodySchema),
   authController.deleteAccount,
+);
+router.post(
+  '/password',
+  requireAuth,
+  authRateLimit,
+  validateBody(changePasswordBodySchema),
+  authController.changePassword,
 );
 router.post(
   '/devices/register',

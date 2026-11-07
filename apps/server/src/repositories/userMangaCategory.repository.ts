@@ -28,6 +28,14 @@ const assign = async (user_id: string, manga_id: string, category_id: string) =>
   });
 };
 
+/** A tombstone rather than a delete: other devices pull it to drop the assignment too. */
+const unassign = async (user_id: string, manga_id: string, category_id: string) => {
+  await prisma.user_manga_category.updateMany({
+    where: { user_id, manga_id, category_id, deleted_at: null },
+    data: { deleted_at: new Date(), edited_at: null },
+  });
+};
+
 const getChangedSince = async (user_id: string, since: Date, limit?: number, afterId?: string) => {
   return await prisma.user_manga_category.findMany({
     where: {
@@ -89,6 +97,7 @@ const userMangaCategoryRepository = {
   getForManga,
   getMangaIdsForCategory,
   assign,
+  unassign,
   getChangedSince,
   applyIncoming,
   claimFromAnonymous,

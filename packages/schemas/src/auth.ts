@@ -1,14 +1,16 @@
 import { z } from 'zod';
 
+const newPasswordSchema = z
+  .string()
+  .min(8, 'Password must be at least 8 characters')
+  // bcrypt ignores everything past 72 bytes, so a longer password would silently match its prefix.
+  .refine((value) => new TextEncoder().encode(value).length <= 72, {
+    message: 'Password must be at most 72 bytes',
+  });
+
 export const registerBodySchema = z.object({
   email: z.string().trim().toLowerCase().email(),
-  password: z
-    .string()
-    .min(8, 'Password must be at least 8 characters')
-    // bcrypt ignores everything past 72 bytes, so a longer password would silently match its prefix.
-    .refine((value) => new TextEncoder().encode(value).length <= 72, {
-      message: 'Password must be at most 72 bytes',
-    }),
+  password: newPasswordSchema,
   display_name: z
     .string()
     .trim()
@@ -30,6 +32,12 @@ export const deleteAccountBodySchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 export type DeleteAccountBody = z.infer<typeof deleteAccountBodySchema>;
+
+export const changePasswordBodySchema = z.object({
+  current_password: z.string().min(1, 'Current password is required'),
+  new_password: newPasswordSchema,
+});
+export type ChangePasswordBody = z.infer<typeof changePasswordBodySchema>;
 
 // Duplicated from DEVICE_PLATFORM_VALUES in @projekt-manga/types's enums.ts — this package
 // has no dependency on packages/types (see package.json), so the two arrays have to be

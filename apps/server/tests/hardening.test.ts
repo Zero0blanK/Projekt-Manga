@@ -133,6 +133,22 @@ describe('library update sweep', () => {
 });
 
 describe('POST /api/source/library/check-updates', () => {
+  it('finishes the sweep when a title belongs to a source that is gone', async () => {
+    vi.spyOn(mangaRepository, 'listLibraryBasic').mockResolvedValue([
+      { id: 'm1', source: 'uninstalled', slug: 'one' },
+    ] as Awaited<ReturnType<typeof mangaRepository.listLibraryBasic>>);
+
+    await request(app).post('/api/source/library/check-updates');
+
+    await vi.waitFor(async () => {
+      const { running, last } = (await request(app).get('/api/source/library/check-updates')).body
+        .data;
+      expect(running).toBe(false);
+      expect(last).toMatchObject({ checked: 1, failed: 1 });
+    });
+    vi.restoreAllMocks();
+  });
+
   it('stays reachable without an account — the app works fully anonymously', async () => {
     vi.spyOn(mangaRepository, 'listLibraryBasic').mockResolvedValue(
       [] as Awaited<ReturnType<typeof mangaRepository.listLibraryBasic>>,
@@ -140,7 +156,13 @@ describe('POST /api/source/library/check-updates', () => {
 
     const res = await request(app).post('/api/source/library/check-updates');
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
+    expect(res.body.data).toEqual({ started: true });
+    await vi.waitFor(async () =>
+      expect((await request(app).get('/api/source/library/check-updates')).body.data.running).toBe(
+        false,
+      ),
+    );
     vi.restoreAllMocks();
   });
 

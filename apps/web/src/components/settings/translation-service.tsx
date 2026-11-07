@@ -164,7 +164,7 @@ export function TranslationService() {
             </button>
           ))}
         </div>
-        <p className="text-[11px] text-muted-foreground">{current.help}</p>
+        <p className="text-xs text-muted-foreground">{current.help}</p>
         <input
           aria-label={provider === 'deepl' ? 'Service address (optional)' : 'Service address'}
           placeholder={
@@ -194,7 +194,7 @@ export function TranslationService() {
           onChange={(event) => setApiKey(event.target.value)}
           className={INPUT}
         />
-        <p id="translation-key-note" className="text-[11px] text-muted-foreground">
+        <p id="translation-key-note" className="text-xs text-muted-foreground">
           {keySaved
             ? 'Your key is stored encrypted and is never shown again. Leave this empty to keep it.'
             : 'The key is stored encrypted on the server and is never shown again after saving.'}

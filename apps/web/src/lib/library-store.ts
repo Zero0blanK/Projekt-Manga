@@ -1,4 +1,5 @@
 'use client';
+import { useLatest } from '@/lib/use-latest';
 import { mergeSourceResults } from './source-results';
 import { appendSourcePage } from './source-pagination';
 
@@ -100,7 +101,7 @@ export function reportSourceFailure(error: unknown, sourceLabel: string): void {
     error,
     error instanceof ApiError
       ? `${sourceLabel}:`
-      : `${sourceLabel}: Something went wrong reaching this source. Try again shortly.`,
+      : `${sourceLabel}: Couldn't reach this source. Try again shortly.`,
   );
 }
 
@@ -206,7 +207,10 @@ export function useSourceBrowsePaged(
     if (initial && !hasLoadedOnce.current) pendingRestore.current = initial;
   }, [initial]);
 
+  // Compared by filtersKey: callers pass a new object every render.
+  const filtersRef = useLatest(filters);
   useEffect(() => {
+    const filters = filtersRef.current;
     if (!sourceId) {
       // Invalidate a just-aborted request as well as clearing its UI state. Without this,
       // moving from a source to the source picker could let that abort handler overwrite
@@ -270,8 +274,7 @@ export function useSourceBrowsePaged(
         if (id === requestId.current) setLoading(false);
       });
     return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceId, category, filtersKey, pageSize, retryToken, query]);
+  }, [sourceId, category, filtersKey, filtersRef, pageSize, retryToken, query, queryIdentity]);
 
   // A page for a prior source/filter combination is useless and may keep an extension
   // scraping after the reader has already moved on.

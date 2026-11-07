@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MangaDetails } from '@projekt-manga/types';
 import {
   initiateDownload,
-  getHistory,
   getMangaChapters,
   type HistoryEntry,
   type MangaChapterRecord,
@@ -21,6 +20,7 @@ import { SourceChapterList } from '@/components/manga-detail/source-chapter-list
 import { SimilarTitles } from '@/components/manga-detail/similar-titles';
 import { refreshDownloads } from '@/components/downloads/row-data';
 import { useCurrentUser } from '@/lib/session-resource';
+import { useHistory } from '@/lib/shared-queries';
 import { queryClient, queryKeys } from '@/lib/query-client';
 import type { PublicUser } from '@projekt-manga/api-client';
 
@@ -87,8 +87,21 @@ function SourcePreviewContent({
   const { manga: library, loading: libraryLoading, refresh } = useMangaLibrary();
   const [adding, setAdding] = useState(false);
   /** Read chapter ids for this slug, from history — works with or without a manga row. */
-  const [historyReadIds, setHistoryReadIds] = useState<Set<string>>(new Set());
-  const [chapterProgress, setChapterProgress] = useState<Map<string, HistoryEntry>>(new Map());
+  const { data: historyRows, isError: progressError, refetch: refetchHistory } = useHistory();
+  const chapterProgress = useMemo(() => {
+    const progress = new Map<string, HistoryEntry>();
+    for (const row of historyRows ?? []) {
+      const key = row.source_chapter_key;
+      if (row.source !== sourceId || row.manga_slug !== details.slug || !key) continue;
+      const previous = progress.get(key);
+      if (!previous || row.last_read > previous.last_read) progress.set(key, row);
+    }
+    return progress;
+  }, [historyRows, sourceId, details.slug]);
+  const historyReadIds = useMemo(
+    () => new Set([...chapterProgress].filter(([, row]) => row.is_read).map(([id]) => id)),
+    [chapterProgress],
+  );
   /**
    * The library's own chapter rows, keyed by chapter URL, once this title has a row.
    *
@@ -104,7 +117,6 @@ function SourcePreviewContent({
   const [libraryChapters, setLibraryChapters] = useState<Map<string, MangaChapterRecord>>(
     new Map(),
   );
-  const [progressError, setProgressError] = useState(false);
   const [progressRetry, setProgressRetry] = useState(0);
   /** Id of the row backing this title, once one exists (shadow or library). */
   const [rowId, setRowId] = useState<string | null>(null);
@@ -135,30 +147,6 @@ function SourcePreviewContent({
       setInLibrary((current) => current ?? false);
     }
   }, [known, libraryLoading]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setProgressError(false);
-    getHistory(controller.signal)
-      .then((rows) => {
-        if (controller.signal.aborted) return;
-        const progress = new Map<string, HistoryEntry>();
-        for (const row of rows) {
-          const key = row.source_chapter_key;
-          if (row.source !== sourceId || row.manga_slug !== details.slug || !key) continue;
-          const previous = progress.get(key);
-          if (!previous || row.last_read > previous.last_read) progress.set(key, row);
-        }
-        setChapterProgress(progress);
-        setHistoryReadIds(
-          new Set([...progress].filter(([, row]) => row.is_read).map(([id]) => id)),
-        );
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setProgressError(true);
-      });
-    return () => controller.abort();
-  }, [details.slug, sourceId, progressRetry]);
 
   /** Creates the backing row if it doesn't exist, outside the library. Deduped so two
    * actions firing at once don't race into two `addManga` calls. */
@@ -429,7 +417,10 @@ function SourcePreviewContent({
           Saved chapter progress is unavailable. Read indicators may be incomplete.
           <button
             type="button"
-            onClick={() => setProgressRetry((value) => value + 1)}
+            onClick={() => {
+              void refetchHistory();
+              setProgressRetry((value) => value + 1);
+            }}
             className="ml-2 text-primary hover:underline"
           >
             Try again

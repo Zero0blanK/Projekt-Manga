@@ -23,9 +23,6 @@ concurrency:
   group: release-installer-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  NODE_VERSION: '25'
-
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
@@ -44,7 +41,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: npm
 
       # The installer takes its version from apps/desktop/package.json, and the update feed

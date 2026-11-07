@@ -39,7 +39,7 @@ export function NavSearch({
     <div className="group relative mx-1 flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-border/60 bg-secondary/70 px-3 focus-within:border-primary/60 focus-within:bg-secondary">
       <Search size={16} className="text-muted-foreground group-focus-within:text-primary" />
       {scope === 'settings' ? (
-        <span className="shrink-0 text-[11px] font-medium text-primary">Settings</span>
+        <span className="shrink-0 text-xs font-medium text-primary">Settings</span>
       ) : (
         <button
           type="button"
@@ -93,6 +93,7 @@ export function NavSearch({
       />
       {search && (
         <button
+          type="button"
           onClick={() => onSearchChange('')}
           aria-label="Clear search"
           className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -112,6 +113,7 @@ export function NavSearch({
               {results.map((m) => (
                 <li key={m.id}>
                   <button
+                    type="button"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => onSelect(m.id)}
                     className="flex w-full items-center gap-3 px-3 py-2 text-left transition hover:bg-accent"
@@ -124,7 +126,7 @@ export function NavSearch({
                     />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm text-foreground">{m.title}</span>
-                      <span className="block truncate text-[11px] text-muted-foreground">
+                      <span className="block truncate text-xs text-muted-foreground">
                         {authorLine(m)} · {m.latestChapter}
                       </span>
                     </span>

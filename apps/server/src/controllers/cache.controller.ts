@@ -14,8 +14,7 @@ import mangaOverrideService from '../services/mangaOverride.service.js';
 const triggerSync = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { manga_id } = req.params as { manga_id: string };
-    const { source_thumbnail_url, sourceThumbnailUrl } = req.validated as TriggerSyncBody;
-    const requestedThumbnailUrl = source_thumbnail_url || sourceThumbnailUrl;
+    const { source_thumbnail_url } = req.validated as TriggerSyncBody;
 
     const manga = await mangaRepository.getMangaById(manga_id);
     if (!manga) throw new MangaNotFoundError('Manga not found');
@@ -23,7 +22,7 @@ const triggerSync = async (req: Request, res: Response, next: NextFunction) => {
     // A user-triggered refresh rechecks the source even if a cached copy exists.
     const result = await cacheService.syncThumbnail(
       manga.id,
-      requestedThumbnailUrl || manga.thumbnail_url,
+      source_thumbnail_url || manga.thumbnail_url,
       {
         initiatedByUser: true,
         force: true,

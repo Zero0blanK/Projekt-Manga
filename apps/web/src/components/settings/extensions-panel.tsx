@@ -163,6 +163,7 @@ export function ExtensionsPanel() {
                   </div>
                   <div className="flex shrink-0 gap-2">
                     <button
+                      type="button"
                       onClick={() => void handleRefreshRepo(repo.id, label)}
                       disabled={busy}
                       className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
@@ -171,7 +172,10 @@ export function ExtensionsPanel() {
                     </button>
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
-                        <button className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition hover:bg-destructive/20">
+                        <button
+                          type="button"
+                          className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition hover:bg-destructive/20"
+                        >
                           Remove
                         </button>
                       </AlertDialogTrigger>

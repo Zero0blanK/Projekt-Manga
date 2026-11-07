@@ -50,6 +50,64 @@ const drain = async () => {
   await Promise.resolve();
 };
 
+describe('DownloadWorker lifecycle', () => {
+  it('re-queues a download resumed while its paused run is still unwinding', async () => {
+    const w = internals(worker);
+    w.downloadThreads.set('dl', new Promise(() => {}));
+    w.pausedDownloads.add('dl');
+
+    await worker.resumeDownload('dl');
+    await drain();
+
+    // Held back until the old run settles, not dropped.
+    expect(w.queue).toEqual(['dl']);
+    expect(launched).toEqual([]);
+
+    w.downloadThreads.delete('dl');
+    await drain();
+    expect(launched).toEqual(['dl']);
+  });
+
+  it('leaves a download alone when resumed while it is really running', async () => {
+    const w = internals(worker) as WorkerInternals & {
+      activeDownloads: Map<string, AbortController>;
+    };
+    w.downloadThreads.set('dl', new Promise(() => {}));
+    w.activeDownloads.set('dl', new AbortController());
+
+    await worker.resumeDownload('dl');
+
+    expect(w.queue).toEqual([]);
+  });
+
+  it('recovers queued and interrupted downloads, and keeps paused ones paused', async () => {
+    const byStatus: Record<string, Array<{ id: string }>> = {
+      PAUSED: [{ id: 'paused' }],
+      IN_PROGRESS: [{ id: 'interrupted' }],
+      PENDING: [{ id: 'interrupted' }, { id: 'waiting' }],
+    };
+    const repository = await import('../src/repositories/download.repository.js');
+    const getByStatus = vi
+      .spyOn(repository.default, 'getDownloadsByStatus')
+      .mockImplementation(async (status: string) => byStatus[status] as never);
+    const setStatus = vi
+      .spyOn(repository.default, 'updateDownloadStatus')
+      .mockResolvedValue({} as never);
+
+    try {
+      expect(await worker.recoverInterruptedDownloads()).toBe(2);
+      await drain();
+
+      expect(launched.sort()).toEqual(['interrupted', 'waiting']);
+      expect(worker.isPaused('paused')).toBe(true);
+      expect(setStatus).toHaveBeenCalledWith('interrupted', 'PENDING');
+    } finally {
+      getByStatus.mockRestore();
+      setStatus.mockRestore();
+    }
+  });
+});
+
 describe('DownloadWorker queue scheduling', () => {
   it('reports a full queue instead of silently accepting dropped work', () => {
     const w = internals(worker);

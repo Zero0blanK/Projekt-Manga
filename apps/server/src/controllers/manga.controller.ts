@@ -31,9 +31,6 @@ const getManga = async (req: Request, res: Response, next: NextFunction) => {
 const getMangaById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { manga_id } = req.params as { manga_id: string };
-    if (!manga_id) {
-      throw new Error('Manga ID is required');
-    }
 
     const manga = await mangaService.getMangaById(manga_id);
     return HTTPSuccessResponse(res, 200, 'Manga retrieved successfully', manga);
@@ -45,9 +42,6 @@ const getMangaById = async (req: Request, res: Response, next: NextFunction) => 
 const getMangaDetailsById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { manga_id } = req.params as { manga_id: string };
-    if (!manga_id) {
-      throw new Error('Manga ID is required');
-    }
 
     const manga = await mangaService.getMangaDetailsById(manga_id, req.user?.id);
     return HTTPSuccessResponse(res, 200, 'Manga with details retrieved successfully', manga);
@@ -69,9 +63,6 @@ const addManga = async (req: Request, res: Response, next: NextFunction) => {
 const addMangaToCategory = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { manga_slug, category_id } = req.params as { manga_slug: string; category_id: string };
-    if (!manga_slug || !category_id) {
-      throw new Error('Manga slug and Category ID are required');
-    }
 
     const mangaCategory = await mangaService.addMangaToCategory(
       manga_slug,
@@ -87,9 +78,6 @@ const addMangaToCategory = async (req: Request, res: Response, next: NextFunctio
 const deleteManga = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { manga_id } = req.params as { manga_id: string };
-    if (!manga_id) {
-      throw new Error('Manga ID is required');
-    }
 
     await mangaService.deleteManga(manga_id, req.user?.id);
     return HTTPSuccessResponse(res, 200, 'Manga deleted successfully', null);
@@ -102,10 +90,6 @@ const getMangaByCategoryId = async (req: Request, res: Response, next: NextFunct
   try {
     const { category_id } = req.params as { category_id: string };
     const options = req.validated as GetMangaQuery;
-
-    if (!category_id) {
-      throw new Error('Category ID is required');
-    }
 
     const manga = await mangaService.getMangaByCategoryId(category_id, options, req.user?.id);
     return HTTPSuccessResponse(res, 200, 'Manga retrieved by category ID successfully', manga);

@@ -1,10 +1,11 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { SelectMenu } from '@/components/ui/select-menu';
-import { initiateDownload, getAllDownloads } from '@projekt-manga/api-client';
+import { initiateDownload } from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
 import { refreshDownloads } from './row-data';
 import { useCurrentUser } from '@/lib/session-resource';
+import { fetchDownloads } from '@/lib/shared-queries';
 export type DownloadCandidate = { id: string; n: number; title: string; read: boolean };
 export function ChapterDownloadPicker({
   manga,
@@ -75,13 +76,13 @@ export function ChapterDownloadPicker({
       let blocked: Set<string>;
       try {
         blocked = new Set(
-          (await getAllDownloads(controller.signal))
+          (await fetchDownloads())
             .filter((download) => download.status !== 'FAILED')
             .map((download) => download.chapter_id),
         );
       } catch {
         if (active.current && generation.current === requestGeneration)
-          setMessage('Could not refresh download status. No chapters were queued; try again.');
+          setMessage("Couldn't refresh download status. No chapters were queued; try again.");
         return;
       }
       const existing = targets

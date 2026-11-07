@@ -25,6 +25,7 @@ import translateRoutes from './routes/translate.route.js';
 import suwayomiRoutes from './routes/suwayomi.route.js';
 import libraryEventsRoutes, { announceLibraryWrites } from './routes/libraryEvents.route.js';
 import errorHandler from './middleware/error.middleware.js';
+import { NotFoundError } from './utils/customErrors.js';
 import captureUserAgent from './middleware/userAgent.middleware.js';
 import { attachUser } from './middleware/auth.middleware.js';
 import { initializeUserAgentRefresh } from './utils/userAgent.js';
@@ -114,6 +115,10 @@ app.use('/api/notification-channels', notificationChannelRoutes);
 app.use('/api/translate', translateRoutes);
 app.use('/api/suwayomi', suwayomiRoutes);
 app.use('/api/library-events', libraryEventsRoutes);
+
+// Without this an unknown path falls through to Express's HTML 404, which the JSON client
+// can't read.
+app.use('/api', (_req, _res, next) => next(new NotFoundError('API route not found')));
 
 app.use(errorHandler);
 

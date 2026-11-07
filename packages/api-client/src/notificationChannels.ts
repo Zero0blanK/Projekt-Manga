@@ -1,21 +1,11 @@
 import type {
   ChapterAlertBody,
   CreateNotificationChannelBody,
-  NotificationChannelKind,
   UpdateNotificationChannelBody,
 } from '@projekt-manga/schemas';
 import { request } from './client.js';
-
-/** An alert destination as the API shows it: never its URL or token, only the host. */
-export interface NotificationChannel {
-  id: string;
-  kind: NotificationChannelKind;
-  name: string;
-  enabled: boolean;
-  destination: string;
-  last_sent_at: string | null;
-  last_error: string | null;
-}
+import type { NotificationChannel } from '@projekt-manga/types';
+export type { NotificationChannel } from '@projekt-manga/types';
 
 const base = '/notification-channels';
 const one = (id: string) => `${base}/${encodeURIComponent(id)}`;

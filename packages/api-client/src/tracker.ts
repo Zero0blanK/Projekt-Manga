@@ -1,41 +1,23 @@
 import { request } from './client.js';
 import type { ConnectTrackerBody, LinkTrackerBody, TRACKER_SERVICES } from '@projekt-manga/schemas';
-
-export type TrackerName = (typeof TRACKER_SERVICES)[number];
-
-/** How a tracker is connected: an OAuth redirect, a username/password, or a self-hosted
- * server URL plus API key. */
-export type TrackerAuthKind = 'oauth' | 'password' | 'api_key';
-
-export interface TrackerAvailability {
-  tracker: TrackerName;
-  label: string;
-  auth_kind: TrackerAuthKind;
-  /** False when the server is missing configuration this tracker needs. */
-  available: boolean;
-}
-
-export interface ConnectedTracker {
-  tracker: TrackerName;
-  tracker_username: string;
-  connected_at: string;
-}
-
-export interface TrackerSearchResult {
-  tracker_media_id: string;
-  title: string;
-  cover_image_url: string | null;
-}
-
-export interface TrackerLink {
-  id: string;
-  user_id: string;
-  manga_id: string;
-  tracker: TrackerName;
-  tracker_media_id: string;
-  sync_enabled: boolean;
-  last_synced_at: string | null;
-}
+import type {
+  TrackerName,
+  TrackerAuthKind,
+  TrackerAvailability,
+  ConnectedTracker,
+  TrackerSearchResult,
+  TrackerLink,
+  TrackerSyncResult,
+} from '@projekt-manga/types';
+export type {
+  TrackerName,
+  TrackerAuthKind,
+  TrackerAvailability,
+  ConnectedTracker,
+  TrackerSearchResult,
+  TrackerLink,
+  TrackerSyncResult,
+} from '@projekt-manga/types';
 
 const trackerPath = (tracker: TrackerName) => tracker.toLowerCase();
 
@@ -60,11 +42,6 @@ export const getTrackerAuthorizeUrl = (tracker: TrackerName) =>
 
 export const disconnectTracker = (tracker: TrackerName) =>
   request<null>(`/trackers/${trackerPath(tracker)}`, { method: 'DELETE' });
-
-export interface TrackerSyncResult {
-  checked: number;
-  updated: number;
-}
 
 /** Forces a sync of every link on this account, instead of waiting for the server's
  * 30-minute background cycle to reach them. Server-side capped, so this is safe to

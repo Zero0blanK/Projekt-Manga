@@ -4,8 +4,9 @@ info:
   description: >
     Server API for ProjektManga. All responses share a common envelope:
     `{ success: boolean, message: string, data?: T }` on success,
-    `{ success: false, message: string }` on error. This spec documents the `data`
-    payload for each endpoint under its 2xx response.
+    `{ success: false, message: string, code?: string, errors?: object }` on error, where
+    `errors` holds field messages on a `VALIDATION_ERROR`. Routes marked host-level take
+    an `X-Admin-Token` when the server sets `ADMIN_TOKEN`.
   version: 1.0.0
 servers:
   - url: http://localhost:4000/api
@@ -20,16 +21,26 @@ tags:
   - name: Sources
   - name: Cache
   - name: Health
+  - name: Auth
+  - name: Library
+  - name: Trackers
+  - name: Extensions
+  - name: Sync
+  - name: Backup
+  - name: Suwayomi
+  - name: Translate
 
 paths:
   # ── Manga ──────────────────────────────────────────────────────────────
   /manga:
     get:
       tags: [Manga]
-      summary: List the library
+      summary: List the library, all of it unless paged
       parameters:
         - $ref: '#/components/parameters/SortBy'
         - $ref: '#/components/parameters/SortOrder'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
           $ref: '#/components/responses/MangaListItemArray'
@@ -868,17 +879,13 @@ paths:
   /history:
     get:
       tags: [History]
-      summary: List reading history (most recent first)
+      summary: List reading history (most recent first), all of it unless paged
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
           description: OK
-
-    post:
-      tags: [History]
-      summary: (alias, see /history/add)
-      deprecated: true
-      responses:
-        '404': { description: Not routed — use POST /history/add }
 
   /history/add:
     post:
@@ -1055,7 +1062,10 @@ paths:
   /downloads:
     get:
       tags: [Downloads]
-      summary: List all downloads
+      summary: List downloads, all of them unless paged
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
           description: OK
@@ -1216,13 +1226,17 @@ paths:
         '200':
           description: OK
 
-  /source/{source_id}/chapter/{source_chapter_key}/pages:
+  /source/{source_id}/chapter/{chapter_id}/pages:
     get:
       tags: [Sources]
       summary: Get a chapter's page image URLs from the source
       parameters:
         - $ref: '#/components/parameters/SourceId'
-        - $ref: '#/components/parameters/SourceChapterKey'
+        - name: chapter_id
+          in: path
+          required: true
+          description: The source's own id for the chapter, unique only within its title.
+          schema: { type: string }
         - name: manga_slug
           in: query
           schema: { type: string }
@@ -1704,6 +1718,774 @@ paths:
         '401':
           $ref: '#/components/responses/Error'
 
+  # ── Added with the route drift test (tests/openapiRoutes.test.ts) ──────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: 'Create an account. 403 when REGISTRATION=closed and the caller is not the server host'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: 'Sign in and set the session cookie'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: 'Sign out and clear the session cookie'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: 'The signed-in account, or null'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags: [Auth]
+      summary: 'Delete the account. Requires the password'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /auth/password:
+    post:
+      tags: [Auth]
+      summary: 'Change the password and sign out other sessions'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /auth/devices/register:
+    post:
+      tags: [Auth]
+      summary: 'Register a device for sync'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /auth/sessions/revoke-others:
+    post:
+      tags: [Auth]
+      summary: 'Sign out every other session'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /category/state:
+    get:
+      tags: [Category]
+      summary: "The caller's categories, each with the titles in it"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /category/import:
+    post:
+      tags: [Category]
+      summary: 'Add categories held locally, reusing existing names and skipping unknown titles'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /category/{category_id}/manga/{manga_id}:
+    put:
+      tags: [Category]
+      summary: "Put a title in one of the caller's categories"
+      parameters:
+        - { name: category_id, in: path, required: true, schema: { type: string } }
+        - { name: manga_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags: [Category]
+      summary: "Take a title out of one of the caller's categories"
+      parameters:
+        - { name: category_id, in: path, required: true, schema: { type: string } }
+        - { name: manga_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /history/delete/{id}:
+    delete:
+      tags: [History]
+      summary: 'Remove a history entry'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /library:
+    get:
+      tags: [Library]
+      summary: "The caller's bookmark, shelf and rating for each title"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /library/{manga_id}:
+    patch:
+      tags: [Library]
+      summary: 'Update bookmark, shelf or rating for a title'
+      parameters:
+        - { name: manga_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /library-events/stream:
+    get:
+      tags: [Library]
+      summary: "Server-sent events when the caller's library changes"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /update-log:
+    get:
+      tags: [Library]
+      summary: 'Recent library update results'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /manga/{manga_id}/library:
+    patch:
+      tags: [Manga]
+      summary: "Add a title to, or remove it from, the caller's library"
+      parameters:
+        - { name: manga_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /manga/{manga_id}/tracker-link:
+    get:
+      tags: [Trackers]
+      summary: 'Tracker links for a title'
+      parameters:
+        - { name: manga_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      tags: [Trackers]
+      summary: 'Link a title to a tracker entry'
+      parameters:
+        - { name: manga_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /manga/{manga_id}/tracker-link/{tracker}:
+    delete:
+      tags: [Trackers]
+      summary: 'Remove a tracker link'
+      parameters:
+        - { name: manga_id, in: path, required: true, schema: { type: string } }
+        - { name: tracker, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /trackers:
+    get:
+      tags: [Trackers]
+      summary: 'Connected tracker accounts'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /trackers/available:
+    get:
+      tags: [Trackers]
+      summary: 'Trackers this server can connect to'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /trackers/{tracker}/authorize:
+    get:
+      tags: [Trackers]
+      summary: 'Start a tracker OAuth flow'
+      parameters:
+        - { name: tracker, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /trackers/{tracker}/callback:
+    get:
+      tags: [Trackers]
+      summary: 'Finish a tracker OAuth flow'
+      parameters:
+        - { name: tracker, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /trackers/{tracker}/search:
+    get:
+      tags: [Trackers]
+      summary: 'Search a tracker for a title'
+      parameters:
+        - { name: tracker, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /trackers/{tracker}/connect:
+    post:
+      tags: [Trackers]
+      summary: 'Connect a tracker with a credential'
+      parameters:
+        - { name: tracker, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /trackers/sync:
+    post:
+      tags: [Trackers]
+      summary: 'Push and pull tracker progress now'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /trackers/{tracker}:
+    delete:
+      tags: [Trackers]
+      summary: 'Disconnect a tracker'
+      parameters:
+        - { name: tracker, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /cache/thumbnail/{manga_id}:
+    get:
+      tags: [Cache]
+      summary: 'A stored cover, optionally resized with ?w='
+      parameters:
+        - { name: manga_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /cache/legacy-thumbnail/{source_id}/{manga_id}:
+    get:
+      tags: [Cache]
+      summary: 'A cover stored under an older path'
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string } }
+        - { name: manga_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /downloads/chapter/{chapterId}/page/{index}:
+    get:
+      tags: [Downloads]
+      summary: 'One page of a downloaded chapter'
+      parameters:
+        - { name: chapterId, in: path, required: true, schema: { type: string } }
+        - { name: index, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /downloads/orphans:
+    get:
+      tags: [Downloads]
+      summary: 'Folders on disk no download refers to'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /downloads/orphans/cleanup:
+    post:
+      tags: [Downloads]
+      summary: 'Remove orphaned folders'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /downloads/storage-limit:
+    patch:
+      tags: [Downloads]
+      summary: 'Set the download storage limit'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /source/capabilities:
+    get:
+      tags: [Sources]
+      summary: 'What every installed source supports'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /source/health:
+    get:
+      tags: [Sources]
+      summary: 'Recent health of each source'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /source/{source_id}/capabilities:
+    get:
+      tags: [Sources]
+      summary: 'What one source supports'
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /source/{source_id}/catalogue:
+    get:
+      tags: [Sources]
+      summary: "A page of a source's catalogue"
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /source/{source_id}/search-page:
+    get:
+      tags: [Sources]
+      summary: 'A page of search results'
+      parameters:
+        - { name: source_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /source/library/check-updates:
+    get:
+      tags: [Sources]
+      summary: 'Whether a check is running, and how the last one went'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      tags: [Sources]
+      summary: 'Start checking every library title for new chapters. Answers 202 and runs in the background'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /extensions/repositories:
+    get:
+      tags: [Extensions]
+      summary: 'Added extension repositories'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      tags: [Extensions]
+      summary: 'Add a repository. Host-level'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /extensions/repositories/{id}/refresh:
+    post:
+      tags: [Extensions]
+      summary: "Fetch a repository's index again. Host-level"
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /extensions/repositories/{id}:
+    delete:
+      tags: [Extensions]
+      summary: 'Remove a repository and its sources. Host-level'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /extensions/installed:
+    get:
+      tags: [Extensions]
+      summary: 'Installed sources'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      tags: [Extensions]
+      summary: 'Install a source. Host-level; 409 until an unsigned repository is acknowledged'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /extensions/installed/{id}/icon:
+    get:
+      tags: [Extensions]
+      summary: "An installed source's icon"
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /extensions/installed/{id}/update:
+    post:
+      tags: [Extensions]
+      summary: 'Update an installed source. Host-level'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /extensions/installed/{id}:
+    delete:
+      tags: [Extensions]
+      summary: 'Uninstall a source. Host-level'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /sync/generation:
+    get:
+      tags: [Sync]
+      summary: "The account's restore generation"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /sync/pull:
+    get:
+      tags: [Sync]
+      summary: 'What changed since a cursor'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /sync/push:
+    post:
+      tags: [Sync]
+      summary: "Apply a device's changes. Times more than five minutes ahead of the server are pulled back"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /backup:
+    get:
+      tags: [Backup]
+      summary: 'Automatic backup status. Host-level'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      tags: [Backup]
+      summary: 'Make a backup now. Host-level'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /backup/export:
+    get:
+      tags: [Backup]
+      summary: 'Download the library as a backup file. Host-level'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /backup/files/{name}:
+    get:
+      tags: [Backup]
+      summary: 'Download a stored backup. Host-level'
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /backup/config:
+    patch:
+      tags: [Backup]
+      summary: 'Set the automatic backup interval. Host-level'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /restore/preview:
+    post:
+      tags: [Backup]
+      summary: 'What a backup would change. Host-level'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /restore/jobs:
+    post:
+      tags: [Backup]
+      summary: 'Start restoring a backup. Host-level'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /restore/jobs/{id}:
+    get:
+      tags: [Backup]
+      summary: "A restore job's progress. Host-level"
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags: [Backup]
+      summary: 'Cancel a queued restore. Host-level'
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/settings:
+    get:
+      tags: [Suwayomi]
+      summary: 'The saved Suwayomi connection, without its password'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      tags: [Suwayomi]
+      summary: 'Save the Suwayomi connection'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags: [Suwayomi]
+      summary: 'Forget the Suwayomi connection'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/test:
+    post:
+      tags: [Suwayomi]
+      summary: 'Try a Suwayomi connection'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/import:
+    post:
+      tags: [Suwayomi]
+      summary: 'Import sources from the Suwayomi server'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/extensions:
+    get:
+      tags: [Suwayomi]
+      summary: 'Extensions on the Suwayomi server'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/extensions/{pkg_name}:
+    post:
+      tags: [Suwayomi]
+      summary: 'Install, update or remove an extension on the Suwayomi server'
+      parameters:
+        - { name: pkg_name, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /translate/settings:
+    get:
+      tags: [Translate]
+      summary: "The caller's own translation service, without its key"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      tags: [Translate]
+      summary: "Save the caller's translation service"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags: [Translate]
+      summary: "Remove the caller's translation service"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
 components:
   parameters:
     MangaId:
@@ -1772,6 +2554,12 @@ components:
       schema: { type: string }
 
   responses:
+    Ok:
+      description: OK
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Envelope'
     Error:
       description: Error
       content:
@@ -1811,6 +2599,12 @@ components:
             Present when the client is expected to act on the reason. CHALLENGE_REQUIRED
             (with 503) means the source wants a browser check that the desktop app can open.
           example: CHALLENGE_REQUIRED
+        errors:
+          type: object
+          description: Field messages, on a VALIDATION_ERROR only.
+          additionalProperties:
+            type: array
+            items: { type: string }
 
     SourceNetworkConfig:
       type: object

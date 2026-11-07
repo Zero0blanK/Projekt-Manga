@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { getAllMangaLinks, getHistory, type HistoryEntry } from '@projekt-manga/api-client';
+import { getAllMangaLinks, type HistoryEntry } from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
 import { useMangaLibrary, useLibraryState } from '@/lib/library-store';
 import { useAppState } from '@/lib/app-store';
@@ -14,6 +14,12 @@ import { UpdateLibraryButton } from '@/components/library/update-library-button'
 import { ContinueReadingHero } from '@/components/library/continue-reading-hero';
 import { ReadingGoalProgress } from '@/components/library/reading-goal';
 import { LibraryGrid } from '@/components/library/library-grid';
+import { LibraryFilterMenu } from '@/components/library/library-filter-menu';
+import {
+  NO_LIBRARY_FILTERS,
+  parseLibraryFilters,
+  passesLibraryFilters,
+} from '@/lib/library-filters';
 import { useDownloadRows } from '@/components/downloads/row-data';
 import { RecentlyUpdatedRail } from '@/components/library/recently-updated-rail';
 import { EmptyState } from '@/components/page-shell';
@@ -24,43 +30,40 @@ import { useProfilePreference } from '@/lib/profile-preferences';
 import { ArrowRightLeft, CalendarDays, Download, Eye, Shuffle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCurrentUser } from '@/lib/session-resource';
+import { useHistory } from '@/lib/shared-queries';
+import { useQuery } from '@tanstack/react-query';
+import { queryClient, queryKeys } from '@/lib/query-client';
+
+const progressOf = (m: Manga) => m.progress ?? 0;
+const unreadOf = (m: Manga) => Math.max(0, m.chapters - Math.round((m.progress ?? 0) * m.chapters));
 
 export function LibraryPageClient() {
   const router = useRouter();
   const [filter, setFilter] = useState<string>('all');
-  const [historyRows, setHistory] = useState<HistoryEntry[] | null>(null);
-  const [historyOwner, setHistoryOwner] = useState<string | null>(null);
   const { user, loading: sessionLoading } = useCurrentUser();
   const owner = user?.id ?? 'anonymous';
-  const history = historyOwner === owner && !sessionLoading ? historyRows : null;
   const [selected, setSelected] = useState<string[]>([]);
   const [actionsRequest, setActionsRequest] = useState(0);
   const [density] = useProfilePreference('library-density', parseDensity, 'comfortable');
 
-  useEffect(() => {
-    setHistory(null);
-    if (sessionLoading) return;
-    const controller = new AbortController();
-    // Linked sources: reading on one counts as reading its library entry. A failed link
-    // lookup just leaves history as it is.
-    Promise.all([
-      getHistory(controller.signal),
-      getAllMangaLinks(controller.signal).catch(() => []),
-    ])
-      .then(([rows, groups]) => {
-        if (!controller.signal.aborted) {
-          setHistory(creditLinkedReading(rows, groups));
-          setHistoryOwner(owner);
-        }
-      })
-      .catch(() => {
-        if (controller.signal.aborted) return;
-        // History only chooses the featured card; the library itself is still usable.
-        setHistory([]);
-        setHistoryOwner(owner);
-      });
-    return () => controller.abort();
-  }, [owner, sessionLoading]);
+  // Linked sources: reading on one counts as reading its library entry. A failed link
+  // lookup just leaves history as it is, and failed history only costs the featured card.
+  const { data: rawHistory, isError: historyFailed } = useHistory();
+  const { data: linkGroups, isPending: linksPending } = useQuery(
+    {
+      queryKey: [...queryKeys.mangaLinks, owner],
+      queryFn: ({ signal }) => getAllMangaLinks(signal).catch(() => []),
+      enabled: !sessionLoading,
+    },
+    queryClient,
+  );
+  const history = useMemo(() => {
+    if (sessionLoading) return null;
+    if (historyFailed) return [];
+    if (!rawHistory || linksPending) return null;
+    return creditLinkedReading(rawHistory, linkGroups ?? []);
+  }, [sessionLoading, historyFailed, rawHistory, linksPending, linkGroups]);
+  const historyRows = history;
 
   const sort = useAppState((s) => s.sort);
   const sortDir = useAppState((s) => s.sortDir);
@@ -70,7 +73,6 @@ export function LibraryPageClient() {
   const { shelf, bookmarks } = useLibraryState();
 
   const shelfOf = (m: Manga) => resolveShelf(m, shelf);
-  const progressOf = (m: Manga) => m.progress ?? 0;
 
   const reading = mangaLibrary.filter((m) => shelfOf(m) === 'reading');
 
@@ -92,19 +94,22 @@ export function LibraryPageClient() {
   // Quick filters that combine with the shelf/category pills.
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [onlyDownloaded, setOnlyDownloaded] = useState(false);
+  const [libraryFilters, setLibraryFilters] = useProfilePreference(
+    'library-filters',
+    parseLibraryFilters,
+    NO_LIBRARY_FILTERS,
+  );
   const { completed: completedDownloads } = useDownloadRows();
   const downloadedIds = useMemo(
     () => new Set(completedDownloads.map((row) => row.mangaId)),
     [completedDownloads],
   );
-  const unreadOf = (m: Manga) =>
-    Math.max(0, m.chapters - Math.round((m.progress ?? 0) * m.chapters));
-
   const visible = useMemo(() => {
     const list = mangaLibrary.filter((m) => {
       if (onlyUnread && unreadOf(m) === 0) return false;
       if (onlyDownloaded && !downloadedIds.has(m.id)) return false;
-      if (isShelfFilter) return filter === 'all' || shelfOf(m) === filter;
+      if (!passesLibraryFilters(m, libraryFilters)) return false;
+      if (isShelfFilter) return filter === 'all' || resolveShelf(m, shelf) === filter;
       return (categoryMembers[filter] ?? []).includes(m.id);
     });
     const sorted = [...list];
@@ -119,7 +124,6 @@ export function LibraryPageClient() {
     const flip = sortDir === 'asc' ? -1 : 1;
     sorted.sort((a, b) => flip * compare(a, b));
     return sorted;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     mangaLibrary,
     filter,
@@ -131,6 +135,7 @@ export function LibraryPageClient() {
     lastReadAt,
     onlyUnread,
     onlyDownloaded,
+    libraryFilters,
     downloadedIds,
   ]);
 
@@ -218,6 +223,13 @@ export function LibraryPageClient() {
                 <Icon className="h-4 w-4" />
               </button>
             ))}
+            {mangaLibrary.length > 0 && (
+              <LibraryFilterMenu
+                library={mangaLibrary}
+                filters={libraryFilters}
+                onChange={setLibraryFilters}
+              />
+            )}
             {/* With nothing in the library there is nothing to update; finding a first title
                 is the one useful next step. */}
             {mangaLibrary.length > 0 ? (
@@ -317,7 +329,15 @@ export function LibraryPageClient() {
               }}
               onContextOpen={() => setSelected([])}
               density={density}
-              resetKey={[filter, sort, sortDir, view, onlyUnread, onlyDownloaded].join('|')}
+              resetKey={[
+                filter,
+                sort,
+                sortDir,
+                view,
+                onlyUnread,
+                onlyDownloaded,
+                JSON.stringify(libraryFilters),
+              ].join('|')}
             />
           )}
         </div>

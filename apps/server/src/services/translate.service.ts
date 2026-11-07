@@ -96,6 +96,7 @@ class RateLimitedError extends AppError {
 }
 
 const recent = new Map<string, number[]>();
+const RECENT_IDENTITIES_LIMIT = 1000;
 
 function checkRate(identity: string) {
   const now = Date.now();
@@ -103,6 +104,14 @@ function checkRate(identity: string) {
   if (times.length >= RATE_LIMIT) throw new RateLimitedError();
   times.push(now);
   recent.set(identity, times);
+  if (recent.size > RECENT_IDENTITIES_LIMIT) forgetIdleIdentities(now);
+}
+
+/** Identities are per IP, so an entry that's aged out would otherwise stay forever. */
+function forgetIdleIdentities(now: number) {
+  for (const [identity, times] of recent) {
+    if (!times.some((at) => now - at < RATE_WINDOW_MS)) recent.delete(identity);
+  }
 }
 
 // The same bubble text comes up again (re-reading, a recurring line): translated once.

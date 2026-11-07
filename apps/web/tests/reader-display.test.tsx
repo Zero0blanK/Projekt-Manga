@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { adjacentChapter, adjacentRelease, releaseStops } from '@/lib/chapter-skip';
+import { knownGroup } from '@/lib/manga-data';
 import { parseChapterFilter, releasePassesFilter } from '@/lib/chapter-filter';
 import { isTallPage, readerTintColor, tintBlendMode } from '@/lib/page-image';
 import type { Manga } from '@/lib/manga-data';
@@ -68,27 +69,51 @@ describe('chapter-list filters in the reader', () => {
     expect(parseChapterFilter({ status: 'Unread', group: 'Alpha' })).toEqual({
       status: 'Unread',
       group: 'Alpha',
+      hiddenGroups: [],
     });
     expect(parseChapterFilter({ status: 'Everything', group: 42 })).toEqual({
       status: 'All',
       group: 'All',
+      hiddenGroups: [],
     });
-    expect(parseChapterFilter(null)).toEqual({ status: 'All', group: 'All' });
+    expect(parseChapterFilter(null)).toEqual({ status: 'All', group: 'All', hiddenGroups: [] });
+  });
+
+  it('hides a release from a hidden group', () => {
+    expect(
+      releasePassesFilter(
+        release(),
+        { status: 'All', group: 'All', hiddenGroups: [knownGroup(release().scanlator)] },
+        context,
+      ),
+    ).toBe(false);
   });
 
   it('decides each release the way the chapter list does', () => {
-    expect(releasePassesFilter(release(), { status: 'Unread', group: 'All' }, context)).toBe(true);
     expect(
-      releasePassesFilter(release({ is_read: true }), { status: 'Unread', group: 'All' }, context),
+      releasePassesFilter(release(), { status: 'Unread', group: 'All', hiddenGroups: [] }, context),
+    ).toBe(true);
+    expect(
+      releasePassesFilter(
+        release({ is_read: true }),
+        { status: 'Unread', group: 'All', hiddenGroups: [] },
+        context,
+      ),
     ).toBe(false);
-    expect(releasePassesFilter(release(), { status: 'All', group: 'Beta' }, context)).toBe(false);
     expect(
-      releasePassesFilter(release({ id: 'dl' }), { status: 'Downloaded', group: 'All' }, context),
+      releasePassesFilter(release(), { status: 'All', group: 'Beta', hiddenGroups: [] }, context),
+    ).toBe(false);
+    expect(
+      releasePassesFilter(
+        release({ id: 'dl' }),
+        { status: 'Downloaded', group: 'All', hiddenGroups: [] },
+        context,
+      ),
     ).toBe(true);
     expect(
       releasePassesFilter(
         release({ source_chapter_key: 'bm' }),
-        { status: 'Bookmarked', group: 'All' },
+        { status: 'Bookmarked', group: 'All', hiddenGroups: [] },
         context,
       ),
     ).toBe(true);

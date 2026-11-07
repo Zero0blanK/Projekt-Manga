@@ -38,7 +38,7 @@ export function SourceHealthSummary({
   return (
     <Link
       href="/settings#about"
-      className="mt-2 block text-[11px] text-muted-foreground hover:text-foreground"
+      className="mt-2 block text-xs text-muted-foreground hover:text-foreground"
     >
       {apiVersion !== undefined &&
         `API v${apiVersion} ${apiVersion <= SUPPORTED_EXTENSION_API_VERSION ? 'compatible' : 'unsupported'} · `}

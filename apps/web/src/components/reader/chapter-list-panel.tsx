@@ -161,7 +161,7 @@ export function ChapterListPanel({
                   {chapter.name ? ` · ${chapter.name}` : ''}
                 </span>
                 {knownGroup(chapter.scanlator) && (
-                  <span className="shrink-0 text-[10px] text-white/40">
+                  <span className="shrink-0 text-xs text-white/70">
                     {knownGroup(chapter.scanlator)}
                   </span>
                 )}
@@ -173,7 +173,7 @@ export function ChapterListPanel({
           <div aria-hidden="true" style={{ height: (sorted.length - endIndex) * ROW_HEIGHT }} />
         )}
         {sorted.length === 0 && (
-          <div className="px-3 py-4 text-center text-xs text-white/40">No chapters yet.</div>
+          <div className="px-3 py-4 text-center text-xs text-white/70">No chapters yet.</div>
         )}
       </div>
     </>

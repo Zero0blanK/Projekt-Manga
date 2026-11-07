@@ -78,11 +78,12 @@ export function DownloadFolderField() {
           disabled={loading || busy}
           spellCheck={false}
           placeholder="C:\Users\you\Downloads\ProjektManga"
-          className="font-mono text-[11px]"
+          className="font-mono text-xs"
         />
-        <div className="flex items-center gap-3 text-[11px]">
+        <div className="flex items-center gap-3 text-xs">
           {loadError && (
             <button
+              type="button"
               onClick={() => setLoadAttempt((attempt) => attempt + 1)}
               disabled={loading || busy}
               className="font-medium text-primary transition hover:opacity-80 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:inline-flex pointer-coarse:min-h-6 pointer-coarse:items-center"
@@ -91,6 +92,7 @@ export function DownloadFolderField() {
             </button>
           )}
           <button
+            type="button"
             onClick={() => apply(setDownloadDirectory(value.trim()), 'Download folder updated')}
             disabled={!dirty || busy}
             className="font-medium text-primary transition hover:opacity-80 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:inline-flex pointer-coarse:min-h-6 pointer-coarse:items-center"
@@ -98,6 +100,7 @@ export function DownloadFolderField() {
             Save
           </button>
           <button
+            type="button"
             onClick={() => apply(resetDownloadDirectory(), 'Download folder reset to default')}
             disabled={busy}
             className="text-muted-foreground transition hover:text-foreground disabled:opacity-40 pointer-coarse:inline-flex pointer-coarse:min-h-6 pointer-coarse:items-center"

@@ -39,10 +39,10 @@ const mapForManga = async (
 /**
  * Applies a partial edit to this identity's override, creating it on first use.
  *
- * One row per (manga_id, user_id) is kept here rather than by a unique index (SQLite
- * treats NULLs as distinct). The read-then-write runs in one transaction, which SQLite
- * serializes, so two concurrent edits cannot both create a row. A write that leaves every
- * field null removes the row, so an emptied override reads exactly like none.
+ * The read-then-write runs in one transaction, which SQLite serializes, so two concurrent
+ * edits meet the same row; the unique indexes are what guarantee one row per identity. A
+ * write that leaves every field null removes the row, so an emptied override reads exactly
+ * like none.
  */
 const upsert = async (
   manga_id: string,

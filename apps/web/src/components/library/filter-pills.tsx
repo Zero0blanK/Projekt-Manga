@@ -95,6 +95,7 @@ export function FilterPills({
         const on = filter === f.value;
         return (
           <button
+            type="button"
             key={f.value}
             onClick={() => onChange(f.value)}
             aria-pressed={on}
@@ -119,6 +120,7 @@ export function FilterPills({
           <ContextMenu key={c}>
             <ContextMenuTrigger asChild>
               <button
+                type="button"
                 ref={(element) => {
                   if (element) categoryTriggers.current.set(c, element);
                   else categoryTriggers.current.delete(c);
@@ -177,6 +179,7 @@ export function FilterPills({
         </div>
       ) : (
         <button
+          type="button"
           ref={addCategoryTrigger}
           onClick={() => setAdding(true)}
           aria-label="Add category"

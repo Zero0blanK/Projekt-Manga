@@ -2,8 +2,10 @@ import { Prisma } from '@prisma/client';
 import mangaRepository from '../repositories/manga.repository.js';
 import userLibraryRepository from '../repositories/userLibrary.repository.js';
 import userMangaCategoryRepository from '../repositories/userMangaCategory.repository.js';
+import categoryRepository from '../repositories/category.repository.js';
 import {
   MangaNotFoundError,
+  NotFoundError,
   DuplicateResourceError,
   ValidationError,
   PrismaError,
@@ -28,15 +30,9 @@ const getMangaById = async (manga_id: string) => {
   return manga;
 };
 
-const getMangaDetailsById = async (manga_id: string, user_id?: string) => {
-  const manga = user_id
-    ? await mangaRepository.getMangaDetailsByIdForUser(user_id, manga_id)
-    : await mangaRepository.getMangaDetailsById(manga_id);
+type StoredDetails = NonNullable<Awaited<ReturnType<typeof mangaRepository.getMangaDetailsById>>>;
 
-  if (!manga) {
-    throw new MangaNotFoundError('Manga not found');
-  }
-
+const toMangaDetails = (manga: StoredDetails) => {
   const detail = Array.isArray(manga.manga_detail) ? manga.manga_detail[0] : manga.manga_detail;
 
   const { manga_detail, chapter, ...rest } = manga;
@@ -51,17 +47,20 @@ const getMangaDetailsById = async (manga_id: string, user_id?: string) => {
   };
 };
 
-const getMangaByCategory = async (category_id: string) => {
-  const manga = await mangaRepository.getMangaByCategory(category_id);
+const getMangaDetailsById = async (manga_id: string, user_id?: string) => {
+  const manga = user_id
+    ? await mangaRepository.getMangaDetailsByIdForUser(user_id, manga_id)
+    : await mangaRepository.getMangaDetailsById(manga_id);
 
-  return manga;
+  if (!manga) {
+    throw new MangaNotFoundError('Manga not found');
+  }
+  return toMangaDetails(manga);
 };
 
-const searchMangaByQuery = async (query: string) => {
-  const manga = await mangaRepository.searchMangaByQuery(query);
-
-  return manga;
-};
+/** Many titles' details at once, leaving out any that have gone. */
+const getMangaDetailsByIds = async (manga_ids: string[], user_id?: string) =>
+  (await mangaRepository.getMangaDetailsByIds(manga_ids, user_id)).map(toMangaDetails);
 
 const addManga = async (manga_data: AddMangaPayload, user_id?: string) => {
   try {
@@ -117,8 +116,15 @@ const deleteManga = async (manga_id: string, user_id?: string) => {
   return true;
 };
 
+const assertOwnCategory = async (category_id: string, user_id?: string) => {
+  if (!(await categoryRepository.getCategoryById(category_id, user_id ?? null))) {
+    throw new NotFoundError('Category not found');
+  }
+};
+
 const addMangaToCategory = async (manga_slug: string, category_id: string, user_id?: string) => {
   try {
+    await assertOwnCategory(category_id, user_id);
     const manga = await mangaRepository.getMangaIdBySlug(manga_slug);
 
     if (!manga) {
@@ -140,6 +146,7 @@ const getMangaByCategoryId = async (
   user_id?: string,
 ) => {
   try {
+    await assertOwnCategory(category_id, user_id);
     const manga = user_id
       ? await mangaRepository.getMangaByCategoryIdForUser(user_id, category_id, options)
       : await mangaRepository.getMangaByCategoryId(category_id, options);
@@ -164,9 +171,8 @@ const mangaService = {
   getManga,
   getMangaById,
   getMangaDetailsById,
+  getMangaDetailsByIds,
   setInLibrary,
-  getMangaByCategory,
-  searchMangaByQuery,
   addManga,
   deleteManga,
   addMangaToCategory,

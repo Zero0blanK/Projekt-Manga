@@ -5,6 +5,8 @@ import {
   onLibraryChange,
   type LibraryChangeScope,
 } from '../utils/libraryChanges.js';
+import { StreamLimiter } from '../utils/streamLimiter.js';
+import { HTTPErrorResponse } from '../utils/responseHandlers.js';
 
 /**
  * Tells every open app and browser tab on the same library that it changed.
@@ -19,6 +21,7 @@ import {
 
 const MAX_STREAMS = 50;
 const streams = new Set<Response>();
+const perClient = new StreamLimiter();
 
 /** Whose library a request reads and writes: its account, or the anonymous one. */
 const ownerOf = (req: Request) => (req.user?.id ? `user:${req.user.id}` : 'anonymous');
@@ -42,8 +45,8 @@ export function announceLibraryWrites(req: Request, res: Response, next: NextFun
 const router = Router();
 
 router.get('/stream', (req: Request, res: Response) => {
-  if (streams.size >= MAX_STREAMS) {
-    res.status(503).json({ success: false, message: 'Too many open library streams' });
+  if (streams.size >= MAX_STREAMS || !perClient.acquire(req.ip)) {
+    HTTPErrorResponse(res, 503, 'Too many open library streams');
     return;
   }
   const owner = ownerOf(req);
@@ -77,6 +80,7 @@ router.get('/stream', (req: Request, res: Response) => {
     if (pending) clearTimeout(pending);
     stopListening();
     streams.delete(res);
+    perClient.release(req.ip);
   });
 });
 

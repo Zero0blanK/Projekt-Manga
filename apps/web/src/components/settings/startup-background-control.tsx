@@ -1,5 +1,6 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
 import { useEffect, useState } from 'react';
 import { Field, Group, ToggleSwitch } from '@/components/settings/field-controls';
 import { toast } from '@/hooks/use-toast';
@@ -23,13 +24,8 @@ interface StartupBridge {
 /** Desktop on/off settings kept by the main process, each with the same get/set shape. */
 type BridgeName = 'startupBackground' | 'closeToTray';
 
-function desktopBridge(name: BridgeName): StartupBridge | null {
-  if (typeof window === 'undefined') return null;
-  return (
-    (window as unknown as { desktop?: Partial<Record<BridgeName, StartupBridge>> }).desktop?.[
-      name
-    ] ?? null
-  );
+function startupBridge(name: BridgeName): StartupBridge | null {
+  return desktopBridge<Record<BridgeName, StartupBridge>>()?.[name] ?? null;
 }
 
 export function StartupBackgroundControl() {
@@ -40,7 +36,7 @@ export function StartupBackgroundControl() {
       label="Run in background at sign-in"
       hint="Start hidden in the tray when you sign in"
       switchLabel="Run Projekt Manga in background at sign-in"
-      failure="Could not change startup behavior. Try again."
+      failure="Couldn't change startup behavior. Try again."
       unavailable="Startup setting unavailable. Relaunch the app to retry."
     />
   );
@@ -56,7 +52,7 @@ export function CloseToTrayControl() {
       label="Close to tray"
       hint="Closing the window keeps the app running in the tray, so updates continue"
       switchLabel="Keep Projekt Manga running in the tray when the window closes"
-      failure="Could not change what closing the window does. Try again."
+      failure="Couldn't change what closing the window does. Try again."
       unavailable="Tray setting unavailable. Relaunch the app to retry."
     />
   );
@@ -85,7 +81,7 @@ function DesktopToggle({
   const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
-    const desktop = desktopBridge(bridgeName);
+    const desktop = startupBridge(bridgeName);
     if (!desktop) return;
     let active = true;
     setBridge(desktop);
@@ -111,7 +107,7 @@ function DesktopToggle({
     try {
       const result = await bridge.setEnabled(!state.enabled);
       if (!result.success || !result.data)
-        throw new Error(result.message ?? 'Could not save setting');
+        throw new Error(result.message ?? "Couldn't save setting");
       setState(result.data);
     } catch {
       toast({ variant: 'destructive', description: failure });

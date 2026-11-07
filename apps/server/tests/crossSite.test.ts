@@ -46,10 +46,19 @@ describe('cross-site write protection', () => {
     expect(res.status).toBe(403);
   });
 
+  it('refuses a same-site request from another app, like a sibling subdomain', async () => {
+    process.env.CLIENT_URL = 'https://manga.example.com';
+    const res = await request(app)
+      .post('/api/auth/logout')
+      .set({ 'Sec-Fetch-Site': 'same-site', Origin: 'https://blog.example.com' });
+
+    expect(res.status).toBe(403);
+  });
+
   it('lets the app itself through: same-site, same-origin and CLIENT_URL', async () => {
     process.env.CLIENT_URL = 'http://localhost:3000';
     for (const headers of [
-      { 'Sec-Fetch-Site': 'same-site' },
+      { 'Sec-Fetch-Site': 'same-site', Origin: 'http://localhost:3000' },
       { 'Sec-Fetch-Site': 'same-origin' },
       { Origin: 'http://localhost:3000' },
       {},

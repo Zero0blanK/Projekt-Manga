@@ -14,9 +14,14 @@ import userLibraryRepository from '../repositories/userLibrary.repository.js';
 import userMangaStateRepository from '../repositories/userMangaState.repository.js';
 import userChapterStateRepository from '../repositories/userChapterState.repository.js';
 import userMangaCategoryRepository from '../repositories/userMangaCategory.repository.js';
-import { DuplicateResourceError, UnauthorizedError, NotFoundError } from '../utils/customErrors.js';
+import {
+  DuplicateResourceError,
+  ForbiddenError,
+  UnauthorizedError,
+  NotFoundError,
+} from '../utils/customErrors.js';
 import { removeOwnerBackups } from '../utils/backupStore.js';
-import type { RegisterBody, LoginBody } from '@projekt-manga/schemas';
+import type { RegisterBody, LoginBody, ChangePasswordBody } from '@projekt-manga/schemas';
 
 const BCRYPT_COST_FACTOR = 12;
 /** A fixed, valid-shaped bcrypt hash of no real password, compared against when the
@@ -29,7 +34,7 @@ const DUMMY_PASSWORD_HASH = bcrypt.hashSync(
   BCRYPT_COST_FACTOR,
 );
 // 90 days: the desktop's offline auto-auth (apps/desktop) relies on not having to re-login
-// often. The expiry is not extended on activity.
+// often. Activity extends it (see the sliding renewal in auth.middleware.ts).
 export const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 export { SESSION_COOKIE_NAME };
 
@@ -71,16 +76,24 @@ function toPublicUser(user: {
 /** One-time bulk copy of the shared anonymous state onto a brand-new account — only ever
  * runs for the very first account this server has had (see register's isFirstAccount
  * check), so the person who's been using the app anonymously doesn't lose their library
- * the moment they create an account. Every write here goes through each domain's own
+ * the moment they create an account. Categories are copied into the account's own list. Every write here goes through each domain's own
  * claimFromAnonymous, which is skipDuplicates-safe, so a retry after a partial failure
  * can't double-claim. */
 const claimExistingAnonymousData = async (user_id: string) => {
-  const [libraryMangaIds, mangaStates, chaptersWithState, categoryAssignments] = await Promise.all([
+  const [libraryMangaIds, mangaStates, chaptersWithState, anonymousCategories] = await Promise.all([
     mangaRepository.listLibraryMangaIds(),
     libraryRepository.getAll(),
     chapterRepository.listChaptersWithState(),
-    categoryRepository.getAllAssignments(),
+    categoryRepository.getAnonymousCategoriesWithAssignments(),
   ]);
+
+  const categoryAssignments: { manga_id: string; category_id: string }[] = [];
+  for (const { name, manga_category } of anonymousCategories) {
+    const own = await categoryRepository.findOrCreateByName(name, user_id);
+    for (const { manga_id } of manga_category) {
+      categoryAssignments.push({ manga_id, category_id: own.id });
+    }
+  }
 
   await Promise.all([
     userLibraryRepository.claimFromAnonymous(user_id, libraryMangaIds),
@@ -110,20 +123,39 @@ const claimExistingAnonymousData = async (user_id: string) => {
   ]);
 };
 
-const register = async (body: RegisterBody, userAgent?: string) => {
+/** `REGISTRATION=closed` leaves sign-up to the server's own machine or an `ADMIN_TOKEN`
+ * holder, so an exposed server can't be joined by anyone who finds it. */
+const registrationOpen = () => process.env.REGISTRATION?.trim().toLowerCase() !== 'closed';
+
+/** `fromHost` is whether the request came from the server machine or an admin. The first
+ * account only inherits the anonymous library then: on an exposed server, the first
+ * stranger to register would otherwise walk away with the owner's data. */
+const register = async (body: RegisterBody, fromHost: boolean, userAgent?: string) => {
+  if (!registrationOpen() && !fromHost) {
+    throw new ForbiddenError('Registration is closed on this server');
+  }
+
   const existing = await userRepository.getByEmail(body.email);
   if (existing) {
     throw new DuplicateResourceError('An account with this email already exists');
   }
 
   const password_hash = await bcrypt.hash(body.password, BCRYPT_COST_FACTOR);
-  const { user, isFirstAccount } = await userRepository.createAndCheckFirstAccount({
-    email: body.email,
-    password_hash,
-    display_name: body.display_name,
-  });
+  const { user, isFirstAccount } = await userRepository
+    .createAndCheckFirstAccount({
+      email: body.email,
+      password_hash,
+      display_name: body.display_name,
+    })
+    .catch((error: unknown) => {
+      // Two registrations for one address racing past the check above.
+      if ((error as { code?: unknown } | null)?.code === 'P2002') {
+        throw new DuplicateResourceError('An account with this email already exists');
+      }
+      throw error;
+    });
 
-  if (isFirstAccount) {
+  if (isFirstAccount && fromHost) {
     try {
       await claimExistingAnonymousData(user.id);
     } catch (error) {
@@ -218,6 +250,27 @@ const registerDevice = async (user_id: string, label: string, platform: DevicePl
   return await deviceRepository.create({ user_id, label, platform });
 };
 
+/** Other sessions are revoked: changing a password is what someone does when they suspect
+ * another device has it. The caller's own session stays signed in. */
+const changePassword = async (
+  user_id: string,
+  currentSessionId: string,
+  body: ChangePasswordBody,
+) => {
+  const user = await userRepository.getById(user_id);
+  if (!user) {
+    throw new NotFoundError('Account not found');
+  }
+  if (!(await bcrypt.compare(body.current_password, user.password_hash))) {
+    throw new UnauthorizedError('Incorrect password');
+  }
+  await userRepository.setPasswordHash(
+    user_id,
+    await bcrypt.hash(body.new_password, BCRYPT_COST_FACTOR),
+  );
+  return await sessionRepository.deleteAllExcept(user_id, currentSessionId);
+};
+
 const deleteAccount = async (user_id: string, password: string) => {
   const user = await userRepository.getById(user_id);
   if (!user) {
@@ -240,6 +293,7 @@ const authService = {
   signOutOtherDevices,
   getSessionUser,
   registerDevice,
+  changePassword,
   deleteAccount,
   toPublicUser,
 };

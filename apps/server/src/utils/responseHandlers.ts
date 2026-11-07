@@ -10,7 +10,16 @@ export interface ErrorResponse {
   success: false;
   message: string;
   code?: string;
+  /** Field-level messages, on a `VALIDATION_ERROR` only. */
+  errors?: Record<string, string[] | undefined>;
 }
+
+/** The body a rate limiter answers with, for `express-rate-limit`'s `message` option. */
+export const rateLimitBody = (message: string): ErrorResponse => ({
+  success: false,
+  message,
+  code: 'RATE_LIMITED',
+});
 
 export const HTTPSuccessResponse = (
   res: Response,
@@ -35,5 +44,17 @@ export const HTTPErrorResponse = (
     success: false,
     message,
     ...(code ? { code } : {}),
+  });
+};
+
+export const HTTPValidationErrorResponse = (
+  res: Response,
+  errors: Record<string, string[] | undefined>,
+): Response<ErrorResponse> => {
+  return res.status(400).json({
+    success: false,
+    message: 'Validation failed',
+    code: 'VALIDATION_ERROR',
+    errors,
   });
 };

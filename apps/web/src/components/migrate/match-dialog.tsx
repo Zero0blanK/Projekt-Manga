@@ -1,5 +1,6 @@
 'use client';
 
+import { useLatest } from '@/lib/use-latest';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Loader2, Search } from 'lucide-react';
 import {
@@ -78,17 +79,21 @@ export function MatchDialog({
     );
   };
   // The first search runs on its own when the dialog opens on it.
+  const startSearch = useLatest(() => {
+    if (results.state === 'idle') search();
+  });
   useEffect(() => {
-    if (view.kind === 'search' && results.state === 'idle') search();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.kind]);
+    if (view.kind === 'search') startSearch.current();
+  }, [view.kind, startSearch]);
 
   const previewKey = view.kind === 'preview' ? `${view.found.sourceId}\0${view.found.slug}` : '';
+  const previewSource = view.kind === 'preview' ? view.found.sourceId : null;
+  const previewSlug = view.kind === 'preview' ? view.found.slug : null;
   useEffect(() => {
-    if (view.kind !== 'preview') return;
+    if (previewSource === null || previewSlug === null) return;
     const controller = new AbortController();
     setDetails({ key: previewKey, state: 'loading', value: null });
-    getSourceMangaDetails(view.found.sourceId, view.found.slug, controller.signal).then(
+    getSourceMangaDetails(previewSource, previewSlug, controller.signal).then(
       (value) => setDetails({ key: previewKey, state: 'ready', value }),
       () => {
         if (!controller.signal.aborted)
@@ -96,8 +101,7 @@ export function MatchDialog({
       },
     );
     return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewKey]);
+  }, [previewKey, previewSource, previewSlug]);
 
   const shown = details?.key === previewKey ? details : null;
   const chapters = shown?.value?.chapters ?? [];

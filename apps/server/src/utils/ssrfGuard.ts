@@ -165,7 +165,8 @@ export function isDisallowedRedirectHost(rawHostname: string): boolean {
  * - **TOCTOU.** A hostname validated by `assertPublicHttpUrl` can resolve differently by
  *   request time (DNS rebinding). Validating during lookup removes that window.
  *
- * Pass the agents below as axios's `httpAgent`/`httpsAgent` on any request whose URL came
+ * Pass the agents below as axios's `httpAgent`/`httpsAgent`, with `proxy: false` (an
+ * `HTTP_PROXY` would resolve DNS itself, past this check), on any request whose URL came
  * from outside this app.
  */
 export const guardedLookup: net.LookupFunction = (hostname, options, callback) => {

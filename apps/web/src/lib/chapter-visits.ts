@@ -1,5 +1,6 @@
 'use client';
 
+import { useLatest } from '@/lib/use-latest';
 import { useEffect, useRef, useState } from 'react';
 
 const EMPTY: ReadonlySet<string> = new Set();
@@ -49,9 +50,12 @@ export function useNewSinceLastVisit(
     ids: new Set(),
   }));
   const key = `${owner}:${mangaId}`;
+  // A new array every render: idsKey says when its contents changed.
   const idsKey = chapterIds.join('\n');
+  const ids = useLatest(chapterIds);
 
   useEffect(() => {
+    const chapterIds = ids.current;
     if (!ready || chapterIds.length === 0) return;
     if (previous.current?.key !== key) {
       previous.current = { key, seen: readSeenChapters(owner, mangaId) };
@@ -59,9 +63,7 @@ export function useNewSinceLastVisit(
     const seen = previous.current.seen;
     setFresh({ key, ids: seen ? new Set(chapterIds.filter((id) => !seen.has(id))) : new Set() });
     writeSeenChapters(owner, mangaId, chapterIds);
-    // idsKey stands in for chapterIds, which is a new array on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, key, idsKey, owner, mangaId]);
+  }, [ready, key, idsKey, ids, owner, mangaId]);
 
   return fresh.key === key ? fresh.ids : EMPTY;
 }

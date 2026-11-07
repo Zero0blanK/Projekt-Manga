@@ -288,9 +288,8 @@ const getFilters = async (req: Request, res: Response, next: NextFunction) => {
 const fetchMangaUpdates = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { source_id, manga_slug } = req.params as { source_id: string; manga_slug: string };
-    const { manga_id, mangaId } = req.validated as FetchMangaUpdatesBody;
-    const resolvedMangaId = manga_id || mangaId || undefined;
-    const result = await sourceService.fetchMangaUpdates(source_id, manga_slug, resolvedMangaId);
+    const { manga_id } = req.validated as FetchMangaUpdatesBody;
+    const result = await sourceService.fetchMangaUpdates(source_id, manga_slug, manga_id);
     return HTTPSuccessResponse(
       res,
       200,
@@ -312,13 +311,24 @@ const keysFromUrls = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
-const checkLibraryUpdates = async (_req: Request, res: Response, next: NextFunction) => {
-  try {
-    const result = await sourceService.checkAllLibraryUpdates();
-    return HTTPSuccessResponse(res, 200, 'Library updates checked successfully', result);
-  } catch (error) {
-    next(error);
-  }
+const checkLibraryUpdates = (_req: Request, res: Response) => {
+  const result = sourceService.startLibrarySweep();
+  return HTTPSuccessResponse(
+    res,
+    202,
+    result.started ? 'Library update started' : 'A library update is already running',
+    result,
+  );
+};
+
+const getLibraryUpdateStatus = (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  return HTTPSuccessResponse(
+    res,
+    200,
+    'Library update status',
+    sourceService.getLibrarySweepStatus(),
+  );
 };
 
 const proxySuwayomiImage = async (req: Request, res: Response, url: string) => {
@@ -415,6 +425,7 @@ const proxyImage = async (req: Request, res: Response, next: NextFunction) => {
           ...(fresh
             ? freshGuardedAgents()
             : { httpAgent: guardedHttpAgent, httpsAgent: guardedHttpsAgent }),
+          proxy: false,
           beforeRedirect: (options) => {
             if (isDisallowedRedirectHost(String(options.hostname))) {
               throw new Error('Redirect target is disallowed');
@@ -571,7 +582,7 @@ const saveBrowserSession = async (req: Request, res: Response, next: NextFunctio
     const { source_id } = req.params as { source_id: string };
     const status = await sourceBrowserSessionService.saveSession(
       source_id,
-      req.body as SourceBrowserSessionBody,
+      req.validated as SourceBrowserSessionBody,
     );
     return HTTPSuccessResponse(res, 200, 'Browser session saved', status);
   } catch (error) {
@@ -605,6 +616,7 @@ const sourceController = {
   fetchMangaUpdates,
   keysFromUrls,
   checkLibraryUpdates,
+  getLibraryUpdateStatus,
   proxyImage,
   getBrowserSession,
   saveBrowserSession,

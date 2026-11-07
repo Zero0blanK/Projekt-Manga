@@ -8,10 +8,12 @@ import { shareReadState } from './chapter.service.js';
 import categoryRepository from '../repositories/category.repository.js';
 import type { SyncPushBody } from '@projekt-manga/schemas';
 import { ValidationError } from '../utils/customErrors.js';
-import prisma from '../configs/prisma.config.js';
+import userRepository from '../repositories/user.repository.js';
+import restoreJobRepository from '../repositories/restoreJob.repository.js';
 import { DuplicateResourceError } from '../utils/customErrors.js';
 import { withAccountWriteLock } from '../utils/accountWriteLock.js';
 import { recordDiagnosticEvent } from '../utils/diagnosticLog.js';
+import { clampClientTime } from '../utils/syncMerge.js';
 
 /**
  * The two halves of the delta-sync protocol: pull returns everything an account changed
@@ -89,10 +91,7 @@ function pageOf<T extends { id: string }>(
 }
 
 const pull = async (user_id: string, since?: string) => {
-  const account = await prisma.user.findUniqueOrThrow({
-    where: { id: user_id },
-    select: { sync_generation: true },
-  });
+  const generation = await userRepository.getSyncGeneration(user_id);
   // Captured before the domain queries run, so a row changed while this pull executes is
   // still included next time. No upper bound is needed: a row appearing in two consecutive
   // pulls is harmless, since every domain's apply is idempotent.
@@ -141,10 +140,9 @@ const pull = async (user_id: string, since?: string) => {
       probe,
       positions.history.id,
     ),
-    // The shared category vocabulary is small (a personal library's worth of tags) and
-    // rarely changes, so it's simplest to always send the full list rather than track a
-    // separate delta for it.
-    categoryRepository.getCategory(),
+    // An account's category list is small and rarely changes, so it's simplest to always
+    // send the full list rather than track a separate delta for it.
+    categoryRepository.getCategory(user_id),
   ]);
 
   const library = pageOf(libraryRows, 'updated_at');
@@ -177,7 +175,7 @@ const pull = async (user_id: string, since?: string) => {
     : server_time.toISOString();
 
   return {
-    generation: account.sync_generation,
+    generation,
     server_time: server_time.toISOString(),
     /** Resume point for the next pull. Clients should store this, not server_time. */
     next_since,
@@ -253,17 +251,11 @@ async function applyEach<T>(
 
 const push = async (user_id: string, body: SyncPushBody) =>
   withAccountWriteLock(user_id, async () => {
-    const account = await prisma.user.findUniqueOrThrow({
-      where: { id: user_id },
-      select: { sync_generation: true },
-    });
-    if ((body.generation ?? 0) !== account.sync_generation)
+    const generation = await userRepository.getSyncGeneration(user_id);
+    if ((body.generation ?? 0) !== generation)
       throw new DuplicateResourceError('Sync reset required after a library restore');
-    const restoring = await prisma.restore_job.findFirst({
-      where: { owner: user_id, state: { in: ['queued', 'running'] } },
-      select: { id: true },
-    });
-    if (restoring) throw new DuplicateResourceError('Library restore is in progress');
+    if (await restoreJobRepository.hasActive(user_id))
+      throw new DuplicateResourceError('Library restore is in progress');
     const library = await applyEach(
       body.library ?? [],
       (row) => row.manga_id,
@@ -271,8 +263,8 @@ const push = async (user_id: string, body: SyncPushBody) =>
         userLibraryRepository.applyIncoming(
           user_id,
           row.manga_id,
-          row.deleted_at ? new Date(row.deleted_at) : null,
-          new Date(row.updated_at),
+          row.deleted_at ? clampClientTime(row.deleted_at) : null,
+          clampClientTime(row.updated_at),
         ),
     );
 
@@ -288,7 +280,7 @@ const push = async (user_id: string, body: SyncPushBody) =>
             shelf_status: row.shelf_status,
             notification_read: row.notification_read,
           },
-          new Date(row.updated_at),
+          clampClientTime(row.updated_at),
         ),
     );
 
@@ -314,7 +306,7 @@ const push = async (user_id: string, body: SyncPushBody) =>
           is_read: row.is_read,
           is_bookmark: row.is_bookmark,
           last_page_read: row.last_page_read,
-          updated_at: new Date(row.updated_at),
+          updated_at: clampClientTime(row.updated_at),
         });
         // A chapter read on a linked source, offline: read on the main title as well. Only
         // reads travel here; an old unread row from another device must not clear one.
@@ -332,8 +324,8 @@ const push = async (user_id: string, body: SyncPushBody) =>
         // another device just to mark the assignment deleted, leaving an orphaned empty
         // category behind. No category means there is no assignment left to delete.
         const category = row.deleted_at
-          ? await categoryRepository.getCategoryByName(row.category_name)
-          : await categoryRepository.findOrCreateByName(row.category_name);
+          ? await categoryRepository.getCategoryByName(row.category_name, user_id)
+          : await categoryRepository.findOrCreateByName(row.category_name, user_id);
 
         if (!category) {
           return;
@@ -343,8 +335,8 @@ const push = async (user_id: string, body: SyncPushBody) =>
           user_id,
           row.manga_id,
           category.id,
-          row.deleted_at ? new Date(row.deleted_at) : null,
-          new Date(row.updated_at),
+          row.deleted_at ? clampClientTime(row.deleted_at) : null,
+          clampClientTime(row.updated_at),
         );
       },
     );
@@ -368,11 +360,11 @@ const push = async (user_id: string, body: SyncPushBody) =>
                 // Rows from before app-owned ids were keyed by the source's own id.
                 row.chapter_id)
               : null),
-          read_at: new Date(row.read_at),
-          last_read: new Date(row.last_read),
+          read_at: clampClientTime(row.read_at),
+          last_read: clampClientTime(row.last_read),
           pages_read: row.pages_read,
           time_read: row.time_read,
-          deleted_at: row.deleted_at ? new Date(row.deleted_at) : null,
+          deleted_at: row.deleted_at ? clampClientTime(row.deleted_at) : null,
         }),
     );
 

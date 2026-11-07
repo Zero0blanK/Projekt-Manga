@@ -37,6 +37,7 @@ import { SourceError } from '../sourceError.js';
 import { waitForMangaDexDispatch } from './mangadexPacing.js';
 import { isCloudflareChallenge, type SandboxBrowserSession } from './cookieJar.js';
 import { resolveWithDoh, type ResolvedAddress } from './doh.js';
+import { residentBytes } from './childMemory.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Always the compiled output: fork needs a real .js entry point, so apps/extensions must be
@@ -214,6 +215,33 @@ function setCookiesOf(response: Response): string[] {
   return single ? [single] : [];
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+/**
+ * Whether a message from the child has a shape this process can act on.
+ *
+ * The bundle shares a realm with the runner, so it can call `process.send` itself with
+ * anything at all. A `null` or a reply with no `error` would throw inside an event handler
+ * here, and an uncaught exception in this process takes the whole API down.
+ */
+function isChildMessage(message: unknown): message is ChildMessage {
+  if (!isRecord(message) || typeof message.id !== 'number') return false;
+  if (message.kind === 'fetch-abort') return true;
+  if (message.kind === 'fetch') {
+    return (
+      typeof message.url === 'string' &&
+      typeof message.method === 'string' &&
+      isRecord(message.headers)
+    );
+  }
+  if (message.kind !== 'source-call') return false;
+  return (
+    message.ok === true ||
+    (message.ok === false && isRecord(message.error) && typeof message.error.message === 'string')
+  );
+}
+
 /**
  * Rebuilds the error the sandboxed source threw, so a repo-installed source is classified
  * exactly like a bundled one (the server matches structurally on `code`/`reason`/`detail`).
@@ -232,6 +260,36 @@ function reviveCallError(payload: SerializedSourceError, fallbackSourceId: strin
     detail: payload.detail,
     url: payload.url,
   });
+}
+
+/** Well past `DEFAULT_MAX_OLD_SPACE_MB`, which only covers the JavaScript heap, leaving room
+ * for page buffers. */
+const MAX_CHILD_RESIDENT_BYTES = 1024 * 1024 * 1024;
+const MEMORY_CHECK_INTERVAL_MS = 15_000;
+
+/** A source's stdout and stderr, kept from flooding the server's log: a line is cut short,
+ * and a noisy source goes quiet until the minute is up. */
+const OUTPUT_LINE_CHARS = 2000;
+const OUTPUT_LINES_PER_MINUTE = 120;
+
+function limitedOutput(sourceId: string) {
+  let windowStart = 0;
+  let lines = 0;
+  return (write: (...data: unknown[]) => void, chunk: Buffer) => {
+    const now = Date.now();
+    if (now - windowStart >= 60_000) {
+      windowStart = now;
+      lines = 0;
+    }
+    lines += 1;
+    if (lines > OUTPUT_LINES_PER_MINUTE) {
+      if (lines === OUTPUT_LINES_PER_MINUTE + 1) {
+        console.warn(`[sandbox:${sourceId}] Output suppressed for the rest of this minute`);
+      }
+      return;
+    }
+    write(`[sandbox:${sourceId}]`, chunk.toString().trimEnd().slice(0, OUTPUT_LINE_CHARS));
+  };
 }
 
 /**
@@ -526,20 +584,23 @@ export function spawnSandboxedSource(
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     });
 
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      console.log(`[sandbox:${metadata.id}]`, chunk.toString().trimEnd());
-    });
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      console.error(`[sandbox:${metadata.id}]`, chunk.toString().trimEnd());
-    });
+    const forward = limitedOutput(metadata.id);
+    proc.stdout?.on('data', (chunk: Buffer) => forward(console.log, chunk));
+    proc.stderr?.on('data', (chunk: Buffer) => forward(console.error, chunk));
 
-    proc.on('message', (message: ChildMessage) => {
+    proc.on('message', (message: unknown) => {
+      if (!isChildMessage(message)) {
+        console.warn(`[sandbox] Source "${metadata.id}" sent a malformed message`);
+        return;
+      }
       if (message.kind === 'fetch-abort') {
         inflightFetches.get(message.id)?.abort();
         return;
       }
       if (message.kind === 'fetch') {
-        void handleFetchProxyRequest(message, proc);
+        handleFetchProxyRequest(message, proc).catch(() => {
+          console.warn(`[sandbox] Source "${metadata.id}" fetch could not be handled`);
+        });
         return;
       }
       const call = pending.get(message.id);
@@ -553,6 +614,19 @@ export function spawnSandboxedSource(
         call.reject(reviveCallError(message.error, metadata.id));
       }
     });
+
+    // Measured from outside, since nothing inside the child can be trusted to report it.
+    const memoryWatch = setInterval(() => {
+      if (proc.pid === undefined) return;
+      void residentBytes(proc.pid).then((bytes) => {
+        if (bytes === null || bytes <= MAX_CHILD_RESIDENT_BYTES || child !== proc) return;
+        console.error(`[sandbox] Source "${metadata.id}" used too much memory; stopping it`);
+        rejectAllPending(`Sandboxed source "${metadata.id}" used too much memory`);
+        killChild('exceeding its memory limit');
+      });
+    }, MEMORY_CHECK_INTERVAL_MS);
+    memoryWatch.unref?.();
+    proc.once('exit', () => clearInterval(memoryWatch));
 
     // Required: an unhandled 'error' on a ChildProcess is an uncaught exception. It fires
     // when the process cannot be spawned (e.g. runner.js missing because the package was

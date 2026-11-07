@@ -4,7 +4,6 @@ export const initiateDownloadBodySchema = z.object({
   sourceId: z.string().min(1),
   mangaSlug: z.string().min(1),
   mangaTitle: z.string().min(1),
-  downloadPath: z.string().optional(),
   chapter: z.object({
     id: z.string().min(1, 'chapter.id is required'),
     name: z.string().optional(),

@@ -101,12 +101,12 @@ export function SyncPanel() {
         setLimitGb(String(value.storageLimit / 1024 ** 3));
       })
       .catch((error) => {
-        if (!isAborted(error)) reportError(error, 'Could not load download storage usage.');
+        if (!isAborted(error)) reportError(error, "Couldn't load download storage usage.");
       });
     getDownloadDirectory(controller.signal)
       .then(({ path }) => setFolder(path))
       .catch((error) => {
-        if (!isAborted(error)) reportError(error, 'Could not load the download folder.');
+        if (!isAborted(error)) reportError(error, "Couldn't load the download folder.");
       });
     return () => controller.abort();
   }, []);
@@ -124,8 +124,8 @@ export function SyncPanel() {
       setLimitGb(String(bytes / 1024 ** 3));
       setLimitNotice('Storage limit saved.');
     } catch (error) {
-      reportError(error, 'Could not save the storage limit.');
-      setLimitNotice('Could not save the limit. Try again.');
+      reportError(error, "Couldn't save the storage limit.");
+      setLimitNotice("Couldn't save the limit. Try again.");
     } finally {
       setSavingLimit(false);
     }
@@ -333,6 +333,7 @@ export function SyncPanel() {
                   </span>
                 )}
                 <button
+                  type="button"
                   onClick={() => void runDesktopSync()}
                   disabled={
                     syncState.running || restorePending || online === false || !desktopSyncEnabled

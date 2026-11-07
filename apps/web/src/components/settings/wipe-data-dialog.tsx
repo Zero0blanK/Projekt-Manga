@@ -132,6 +132,7 @@ export function WipeDataDialog() {
     <AlertDialog open={open} onOpenChange={changeOpen}>
       <AlertDialogTrigger asChild>
         <button
+          type="button"
           disabled={busy}
           className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition hover:bg-destructive/20 disabled:opacity-50"
         >

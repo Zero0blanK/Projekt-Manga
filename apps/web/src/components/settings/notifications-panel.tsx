@@ -48,7 +48,7 @@ function useNotificationPermission() {
     } catch {
       toast({
         variant: 'destructive',
-        description: 'Could not request notification permission. Check your browser settings.',
+        description: "Couldn't request notification permission. Check your browser settings.",
       });
     }
   };
@@ -85,7 +85,7 @@ export function NotificationsPanel() {
     ) {
       toast({
         variant: 'destructive',
-        title: 'Could not show a notification',
+        title: "Couldn't show a notification",
         description: 'Check your operating system notification settings.',
       });
     }

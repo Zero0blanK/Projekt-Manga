@@ -1,5 +1,6 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
 import { configureApiClient } from '@projekt-manga/api-client';
 
 /**
@@ -26,7 +27,7 @@ export function applyRuntimeApiBaseUrl(): void {
   if (applied || typeof window === 'undefined') return;
   applied = true;
 
-  const bridge = (window as { desktop?: DesktopApiConfigBridge }).desktop;
+  const bridge = desktopBridge<DesktopApiConfigBridge>();
   const baseUrl = bridge?.apiBaseUrl?.trim();
   if (!baseUrl) return;
 

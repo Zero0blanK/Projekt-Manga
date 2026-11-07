@@ -1,3 +1,4 @@
+import { useLatest } from '@/lib/use-latest';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MangaPage } from '@/components/reader/manga-page';
 import type { Manga } from '@/lib/manga-data';
@@ -95,8 +96,11 @@ export function LongStripViewer({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const prevZoomRef = useRef(zoom);
   const fetchedIdentities = useRef(new Map<number, string>());
-  const identityRef = useRef(getChapterIdentity);
-  identityRef.current = getChapterIdentity;
+  const identityRef = useLatest(getChapterIdentity);
+  // Whether a chapter still needs fetching is read when one is added, not on every update.
+  const pagesRef = useLatest(pagesByChapter);
+  const fetchPagesRef = useLatest(fetchPages);
+  const nextChapterRef = useLatest(getNextChapter);
 
   useEffect(() => {
     if (!ready) return;
@@ -104,12 +108,13 @@ export function LongStripViewer({
       // Only skip chapters already resolved or in flight — an entry must never be
       // recorded before its fetch settles, or a chapter that resolved empty (e.g. it was
       // requested before metadata arrived) would be cached as "done" and never retried.
-      const identity = getChapterIdentity?.(chapterNum) ?? String(chapterNum);
-      if (pagesByChapter[chapterNum] && fetchedIdentities.current.get(chapterNum) === identity)
+      const identity = identityRef.current?.(chapterNum) ?? String(chapterNum);
+      if (pagesRef.current[chapterNum] && fetchedIdentities.current.get(chapterNum) === identity)
         continue;
       fetchedIdentities.current.set(chapterNum, identity);
       setPagesByChapter((prev) => ({ ...prev, [chapterNum]: { status: 'loading', urls: [] } }));
-      fetchPages(chapterNum)
+      fetchPagesRef
+        .current(chapterNum)
         .then((urls) => {
           if ((identityRef.current?.(chapterNum) ?? String(chapterNum)) !== identity) return;
           setPagesByChapter((prev) => ({
@@ -125,8 +130,7 @@ export function LongStripViewer({
           }));
         });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedChapters, ready, retryToken, releaseVersion]);
+  }, [loadedChapters, ready, retryToken, releaseVersion, identityRef, pagesRef, fetchPagesRef]);
 
   // Column width scales with zoom, which reflows the whole strip — rescale scrollTop by
   // the same factor so whatever the reader was looking at stays in view instead of jumping.
@@ -201,7 +205,7 @@ export function LongStripViewer({
       (entries) => {
         if (!entries[0].isIntersecting) return;
         setLoadedChapters((prev) => {
-          const next = getNextChapter(prev[prev.length - 1]);
+          const next = nextChapterRef.current(prev[prev.length - 1]);
           if (next === null || prev.includes(next)) return prev;
           return [...prev, next];
         });
@@ -210,8 +214,7 @@ export function LongStripViewer({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, lastChapterHasPages, loadedChapters.length, autoAdvance]);
+  }, [ready, lastChapterHasPages, loadedChapters.length, autoAdvance, nextChapterRef]);
 
   /**
    * The position observer is created only when the loaded set changes, so it must reach

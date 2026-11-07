@@ -52,11 +52,26 @@ const createAndCheckFirstAccount = async (data: {
   );
 };
 
+const setPasswordHash = async (id: string, password_hash: string) => {
+  return await prisma.user.update({ where: { id }, data: { password_hash } });
+};
+
+/** The account's restore counter; a device that pushes an older one must reset first. */
+const getSyncGeneration = async (id: string): Promise<number> => {
+  const account = await prisma.user.findUniqueOrThrow({
+    where: { id },
+    select: { sync_generation: true },
+  });
+  return account.sync_generation;
+};
+
 const userRepository = {
   getByEmail,
   getById,
   listIds,
   create,
+  setPasswordHash,
+  getSyncGeneration,
   deleteById,
   createAndCheckFirstAccount,
 };

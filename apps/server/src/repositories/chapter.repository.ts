@@ -31,6 +31,24 @@ const markChapterAsUnread = async (manga_id: string, chapter_id: string) => {
   });
 };
 
+/** One title's stored chapters, by source key, in one query. */
+const findByKeys = async (source: string, manga_slug: string, keys: string[]) => {
+  return await prisma.chapter.findMany({
+    where: { source, manga_slug, source_chapter_key: { in: keys } },
+  });
+};
+
+const setReadMany = async (manga_id: string, chapter_ids: string[], is_read: boolean) => {
+  return await prisma.chapter.updateMany({
+    where: { id: { in: chapter_ids } },
+    data: {
+      is_read,
+      ...(manga_id ? { manga_id } : {}),
+      ...(is_read ? {} : { last_page_read: 0 }),
+    },
+  });
+};
+
 const markChapterByLastPage = async (
   manga_id: string,
   chapter_id: string,
@@ -300,7 +318,8 @@ async function mergeChapterInto(tx: Tx, fromId: string, intoId: string) {
 
   // Downloads: one row per chapter, the furthest along. A dropped row's pages stay on
   // disk, where Settings › Downloads lists them as orphaned folders to clean up.
-  const rank = (status: string) => ({ COMPLETED: 3, IN_PROGRESS: 2, PENDING: 1 })[status] ?? 0;
+  const rank = (status: string) =>
+    ({ COMPLETED: 3, IN_PROGRESS: 2, PENDING: 1, PAUSED: 1 })[status] ?? 0;
   const [fromDownloads, intoDownloads] = await Promise.all([
     tx.download.findMany({ where: { chapter_id: fromId } }),
     tx.download.findMany({ where: { chapter_id: intoId } }),
@@ -559,6 +578,8 @@ const getChapterFetchDate = async () => {
 const chapterRepository = {
   markChapterAsRead,
   markChapterAsUnread,
+  findByKeys,
+  setReadMany,
   markChapterByLastPage,
   getChapter,
   getChapterProgressById,

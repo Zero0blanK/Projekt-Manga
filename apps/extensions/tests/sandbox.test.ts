@@ -86,6 +86,12 @@ describe('spawnSandboxedSource (hostile fixture)', () => {
     // 1. Scrubbed environment — the child never saw this process's env at all.
     expect(results.envSecret).toBeNull();
 
+    // It could not signal this process, and the malformed messages it sent were ignored:
+    // getting here at all means neither took the parent down.
+    expect(results.killSucceeded).toBeUndefined();
+    expect(results._killSucceeded).toBeUndefined();
+    expect(String(results.killError)).toMatch(/cannot signal/);
+
     // 2. Filesystem read outside the bundle's own directory is denied by Node's
     // permission model, not merely "the fixture chose not to try."
     expect(results.readOutside).toBeNull();

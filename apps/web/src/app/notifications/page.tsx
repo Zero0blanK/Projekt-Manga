@@ -3,7 +3,7 @@ import { NotificationsPageClient } from './client';
 
 export const metadata: Metadata = {
   title: 'Notifications — Projekt Manga',
-  description: 'New chapters for series in your library, plus the extension update log.',
+  description: 'New chapters for series in your library, plus the source update log.',
   openGraph: {
     title: 'Notifications — Projekt Manga',
     description: 'New chapters for series in your library.',

@@ -45,7 +45,7 @@ const chapterStateRowSchema = z.union([
 
 /** Categories are referenced by name, not id — the pushing device may have created one
  * locally that the server has never seen, so the sync service resolves it via
- * find-or-create against the shared category table before recording the assignment. */
+ * find-or-create in the account's own list before recording the assignment. */
 const mangaCategoryRowSchema = z.object({
   manga_id: z.string().min(1),
   category_name: z.string().trim().min(1).max(255),

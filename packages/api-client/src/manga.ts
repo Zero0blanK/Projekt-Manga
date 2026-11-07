@@ -1,110 +1,37 @@
 import type { GetMangaOptions, AddMangaPayload } from '@projekt-manga/types';
 import { SESSION_COOKIE_NAME } from '@projekt-manga/types';
-import { ApiError, request } from './client.js';
+import { ApiError, fetchAllPages, request } from './client.js';
 import { localInvoke, usesLocalFirstData } from './runtime.js';
-
-export interface Manga {
-  id: string;
-  /** False for rows that exist only to back a source preview/download. */
-  in_library: boolean;
-  slug: string;
-  title: string;
-  author: string;
-  source: string;
-  thumbnail_url: string;
-  /** Present on server responses when a private cover has been cached. */
-  cache?: { sha256_url: string } | null;
-  /** This reader's own edits, already applied to the fields above; null when there are
-   * none. Absent on responses that do not merge edits (desktop's local database). */
-  override?: MangaOverride | null;
-  created_at: string;
-  updated_at: string;
-}
-
-/** A reader's local edit to a title. A null field shows the source's value. */
-export interface MangaOverride {
-  title: string | null;
-  author: string | null;
-  description: string | null;
-  status: string | null;
-  /** A custom cover replaces the source's at /cache/thumbnail/:id. */
-  has_cover: boolean;
-  updated_at: string;
-  /** The catalog values underneath the edits. */
-  original: {
-    title: string;
-    author: string;
-    description: string | null;
-    status: string | null;
-  };
-}
-
-/** What the edit endpoints return: the stored edit, or null once nothing is left of it. */
-export type MangaOverrideRecord = Omit<MangaOverride, 'original'> & { manga_id: string };
-
-/** Omit a field to leave it; null clears it back to the source's value. */
-export interface UpdateMangaOverridePayload {
-  title?: string | null;
-  author?: string | null;
-  description?: string | null;
-  status?: string | null;
-}
-
-export interface MangaDetailSummary {
-  status: string;
-  genres: string;
-  description: string;
-  /** Null when the source never supplied one; the column itself is non-null and defaults
-   * to "Unknown", so treat that string as "no artist" rather than a real credit. */
-  artist: string | null;
-  rating: number | null;
-}
-
-/** Shape returned by the library listing endpoints (GET /manga, GET /manga/category/:id). */
-export interface MangaListItem extends Manga {
-  chapter_count: number;
-  latest_chapter_date: string | null;
-  unread_count: number;
-  /** Only populated by GET /manga; GET /manga/category/:id omits it. */
-  manga_detail?: MangaDetailSummary | null;
-}
-
-/** A stored chapter. `id` is the app's own id for it: reads (progress, downloaded pages,
- * reader links) use it. Writes and anything sent to a source use `source_chapter_key`, the
- * source's own id for the chapter, which only names it within `source` + `manga_slug`. */
-export interface MangaChapterRecord {
-  id: string;
-  source: string;
-  manga_slug: string;
-  source_chapter_key: string;
-  manga_id: string | null;
-  url: string;
-  name: string | null;
-  scanlator: string | null;
-  is_read: boolean;
-  is_bookmark: boolean;
-  chapter_number: number;
-  last_page_read: number;
-  page_count: number | null;
-  fetched_at: string | null;
-  release_date: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface MangaWithDetails extends Manga {
-  status: string;
-  genres: string;
-  description: string;
-  rating: number | null;
-  artist: string | null;
-  chapters: MangaChapterRecord[];
-}
-
-export interface MangaCategoryLink {
-  manga_id: string;
-  category_id: string;
-}
+import type {
+  Manga,
+  MangaOverride,
+  MangaOverrideRecord,
+  UpdateMangaOverridePayload,
+  MangaDetailSummary,
+  MangaListItem,
+  MangaChapterRecord,
+  MangaWithDetails,
+  MangaCategoryLink,
+  MigrationSummary,
+  MigrateMangaOptions,
+  LinkedTitle,
+  MangaLinkGroup,
+} from '@projekt-manga/types';
+export type {
+  Manga,
+  MangaOverride,
+  MangaOverrideRecord,
+  UpdateMangaOverridePayload,
+  MangaDetailSummary,
+  MangaListItem,
+  MangaChapterRecord,
+  MangaWithDetails,
+  MangaCategoryLink,
+  MigrationSummary,
+  MigrateMangaOptions,
+  LinkedTitle,
+  MangaLinkGroup,
+} from '@projekt-manga/types';
 
 // Local-first sort options are intentionally ignored below: the desktop local DB is
 // small enough (one person's own library) that server-side sorting isn't worth
@@ -112,10 +39,12 @@ export interface MangaCategoryLink {
 // always orders by title. Revisit if that stops being true.
 /** HTTP-only view of this session's server library, including on desktop. */
 export const getServerManga = (options: GetMangaOptions = {}, signal?: AbortSignal) =>
-  request<MangaListItem[]>('/manga', {
-    query: { sortBy: options.sortBy, sortOrder: options.sortOrder },
-    signal,
-  });
+  fetchAllPages((page) =>
+    request<MangaListItem[]>('/manga', {
+      query: { sortBy: options.sortBy, sortOrder: options.sortOrder, ...page },
+      signal,
+    }),
+  );
 
 export const getManga = async (options: GetMangaOptions = {}, signal?: AbortSignal) => {
   if (await usesLocalFirstData()) {
@@ -219,25 +148,6 @@ export const addMangaToCategory = (categoryId: string, mangaSlug: string) =>
     { method: 'POST' },
   );
 
-export interface MigrationSummary {
-  /** Furthest chapter number read on the old entry; 0 if nothing was read. */
-  progress: number;
-  chapters_marked: number;
-  categories_moved: number;
-  history_moved: number;
-  state_copied: boolean;
-  old_entry_removed: boolean;
-}
-
-export interface MigrateMangaOptions {
-  /** Take the old entry out of the library once everything has moved. Defaults to true
-   * server-side. */
-  remove_old?: boolean;
-  /** Re-point the title's history rows at the new entry. Defaults to true server-side —
-   * history keeps its own source/slug, so this preserves where each chapter was read. */
-  move_history?: boolean;
-}
-
 /**
  * Moves a library entry's reading progress, shelf, rating and categories onto another
  * entry — the "switch this series to a different source" flow.
@@ -303,23 +213,6 @@ export const removeMangaCover = (mangaId: string) =>
   request<MangaOverrideRecord | null>(`/manga/${encodeURIComponent(mangaId)}/override/cover`, {
     method: 'DELETE',
   });
-
-/** Another source's copy of a title, as linked sources list it. */
-export interface LinkedTitle {
-  id: string;
-  title: string;
-  author: string;
-  slug: string;
-  source: string;
-  thumbnail_url: string;
-}
-
-/** A title's group of sources: the library entry (`primary_id`) and the linked titles, in
- * the order they are tried. Asking with a linked title gives the same group. */
-export interface MangaLinkGroup {
-  primary_id: string;
-  links: Array<{ id: string; priority: number; linked: LinkedTitle }>;
-}
 
 const linksPath = (mangaId: string) => `/manga/${encodeURIComponent(mangaId)}/links`;
 

@@ -50,7 +50,7 @@ function UpdateRow({
             <span className="block truncate text-xs font-medium text-foreground">
               {update.title}
             </span>
-            <span className="block text-[10px] text-muted-foreground">
+            <span className="block text-xs text-muted-foreground">
               {multiple
                 ? `${update.chapters.length} new chapters`
                 : `Chapter ${newest.chapter_number}`}
@@ -60,6 +60,7 @@ function UpdateRow({
         </Link>
         {multiple && (
           <button
+            type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
             aria-label={`${open ? 'Hide' : 'Show'} chapters for ${update.title}`}
@@ -110,6 +111,7 @@ export function NavNotifications({
   return (
     <div className="relative">
       <button
+        type="button"
         aria-label={
           unreadMangaIds.length > 0
             ? `Notifications, ${unreadMangaIds.length} unread`

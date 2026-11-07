@@ -2,9 +2,9 @@ import historyRepository from '../repositories/history.repository.js';
 import { PrismaError, rethrowKnownOrWrap } from '../utils/customErrors.js';
 import type { MangaHistory } from '@projekt-manga/types';
 
-const getHistory = async (user_id?: string) => {
+const getHistory = async (user_id?: string, page?: { limit?: number; offset?: number }) => {
   try {
-    const history = await historyRepository.getHistory(user_id);
+    const history = await historyRepository.getHistory(user_id, page);
     return history;
   } catch (error) {
     rethrowKnownOrWrap(error, new PrismaError('Failed to retrieve manga history'));

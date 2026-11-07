@@ -13,6 +13,22 @@ const trustedKeysConfigSchema = z.record(z.string().url(), z.array(trustedKeySch
 export type TrustedExtensionSigningKeys = Map<string, Map<string, KeyObject>>;
 
 /**
+ * A repository URL in the form trust keys are looked up by.
+ *
+ * Matched on the exact string, a key configured for ".../index.json/" or "HTTPS://Host/..."
+ * wouldn't find its repository, and that repository would then be treated as having no key
+ * at all: signatures silently unenforced, on the one server that asked for them.
+ */
+export function canonicalRepositoryUrl(url: string): string {
+  const parsed = new URL(url);
+  parsed.hash = '';
+  return parsed.href.replace(/\/+$/, '');
+}
+
+export const isTrustedRepository = (keys: TrustedExtensionSigningKeys, url: string) =>
+  keys.has(canonicalRepositoryUrl(url));
+
+/**
  * Reads public trust keys from an operator-managed JSON map. Private keys must stay with
  * repository maintainers and are never accepted by the server configuration.
  */
@@ -50,7 +66,7 @@ export function parseTrustedExtensionSigningKeys(raw: string): TrustedExtensionS
       }
       keys.set(entry.key_id, key);
     }
-    result.set(repositoryUrl, keys);
+    result.set(canonicalRepositoryUrl(repositoryUrl), keys);
   }
   return result;
 }
@@ -77,6 +93,8 @@ export function extensionListingSigningPayload(
     api_version: entry.api_version,
     version_code: entry.version_code,
     bundle: entry.bundle,
+    // Only when set, so listings signed before the field existed still verify.
+    ...(entry.expires_at ? { expires_at: entry.expires_at } : {}),
   };
   return Buffer.from(
     JSON.stringify({
@@ -96,7 +114,7 @@ export function verifyTrustedExtensionListing(
   bundleSize: number,
   trustedKeys: TrustedExtensionSigningKeys,
 ): void {
-  const keys = trustedKeys.get(repositoryUrl);
+  const keys = trustedKeys.get(canonicalRepositoryUrl(repositoryUrl));
   if (!keys) return;
 
   if (!entry.bundle || entry.bundle.sha256 !== bundleHash || entry.bundle.size !== bundleSize) {
@@ -125,5 +143,10 @@ export function verifyTrustedExtensionListing(
     crypto.verify(null, extensionListingSigningPayload(repositoryUrl, entry), publicKey, signature);
   if (!valid) {
     throw new ValidationError(`The signature for "${entry.source_key}" is invalid.`);
+  }
+  // Checked after the signature, so the date can be relied on. A listing that expires can't
+  // be replayed later to hold an installation on an old, vulnerable version.
+  if (entry.expires_at && Date.parse(entry.expires_at) <= Date.now()) {
+    throw new ValidationError(`The signed listing for "${entry.source_key}" has expired.`);
   }
 }

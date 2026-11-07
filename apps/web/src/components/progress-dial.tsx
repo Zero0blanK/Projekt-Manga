@@ -135,9 +135,7 @@ export function ProgressDial({
           {status}
         </p>
         {detail && (
-          <p className="mt-0.5 max-w-[14rem] truncate text-[11px] text-muted-foreground">
-            {detail}
-          </p>
+          <p className="mt-0.5 max-w-[14rem] truncate text-xs text-muted-foreground">{detail}</p>
         )}
       </div>
 

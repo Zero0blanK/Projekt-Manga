@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import crypto from 'node:crypto';
 import { extensionListingEntrySchema } from '@projekt-manga/schemas';
 import {
+  canonicalRepositoryUrl,
+  isTrustedRepository,
   extensionListingSigningPayload,
   parseTrustedExtensionSigningKeys,
   verifyTrustedExtensionListing,
@@ -53,6 +55,40 @@ function trustConfig(publicKey: crypto.KeyObject) {
 }
 
 describe('trusted extension signatures', () => {
+  it('finds a key configured with a trailing slash or different host case', () => {
+    expect(canonicalRepositoryUrl('https://Example.COM/repo/index.json/')).toBe(
+      'https://example.com/repo/index.json',
+    );
+    const { publicKey } = signedEntry();
+    expect(isTrustedRepository(trustConfig(publicKey), `${repositoryUrl}/`)).toBe(true);
+  });
+
+  it('fails closed, not open, for a listing whose URL only differs by a slash', () => {
+    const { bundle, entry, publicKey } = signedEntry();
+    expect(() =>
+      verifyTrustedExtensionListing(
+        `${repositoryUrl}/`,
+        { ...entry, signature: undefined },
+        entry.bundle!.sha256,
+        bundle.byteLength,
+        trustConfig(publicKey),
+      ),
+    ).toThrow('did not sign');
+  });
+
+  it('rejects an expiry added after signing', () => {
+    const { bundle, entry, publicKey } = signedEntry();
+    expect(() =>
+      verifyTrustedExtensionListing(
+        repositoryUrl,
+        { ...entry, expires_at: '2099-01-01T00:00:00.000Z' },
+        entry.bundle!.sha256,
+        bundle.byteLength,
+        trustConfig(publicKey),
+      ),
+    ).toThrow('signature');
+  });
+
   it('rejects adding language family metadata after signing', () => {
     const { bundle, entry, publicKey } = signedEntry();
     expect(() =>

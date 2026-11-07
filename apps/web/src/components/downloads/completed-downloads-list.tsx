@@ -57,11 +57,11 @@ export function CompletedDownloadsList({
                   <DownloadCover row={r} className="h-14 w-10" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold text-foreground">{r.title}</div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">
+                    <div className="mt-0.5 text-xs text-muted-foreground">
                       {r.chapters} · {r.pages} · added {formatRelative(r.addedAt)}
                     </div>
                   </div>
-                  <div className="hidden shrink-0 items-center gap-2 text-[11px] text-primary sm:flex">
+                  <div className="hidden shrink-0 items-center gap-2 text-xs text-primary sm:flex">
                     <CheckCircle2 className="h-3.5 w-3.5" /> Ready
                   </div>
                   <Link

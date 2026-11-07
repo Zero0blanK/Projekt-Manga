@@ -122,22 +122,27 @@ function requiredId(value: unknown, message: string): string {
 }
 
 /** A non-negative, finite count. Rejects NaN/Infinity, which bind as-is and would poison
- * the running `time_read + ?` total. */
+ * the running `time_read + ?` total. A fraction is dropped rather than refused: the reader
+ * can report one, and the server's sync push takes whole numbers only. */
 function optionalCount(value: unknown, field: string): number | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     throw new Error(`${field} must be a non-negative number`);
   }
-  return value;
+  return Math.trunc(value);
 }
 
 /** A bounded, non-empty string naming part of a chapter's key. */
-function keyPart(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 512) {
-    throw new Error(`${field} must be a non-empty string of at most 512 characters`);
+function keyPart(value: unknown, field: string, max = 512): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > max) {
+    throw new Error(`${field} must be a non-empty string of at most ${max} characters`);
   }
   return value;
 }
+
+/** The server caps a history title here. Cut rather than refused: it only labels the row. */
+const HISTORY_TITLE_LIMIT = 255;
+const SOURCE_LIMIT = 255;
 
 function optionalFinite(value: unknown, field: string): number | undefined {
   if (value === undefined || value === null) return undefined;
@@ -154,7 +159,7 @@ function chapterStub(value: unknown): LocalChapterStub {
   if (!value || typeof value !== 'object') throw new Error('chapter is required');
   const c = value as Record<string, unknown>;
   return {
-    source: keyPart(c.source, 'chapter.source'),
+    source: keyPart(c.source, 'chapter.source', SOURCE_LIMIT),
     manga_slug: keyPart(c.manga_slug, 'chapter.manga_slug'),
     source_chapter_key: keyPart(c.source_chapter_key, 'chapter.source_chapter_key'),
     chapter_number: optionalFinite(c.chapter_number, 'chapter.chapter_number'),
@@ -226,7 +231,7 @@ async function dispatchDataInvoke(
     ) {
       throw new Error('chapter and lastPageRead are required');
     }
-    localStore.updateChapterProgress(stub, a.lastPageRead);
+    localStore.updateChapterProgress(stub, Math.trunc(a.lastPageRead));
     return ok(null);
   }
   if (domain === 'history' && op === 'list') {
@@ -240,9 +245,6 @@ async function dispatchDataInvoke(
     return ok(null);
   }
   if (domain === 'history' && op === 'add') {
-    if (typeof a.source !== 'string' || typeof a.manga_slug !== 'string') {
-      throw new Error('source and manga_slug are required');
-    }
     // Every remaining field is bound straight into an INSERT. Casting the whole `args`
     // object across instead would let a wrong-typed field (an object where a number is
     // expected) reach node:sqlite's binder, which rejects anything outside
@@ -250,12 +252,12 @@ async function dispatchDataInvoke(
     // "invalid input" this boundary is supposed to produce.
     return ok(
       localStore.addHistory({
-        source: a.source,
-        manga_slug: a.manga_slug,
+        source: keyPart(a.source, 'source', SOURCE_LIMIT),
+        manga_slug: keyPart(a.manga_slug, 'manga_slug'),
         source_manga_id: nullableString(a.source_manga_id, 'source_manga_id'),
         id: optionalString(a.id, 'id'),
         manga_id: nullableString(a.manga_id, 'manga_id'),
-        title: nullableString(a.title, 'title'),
+        title: nullableString(a.title, 'title')?.slice(0, HISTORY_TITLE_LIMIT) ?? null,
         thumbnail_url: nullableString(a.thumbnail_url, 'thumbnail_url'),
         source_chapter_key:
           a.source_chapter_key === undefined || a.source_chapter_key === null

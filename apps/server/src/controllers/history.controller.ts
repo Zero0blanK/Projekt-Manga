@@ -1,11 +1,11 @@
 import { Request, Response, NextFunction } from 'express';
 import { HTTPSuccessResponse } from '../utils/responseHandlers.js';
 import historyService from '../services/history.service.js';
-import type { AddHistoryBody } from '@projekt-manga/schemas';
+import type { AddHistoryBody, ListPageQuery } from '@projekt-manga/schemas';
 
 const getHistory = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const history = await historyService.getHistory(req.user?.id);
+    const history = await historyService.getHistory(req.user?.id, req.validated as ListPageQuery);
     return HTTPSuccessResponse(res, 200, 'Manga history retrieved successfully', history);
   } catch (error) {
     return next(error);

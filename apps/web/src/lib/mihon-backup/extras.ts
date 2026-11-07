@@ -8,7 +8,7 @@ import {
   markPreviousChaptersAsRead,
   type MangaChapterRecord,
 } from '@projekt-manga/api-client';
-import { setState } from '@/lib/app-store';
+import { actions } from '@/lib/app-store';
 import { bulkPayload } from '@/lib/chapter-gaps';
 import type { ChapterNumberState, MihonImportExtras } from './payload';
 
@@ -86,20 +86,7 @@ export async function applyMihonImportExtras(
     }))
     .filter(({ ids }) => ids.length > 0);
   if (members.length > 0) {
-    setState((state) => {
-      const categoryMembers = { ...state.categoryMembers };
-      const customCategories = [...state.customCategories];
-      for (const { name: imported, ids } of members) {
-        // An existing category of the same name (any case) is reused, never duplicated.
-        const name =
-          customCategories.find(
-            (existing) => existing.trim().toLowerCase() === imported.toLowerCase(),
-          ) ?? imported;
-        if (!customCategories.includes(name)) customCategories.push(name);
-        categoryMembers[name] = [...new Set([...(categoryMembers[name] ?? []), ...ids])];
-      }
-      return { customCategories, categoryMembers };
-    });
+    actions.mergeCategories(members);
     applied.categories = members.length;
   }
 

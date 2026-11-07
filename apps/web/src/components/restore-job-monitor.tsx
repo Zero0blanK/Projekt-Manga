@@ -22,7 +22,7 @@ export function RestoreJobMonitor() {
       } catch (error) {
         if (stopped) return;
         if (!reported)
-          reportError(error, 'Could not check restore status. Retrying in the background.');
+          reportError(error, "Couldn't check restore status. Retrying in the background.");
         reported = true;
         timer = setTimeout(check, 5000);
       }

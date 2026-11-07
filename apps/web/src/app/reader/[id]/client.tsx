@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SelectMenu } from '@/components/ui/select-menu';
+import { Button } from '@/components/ui/button';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   getMangaChapters,
@@ -9,12 +10,7 @@ import {
   getDownloadedChapterPages,
   buildDownloadedPageUrl,
   buildImageProxyUrl,
-  buildApiUrl,
-  markChapterByLastPage,
   markChapterAsRead,
-  addHistory,
-  getAllDownloads,
-  usesLocalFirstDataSync,
   type MangaChapterRecord,
 } from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
@@ -28,14 +24,15 @@ import {
   formatScrollSpeed,
 } from '@/lib/reader-settings';
 import { useWakeLock } from '@/lib/use-wake-lock';
-import { useReadingClock } from '@/lib/use-reading-clock';
 import { ReaderHeader } from '@/components/reader/reader-header';
 import { PagedViewer } from '@/components/reader/paged-viewer';
 import { LongStripViewer } from '@/components/reader/long-strip-viewer';
 import { ReaderProgressBar } from '@/components/reader/reader-progress-bar';
 import { usePagePrefetch } from '@/components/reader/use-page-prefetch';
+import { useChapterPages, useLoadedPage } from '@/components/reader/use-chapter-pages';
+import { useAutoMarkRead, useReaderProgress } from '@/components/reader/use-reader-progress';
 import { reportError } from '@/lib/report-error';
-import { queueReaderProgressBeacons } from '@/lib/reader-progress-beacon';
+import { fetchDownloads, useDownloads } from '@/lib/shared-queries';
 import { invalidateSavedReadingProgress } from '@/lib/query-client';
 import { useProfilePreference, useReadingQueue } from '@/lib/profile-preferences';
 import { Pause, Play } from 'lucide-react';
@@ -50,7 +47,7 @@ import { ReaderPersonalTools } from '@/components/reader/reader-personal-tools';
 import { ReaderTintOverlay } from '@/components/reader/reader-tint';
 import { afterChapterRead, downloadAhead } from '@/lib/auto-downloads';
 import { markDuplicatesRead } from '@/lib/chapter-gaps';
-import { isSourceIncognito, useSourceIncognito } from '@/lib/incognito';
+import { useSourceIncognito } from '@/lib/incognito';
 import { useAutoAdvanceCountdown } from '@/lib/auto-advance';
 import { useReaderZoom, ZOOM_MAX, ZOOM_MIN } from '@/lib/reader-zoom';
 import {
@@ -106,7 +103,6 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     parsePreferredGroup,
     '',
   );
-  const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
   const {
     effectiveLayout,
     readingDirection,
@@ -145,18 +141,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   const [chaptersLoaded, setChaptersLoaded] = useState(false);
   const [chaptersError, setChaptersError] = useState(false);
   const [chaptersRetry, setChaptersRetry] = useState(0);
-  const [pagesError, setPagesError] = useState(false);
-  const [pagesRetry, setPagesRetry] = useState(0);
   const [chapter, setChapter] = useState(requestedChapter);
-  // Tagged with the chapter it was fetched for — derived `pageUrls` below only ever
-  // exposes it when the tag matches the *current* chapter, so a resolved fetch for a
-  // chapter we've since navigated away from can never render under the wrong number,
-  // no matter what raced what.
-  const [pagesData, setPagesData] = useState<{
-    chapter: number;
-    chapterId: string;
-    urls: string[];
-  } | null>(null);
   const [page, setPage] = useState(requestedPage ?? 1);
   const { zoom, setZoom, zoomIn, zoomOut, zoomReset } = useReaderZoom();
   const [looksLikeWebtoon, setLooksLikeWebtoon] = useState(false);
@@ -214,24 +199,18 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   );
   const { isBookmarked, toggle: toggleChapterBookmark } = useChapterBookmarks(bookmarkTargets);
   // Only fetched when the filter is "Downloaded", the one filter that needs it.
-  const [downloadedIds, setDownloadedIds] = useState<ReadonlySet<string>>(() => new Set());
-  useEffect(() => {
-    if (!filtering || listFilter.status !== 'Downloaded') return;
-    let live = true;
-    getAllDownloads()
-      .then((all) => {
-        if (live)
-          setDownloadedIds(
-            new Set(
-              all.filter((d) => d.status === 'COMPLETED' && d.chapter_id).map((d) => d.chapter_id),
-            ),
-          );
-      })
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, [filtering, listFilter.status, manga.id]);
+  const { data: filterDownloads } = useDownloads({
+    enabled: filtering && listFilter.status === 'Downloaded',
+  });
+  const downloadedIds: ReadonlySet<string> = useMemo(
+    () =>
+      new Set(
+        (filterDownloads ?? [])
+          .filter((d) => d.status === 'COMPLETED' && d.chapter_id)
+          .map((d) => d.chapter_id),
+      ),
+    [filterDownloads],
+  );
   const skipRelease = (record: MangaChapterRecord) =>
     (skipRead && record.is_read) ||
     (filtering &&
@@ -248,25 +227,61 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   const prevChapterBefore = (n: number): number | null =>
     adjacentChapter(sortedChapterNumbers, n, -1, skipChapter);
 
-  const maxChapter = chapters.reduce((max, c) => Math.max(max, c.chapter_number), 0);
   const currentRecord = chapterByNumber.get(chapter);
-  const pageUrls =
-    pagesData?.chapter === chapter && pagesData.chapterId === currentRecord?.id
-      ? pagesData.urls
-      : [];
   const invalidChapterId =
     chaptersLoaded &&
     requestedChapterId !== null &&
     !chapters.some((record) => record.id === requestedChapterId);
-  const imageReady = currentRecord && loadedImages.has(`${currentRecord.id}:${page}`);
+  const { imageReady, markPageLoaded } = useLoadedPage(currentRecord?.id, page);
   const onPageReady = (chapterNumber: number, pageNumber: number) => {
     const record = chapterByNumber.get(chapterNumber);
-    if (!record) return;
-    setLoadedImages((previous) => {
-      const key = `${record.id}:${pageNumber}`;
-      if (previous.has(key)) return previous;
-      return new Set(previous).add(key);
+    if (record) markPageLoaded(record.id, pageNumber);
+  };
+
+  /**
+   * Downloaded pages first, live source second: a downloaded chapter is served from disk, so
+   * it reads without touching the source at all, which is the whole point of downloading it.
+   * The download list says which those are. If it can't be read, the lookup is tried anyway:
+   * it answers 404 for a chapter that was never downloaded, and falling through to the
+   * source is the handling for that.
+   */
+  const fetchReleasePages = async (record: MangaChapterRecord): Promise<string[]> => {
+    const downloads = await fetchDownloads().catch(() => null);
+    const maybeOffline =
+      !downloads ||
+      downloads.some((item) => item.chapter_id === record.id && item.status === 'COMPLETED');
+    if (maybeOffline) {
+      try {
+        const offline = await getDownloadedChapterPages(record.id);
+        if (offline.length > 0) {
+          return offline
+            .slice()
+            .sort((a, b) => a.index - b.index)
+            .map((p) => buildDownloadedPageUrl(record.id, p.index));
+        }
+      } catch {
+        // Not downloaded, or the stored files went missing — read it from the source.
+      }
+    }
+
+    const result = await getSourceChapterPages(manga.source, record.source_chapter_key, {
+      mangaSlug: manga.slug,
     });
+    return result.items
+      .sort((a, b) => a.index - b.index)
+      .map((p) => (p.image_url ? buildImageProxyUrl(p.image_url, manga.source) : ''))
+      .filter(Boolean);
+  };
+
+  const { pageUrls, pagesError, pagesFor, retryPages } = useChapterPages({
+    chapter,
+    record: currentRecord,
+    enabled: chapters.length > 0 && effectiveLayout !== 'Long strip' && !invalidChapterId,
+    load: fetchReleasePages,
+  });
+  const fetchPages = (chapterNumber: number): Promise<string[]> => {
+    const record = chapterByNumber.get(chapterNumber);
+    return record ? pagesFor(record) : Promise.resolve([]);
   };
   const title = currentRecord?.name ?? `Chapter ${chapter}`;
   // The chapter's real page total, or 0 while still unknown. Sources vary: some report a
@@ -279,7 +294,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   );
   const knownTotal =
     (observedTotal?.chapter === chapter ? observedTotal.total : 0) ||
-    (pagesData?.chapter === chapter ? pageUrls.length : 0) ||
+    pageUrls.length ||
     currentRecord?.page_count ||
     0;
   const totalPages = knownTotal || 1;
@@ -309,90 +324,16 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     return () => controller.abort();
   }, [manga.id, manga.slug, manga.source, chaptersRetry]);
 
-  /**
-   * Downloaded pages first, live source second.
-   *
-   * A downloaded chapter is served from disk, so it reads without touching the source at
-   * all — which is the whole point of downloading one. The lookup 404s for any chapter
-   * that was never downloaded (the common case), so that isn't an error worth surfacing:
-   * falling through to the source is the handling, and a real source failure still
-   * surfaces from the call below.
-   */
-  const fetchPages = async (chapterNumber: number): Promise<string[]> => {
-    const record = chapterByNumber.get(chapterNumber);
-    return record ? fetchReleasePages(record) : [];
-  };
-  const fetchReleasePages = async (record: MangaChapterRecord): Promise<string[]> => {
-    try {
-      const offline = await getDownloadedChapterPages(record.id);
-      if (offline.length > 0) {
-        return offline
-          .slice()
-          .sort((a, b) => a.index - b.index)
-          .map((p) => buildDownloadedPageUrl(record.id, p.index));
-      }
-    } catch {
-      // Not downloaded, or the stored files went missing — read it from the source.
-    }
-
-    const result = await getSourceChapterPages(manga.source, record.source_chapter_key, {
-      mangaSlug: manga.slug,
-    });
-    return result.items
-      .sort((a, b) => a.index - b.index)
-      .map((p) => (p.image_url ? buildImageProxyUrl(p.image_url, manga.source) : ''))
-      .filter(Boolean);
-  };
-
-  // An explicit chapter change from outside (chapter list, a Link, browser back/forward,
-  // or our own router.replace calls below — all of which encode the target page too, so
-  // this never clobbers a page an internal navigation just set).
-  //
-  // Zoom is deliberately left alone here. This effect runs on every chapter change,
-  // including ones the reader didn't ask for (Long Strip auto-advancing into the next
-  // chapter). Resetting zoom there would reflow the strip, and LongStripViewer rescales
-  // scrollTop by the zoom ratio, so the scroll position would jump. Zoom only changes via
-  // zoomIn/zoomOut/zoomReset, as a session preference rather than a per-chapter default.
-  useEffect(() => {
-    if (chapters.length === 0 || effectiveLayout === 'Long strip' || invalidChapterId) return;
-    let cancelled = false;
-    const targetChapter = chapter;
-    setPagesError(false);
-    fetchPages(targetChapter)
-      .then((urls) => {
-        if (!cancelled) {
-          setPagesData({
-            chapter: targetChapter,
-            chapterId: chapterByNumber.get(targetChapter)?.id ?? '',
-            urls,
-          });
-          setPagesError(urls.length === 0);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setPagesError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    chapter,
-    chapters,
-    effectiveLayout,
-    pagesRetry,
-    requestedChapterId,
-    preferredGroup,
-    invalidChapterId,
-  ]);
-
   // When nearing the end of the current chapter, warm the next chapter's first page so
   // stepping across the boundary doesn't stall on a fresh chapter-pages fetch. Gated on
   // the *current* chapter's own real pages already being loaded (not just the metadata
   // page_count, which some sources — e.g. MangaGeko — never populate, leaving it 0) so
   // this never fires a next-chapter scrape concurrently with the current chapter's own
   // still-in-flight one.
-  const preloadedChapters = useRef(new Set<number>());
+  const nextChapterRef = useRef(nextChapterAfter);
+  nextChapterRef.current = nextChapterAfter;
+  const fetchPagesRef = useRef(fetchPages);
+  fetchPagesRef.current = fetchPages;
   useEffect(() => {
     if (!preloadNextChapter || effectiveLayout === 'Long strip') return;
     if (pageUrls.length === 0) return;
@@ -405,7 +346,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     const upcoming: number[] = [];
     let cursor = chapter;
     for (let i = 0; i < chapterPrefetchCount; i++) {
-      const next = nextChapterAfter(cursor);
+      const next = nextChapterRef.current(cursor);
       if (next === null) break;
       upcoming.push(next);
       cursor = next;
@@ -414,18 +355,17 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
 
     let cancelled = false;
     // Sequential, not parallel: several concurrent chapter scrapes against one source is
-    // exactly the traffic pattern that gets a scraper rate-limited.
+    // exactly the traffic pattern that gets a scraper rate-limited. This re-runs on every
+    // page turn near the boundary, which fetchPages makes free: a list that's already
+    // loading or loaded isn't asked for twice.
     void (async () => {
       for (const target of upcoming) {
         if (cancelled) return;
-        // This effect re-runs on every page turn near the boundary; don't redo finished work.
-        if (preloadedChapters.current.has(target)) continue;
         try {
-          const urls = await fetchPages(target);
+          const urls = await fetchPagesRef.current(target);
           if (cancelled || urls.length === 0) return;
           const img = new window.Image();
           img.src = urls[0];
-          preloadedChapters.current.add(target);
         } catch {
           return;
         }
@@ -434,7 +374,6 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     preloadNextChapter,
     chapterPrefetchCount,
@@ -442,9 +381,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     chapter,
     page,
     pageUrls,
-    maxChapter,
     effectiveLayout,
-    chapters,
   ]);
 
   /**
@@ -609,207 +546,87 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
 
   /* ----------------------------------------------------- progress persistence */
 
-  // Latest position worth saving, kept in a ref so the flush paths (debounce timer,
-  // unmount, tab close) always send the newest value rather than a stale closure's.
-  // Progress writes name the chapter by the source's key, like every chapter write.
-  const pendingProgress = useRef<{
-    sourceChapterKey: string;
-    page: number;
-    pageCount: number;
-  } | null>(null);
-  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveQueue = useRef<Promise<void>>(Promise.resolve());
-  /** Chapters already auto-marked read this session, so reaching the end repeatedly
-   * (scrolling back and forth over the last page) doesn't re-fire the request. */
-  const autoReadSent = useRef(new Set<string>());
-  const takeElapsed = useReadingClock();
-  useEffect(() => {
-    takeElapsed();
-  }, [incognito, takeElapsed]);
-
-  const flushProgress = useCallback(
-    (useBeacon = false) => {
-      if (isSourceIncognito(manga.source)) {
-        pendingProgress.current = null;
-        return;
-      }
-      const pending = pendingProgress.current;
-      if (!pending) return;
-      pendingProgress.current = null;
-      if (flushTimer.current) {
-        clearTimeout(flushTimer.current);
-        flushTimer.current = null;
-      }
-
-      const path = `/chapter/${encodeURIComponent(manga.slug)}/${encodeURIComponent(pending.sourceChapterKey)}/${pending.page}/mark-by-page`;
-      const body = { page_count: pending.pageCount, source: manga.source };
-      // Time since the last flush, not a running total — the server adds it to what it
-      // already has. Reading it here means it's taken exactly once per flush.
-      const history = {
-        source: manga.source,
-        manga_id: manga.id,
-        manga_slug: manga.slug,
-        title: manga.title,
-        source_chapter_key: pending.sourceChapterKey,
-        pages_read: pending.page,
-        time_read: takeElapsed(),
-      };
-
-      // On tab close/hide a normal fetch is often killed mid-flight; sendBeacon is the
-      // one transport the browser promises to finish.
-      if (useBeacon && !usesLocalFirstDataSync()) {
-        const queued = queueReaderProgressBeacons(
-          buildApiUrl(path),
-          body,
-          buildApiUrl('/history/add'),
-          history,
-        );
-        if (queued?.progressQueued || queued?.historyQueued) invalidateSavedReadingProgress();
-        if (queued?.progressQueued && queued.historyQueued) return;
-        if (queued?.progressQueued) {
-          addHistory(history)
-            .then(invalidateSavedReadingProgress)
-            .catch((error) => reportError(error, "Your reading progress isn't being saved."));
-          return;
-        }
-        if (queued?.historyQueued) {
-          markChapterByLastPage(manga.slug, pending.sourceChapterKey, pending.page, body)
-            .then(invalidateSavedReadingProgress)
-            .catch((error) => reportError(error, "Your reading progress isn't being saved."));
-          return;
-        }
-      }
-
-      // Deduped inside reportError, deliberately: this fires on every page turn, and a
-      // toast per page would be unusable. Losing your place silently is the worse
-      // outcome of the two, so it is worth saying once.
-      saveQueue.current = saveQueue.current.then(async () => {
-        if (isSourceIncognito(manga.source)) return;
-        await Promise.all([
-          markChapterByLastPage(manga.slug, pending.sourceChapterKey, pending.page, body)
-            .then(invalidateSavedReadingProgress)
-            .catch((error) => reportError(error, "Your reading progress isn't being saved.")),
-          addHistory(history).catch((error) =>
-            reportError(error, "Your reading progress isn't being saved."),
-          ),
-        ]);
-      });
+  const progressRecord = chapterByNumber.get(chapter);
+  const canSave = !incognito && !!progressRecord && knownTotal > 0 && !!imageReady;
+  const { flushProgress } = useReaderProgress(
+    {
+      source: manga.source,
+      mangaSlug: manga.slug,
+      history: { manga_id: manga.id, title: manga.title },
     },
-    [manga.id, manga.slug, manga.source, manga.title, takeElapsed],
+    canSave && !invalidChapterId
+      ? {
+          sourceChapterKey: progressRecord.source_chapter_key,
+          page: Math.min(page, knownTotal),
+          pageCount: knownTotal,
+          body: { page_count: knownTotal, source: manga.source },
+        }
+      : null,
   );
 
+  // Follows the URL: the chapter list, a Link, browser back/forward, or our own
+  // router.replace calls below, all of which encode the target page too, so this never
+  // clobbers a page an internal navigation just set. Applied once per address, so a change
+  // to the chapter list can't throw the reader back to the page the address started on.
+  const appliedAddress = useRef<string | null>(null);
+  const addressState = useRef({ chapter, flushProgress });
+  addressState.current = { chapter, flushProgress };
+  const requestedTarget = requestedChapterId
+    ? chapters.find((record) => record.id === requestedChapterId)?.chapter_number
+    : requestedChapter;
   useEffect(() => {
-    const target = requestedChapterId
-      ? chapters.find((record) => record.id === requestedChapterId)?.chapter_number
-      : requestedChapter;
-    if (target === undefined) return;
-    if (chapter !== target) flushProgress();
-    setChapter(target);
+    if (requestedTarget === undefined) return;
+    const address = `${requestedTarget}:${requestedChapterId}:${requestedPage}`;
+    if (appliedAddress.current === address) return;
+    appliedAddress.current = address;
+    if (addressState.current.chapter !== requestedTarget) addressState.current.flushProgress();
+    setChapter(requestedTarget);
     setPage(requestedPage ?? 1);
-    // Respond to URL changes, not stream-position state updates.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedChapter, requestedChapterId, requestedPage, chapters.length, flushProgress]);
-
-  // Queue the current position, debounced — paging quickly through a chapter shouldn't
-  // fire a write per page. Deliberately gated on a *known* page total: before the pages
-  // resolve we'd otherwise persist a meaningless "page 1 of 1" over real saved progress.
-  useEffect(() => {
-    const record = chapterByNumber.get(chapter);
-    if (incognito || !record || knownTotal === 0 || !imageReady || invalidChapterId) return;
-
-    pendingProgress.current = {
-      sourceChapterKey: record.source_chapter_key,
-      page: Math.min(page, knownTotal),
-      pageCount: knownTotal,
-    };
-
-    if (flushTimer.current) clearTimeout(flushTimer.current);
-    flushTimer.current = setTimeout(() => flushProgress(), 800);
-    return () => {
-      if (flushTimer.current) clearTimeout(flushTimer.current);
-    };
-  }, [
-    chapter,
-    page,
-    knownTotal,
-    chapterByNumber,
-    flushProgress,
-    imageReady,
-    invalidChapterId,
-    incognito,
-  ]);
-
-  // Save immediately when the reader leaves — closing/hiding the tab, or unmounting
-  // (exiting the reader, or switching chapters, which swaps the pending payload anyway).
-  useEffect(() => {
-    const onHide = () => {
-      if (document.visibilityState === 'hidden') flushProgress(true);
-    };
-    const onPageHide = () => flushProgress(true);
-    document.addEventListener('visibilitychange', onHide);
-    window.addEventListener('pagehide', onPageHide);
-    return () => {
-      document.removeEventListener('visibilitychange', onHide);
-      window.removeEventListener('pagehide', onPageHide);
-      flushProgress();
-    };
-  }, [flushProgress]);
+  }, [requestedTarget, requestedChapterId, requestedPage]);
 
   // Settings > Sync & Storage > Download ahead: keep the next chapters downloaded while
   // reading. Once per chapter opened, and never in incognito.
   const downloadAheadFor = useRef<number | null>(null);
-  useEffect(() => {
-    if (incognito || chapters.length === 0 || downloadAheadFor.current === chapter) return;
-    downloadAheadFor.current = chapter;
+  const downloadAheadRef = useRef(() => {});
+  downloadAheadRef.current = () => {
     void downloadAhead(manga, chapter, sortedChapterNumbers, (number) =>
       chapterByNumber.get(number),
     ).catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per chapter, not per render
+  };
+  useEffect(() => {
+    if (incognito || chapters.length === 0 || downloadAheadFor.current === chapter) return;
+    downloadAheadFor.current = chapter;
+    downloadAheadRef.current();
   }, [chapter, chapters.length, incognito]);
 
-  // Finishing the last page marks the chapter read, without the reader having to do it
-  // by hand. Only fires on a real, known page total and only once per chapter.
-  useEffect(() => {
-    const record = chapterByNumber.get(chapter);
-    if (incognito || !record || knownTotal === 0 || !imageReady || invalidChapterId) return;
-    if (page < knownTotal) return;
-    if (record.is_read || autoReadSent.current.has(record.id)) return;
-
-    autoReadSent.current.add(record.id);
-    markChapterAsRead(manga.slug, record.source_chapter_key, {
+  // Finishing the last page marks the chapter read.
+  const finishedRecord =
+    canSave && !invalidChapterId && page >= knownTotal && !progressRecord.is_read
+      ? progressRecord
+      : null;
+  useAutoMarkRead(finishedRecord?.id ?? null, () => {
+    const record = finishedRecord!;
+    return markChapterAsRead(manga.slug, record.source_chapter_key, {
       page_count: knownTotal,
       source: manga.source,
-    })
-      .then(() => {
-        invalidateSavedReadingProgress();
-        // Reflect it locally so the header/chapter list update without a refetch.
-        setChapters((prev) => prev.map((c) => (c.id === record.id ? { ...c, is_read: true } : c)));
-        // Settings > Sync & Storage > Delete after reading. Best effort, never blocks reading.
-        void afterChapterRead(manga, record.chapter_number, sortedChapterNumbers, (number) =>
-          chapterByNumber.get(number),
-        ).catch(() => undefined);
-        // Settings > Reader > Mark duplicates read. Best effort, like the line above.
-        void markDuplicatesRead(manga, chapters, record.chapter_number, record.id)
-          .then((marked) => {
-            if (marked.length === 0) return;
-            const ids = new Set(marked);
-            setChapters((prev) => prev.map((c) => (ids.has(c.id) ? { ...c, is_read: true } : c)));
-          })
-          .catch(() => undefined);
-      })
-      .catch(() => autoReadSent.current.delete(record.id));
-  }, [
-    chapter,
-    page,
-    knownTotal,
-    chapters,
-    chapterByNumber,
-    sortedChapterNumbers,
-    manga,
-    imageReady,
-    invalidChapterId,
-    incognito,
-  ]);
+    }).then(() => {
+      invalidateSavedReadingProgress();
+      // Reflect it locally so the header/chapter list update without a refetch.
+      setChapters((prev) => prev.map((c) => (c.id === record.id ? { ...c, is_read: true } : c)));
+      // Settings > Sync & Storage > Delete after reading. Best effort, never blocks reading.
+      void afterChapterRead(manga, record.chapter_number, sortedChapterNumbers, (number) =>
+        chapterByNumber.get(number),
+      ).catch(() => undefined);
+      // Settings > Reader > Mark duplicates read. Best effort, like the line above.
+      void markDuplicatesRead(manga, chapters, record.chapter_number, record.id)
+        .then((marked) => {
+          if (marked.length === 0) return;
+          const ids = new Set(marked);
+          setChapters((prev) => prev.map((c) => (ids.has(c.id) ? { ...c, is_read: true } : c)));
+        })
+        .catch(() => undefined);
+    });
+  });
 
   const goToPage = (p: number) => setPage(Math.max(1, Math.min(totalPages, p)));
 
@@ -989,17 +806,15 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
         role="alert"
         className="fixed inset-0 z-50 grid place-content-center gap-4 bg-background p-6 text-center"
       >
-        This chapter release does not belong to this title.
-        <button
-          type="button"
-          onClick={() => router.replace(`/reader/${manga.id}?ch=${requestedChapter}`)}
-          className="rounded border p-3"
-        >
+        <p className="text-sm text-foreground">
+          This chapter release does not belong to this title.
+        </p>
+        <Button onClick={() => router.replace(`/reader/${manga.id}?ch=${requestedChapter}`)}>
           Open the chapter list
-        </button>
-        <button type="button" onClick={() => router.push('/')} className="rounded border p-3">
+        </Button>
+        <Button variant="outline" onClick={() => router.push('/')}>
           Return to library
-        </button>
+        </Button>
       </div>
     );
 
@@ -1171,7 +986,6 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
                   if (!record) return;
                   flushProgress();
                   setPreferredGroup(record.scanlator ?? '');
-                  setPagesData(null);
                   router.replace(
                     `/reader/${manga.id}?ch=${record.chapter_number}&page=1&chapterId=${encodeURIComponent(record.id)}`,
                   );
@@ -1226,7 +1040,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
                     getChapterPageCount: (i: number) => stripStop(i)?.page_count ?? 0,
                     fetchPages: (i: number) => {
                       const stop = stripStop(i);
-                      return stop ? fetchReleasePages(stop) : Promise.resolve([]);
+                      return stop ? pagesFor(stop) : Promise.resolve([]);
                     },
                     onPositionChange: handleStripRelease,
                     onPageReady: (i: number, p: number) => {
@@ -1308,7 +1122,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
             Couldn&apos;t load this chapter&apos;s pages.
             <button
               type="button"
-              onClick={() => setPagesRetry((value) => value + 1)}
+              onClick={retryPages}
               className="ml-2 text-primary hover:underline"
             >
               Try again

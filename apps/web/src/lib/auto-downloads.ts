@@ -1,11 +1,11 @@
 import {
   cancelDownload,
-  getAllDownloads,
   initiateDownload,
   type DownloadSummary,
   type MangaChapterRecord,
 } from '@projekt-manga/api-client';
 import { getAppState, getSetting } from '@/lib/app-store';
+import { fetchDownloads } from '@/lib/shared-queries';
 
 /**
  * Settings keys for automatic downloads (Settings → Sync & Storage → Downloads).
@@ -146,7 +146,7 @@ export async function afterChapterRead<T extends ChapterRef>(
   const mode = getSetting(DELETE_AFTER_READ, 'off') as DeleteAfterReadMode;
   const target = deleteAfterReadTarget(mode, justRead, sortedNumbers, pick);
   if (!target) return;
-  const download = (await getAllDownloads()).find(
+  const download = (await fetchDownloads()).find(
     (d) =>
       d.source_id === manga.source &&
       d.mangaSlug === manga.slug &&
@@ -165,7 +165,7 @@ export async function downloadAhead<T extends ChapterRef>(
 ) {
   const count = Number(getSetting(DOWNLOAD_AHEAD, 0)) || 0;
   if (count <= 0) return;
-  const have = activeDownloadKeys(await getAllDownloads(), manga.source, manga.slug);
+  const have = activeDownloadKeys(await fetchDownloads(), manga.source, manga.slug);
   await queueChapterDownloads(
     manga,
     downloadAheadTargets(sortedNumbers, pick, current, count, have),

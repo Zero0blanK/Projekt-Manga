@@ -109,12 +109,22 @@ export class RateLimitedError extends AppError {
   }
 }
 
+/** Prisma failures the error middleware turns into a 4xx: a duplicate, a missing
+ * reference, a record that isn't there. */
+const CLIENT_PRISMA_CODES = new Set(['P2002', 'P2003', 'P2025']);
+
+function isClientPrismaError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' && CLIENT_PRISMA_CODES.has(code);
+}
+
 /**
  * Rethrows known AppError subclasses as-is (so their status code reaches the client
- * unchanged) and wraps anything else with the given fallback error.
+ * unchanged), and the Prisma failures that describe the request rather than the server.
+ * Anything else is wrapped with the given fallback error.
  */
 export function rethrowKnownOrWrap(error: unknown, fallback: AppError): never {
-  if (error instanceof AppError) {
+  if (error instanceof AppError || isClientPrismaError(error)) {
     throw error;
   }
   throw fallback;

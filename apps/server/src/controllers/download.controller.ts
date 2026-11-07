@@ -6,14 +6,14 @@ import { writeStoredZip } from '../utils/storedZip.js';
 import type {
   CleanupOrphanedDownloadsBody,
   InitiateDownloadBody,
+  ListPageQuery,
   UpdateDownloadDirectoryBody,
   UpdateDownloadStorageLimitBody,
 } from '@projekt-manga/schemas';
 
 const initiateDownload = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { sourceId, mangaSlug, mangaTitle, chapter, downloadPath } =
-      req.validated as InitiateDownloadBody;
+    const { sourceId, mangaSlug, mangaTitle, chapter } = req.validated as InitiateDownloadBody;
 
     const result = await downloadService.initiateDownload({
       sourceId,
@@ -22,7 +22,6 @@ const initiateDownload = async (req: Request, res: Response, next: NextFunction)
       mangaTitle,
       chapterTitle: chapter.name || `Chapter ${chapter.chapter_number}`,
       chapterNumber: chapter.chapter_number,
-      downloadPath,
     });
     return HTTPSuccessResponse(res, 200, 'Download initiated successfully', result);
   } catch (error) {
@@ -41,9 +40,9 @@ const getDownloadStatus = async (req: Request, res: Response, next: NextFunction
   }
 };
 
-const getAllDownloads = async (_req: Request, res: Response, next: NextFunction) => {
+const getAllDownloads = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const downloads = await downloadService.getAllDownloads();
+    const downloads = await downloadService.getAllDownloads(req.validated as ListPageQuery);
     return HTTPSuccessResponse(res, 200, 'Downloads retrieved successfully', downloads);
   } catch (error) {
     next(error);

@@ -1,19 +1,8 @@
 import { request } from './client.js';
-
-export interface CacheSyncResult {
-  updated: boolean;
-  hostedUrl?: string;
-}
-
-export interface CacheStatus {
-  exists: boolean;
-  manga_id: string;
-  thumbnail_url: string;
-  sha256_url: string;
-}
+import type { CacheSyncResult, CacheStatus } from '@projekt-manga/types';
+export type { CacheSyncResult, CacheStatus } from '@projekt-manga/types';
 
 // Sends source_thumbnail_url (snake_case) — the canonical field. cache.controller.ts also
-// accepts a sourceThumbnailUrl camelCase alias for an older caller; new code shouldn't need it.
 export const triggerCacheSync = (
   mangaId: string,
   sourceThumbnailUrl?: string,

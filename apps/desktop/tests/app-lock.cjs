@@ -78,15 +78,15 @@ test('the app lock keeps only a hash, locks the windows and unlocks from the loc
     assert.deepEqual(lock.getAppLockState(), { enabled: false, idleMinutes: 0, locked: false });
 
     for (const input of [
-      { newPin: '123', idleMinutes: 5 },
+      { newPin: '12345', idleMinutes: 5 },
       { newPin: 'x'.repeat(65), idleMinutes: 5 },
-      { newPin: '1234', idleMinutes: 7 },
+      { newPin: '123456', idleMinutes: 7 },
       null,
     ])
       await assert.rejects(lock.setAppLock(input), undefined, JSON.stringify(input));
-    await lock.setAppLock({ newPin: '2468', idleMinutes: 5 });
+    await lock.setAppLock({ newPin: '246810', idleMinutes: 5 });
     const stored = fs.readFileSync(path.join(userData, 'app-lock.json'), 'utf8');
-    assert.ok(!stored.includes('2468'), 'The PIN itself is never stored');
+    assert.ok(!stored.includes('246810'), 'The PIN itself is never stored');
 
     // Locking hides the visible app window and shows the lock window.
     const appWindow = new BrowserWindow();
@@ -101,13 +101,13 @@ test('the app lock keeps only a hash, locks the windows and unlocks from the loc
 
     const unlock = handlers.get('desktop:lock:unlock');
     // An app page can't unlock, even with the right PIN.
-    assert.equal((await unlock({ sender: appWindow.webContents }, '2468')).ok, false);
+    assert.equal((await unlock({ sender: appWindow.webContents }, '246810')).ok, false);
     assert.equal(lock.isAppLocked(), true);
     assert.equal((await unlock({ sender: lockWindow.webContents }, '0000')).ok, false);
     const opened = [];
     lock.whenUnlocked(() => opened.push('loaded'));
     assert.deepEqual(opened, []);
-    assert.equal((await unlock({ sender: lockWindow.webContents }, '2468')).ok, true);
+    assert.equal((await unlock({ sender: lockWindow.webContents }, '246810')).ok, true);
     assert.equal(lock.isAppLocked(), false);
     assert.equal(appWindow.isVisible(), true);
     assert.deepEqual(opened, ['loaded']);
@@ -123,12 +123,12 @@ test('the app lock keeps only a hash, locks the windows and unlocks from the loc
       (
         await handlers.get('desktop:lock:unlock')(
           { sender: restartedLockWindow.webContents },
-          '2468',
+          '246810',
         )
       ).ok,
       true,
     );
-    await lock.clearAppLock({ currentPin: '2468' });
+    await lock.clearAppLock({ currentPin: '246810' });
     assert.equal(fs.existsSync(path.join(userData, 'app-lock.json')), false);
   } finally {
     fs.rmSync(userData, { recursive: true, force: true });

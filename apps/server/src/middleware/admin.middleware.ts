@@ -11,6 +11,16 @@ function tokenMatches(supplied: string | undefined, expected: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** True for the server's own machine, or a caller holding `ADMIN_TOKEN`. Unlike
+ * `requireAdmin` this never passes everyone: with no token set, only loopback qualifies. */
+export function isHostRequest(req: Request): boolean {
+  if (LOOPBACK.test(req.ip ?? '')) return true;
+  const expected = process.env.ADMIN_TOKEN;
+  if (!expected) return false;
+  const header = req.headers['x-admin-token'];
+  return tokenMatches(Array.isArray(header) ? header[0] : header, expected);
+}
+
 /** Guards routes that act on the host rather than on an account: the download folder,
  * installing extension code, restoring a backup.
  *
@@ -20,12 +30,6 @@ function tokenMatches(supplied: string | undefined, expected: string): boolean {
  * local web server) pass and anyone else must send the token. `req.ip` honours TRUST_PROXY,
  * so behind a proxy this is the forwarded client address, not the proxy's. */
 export function requireAdmin(req: Request, _res: Response, next: NextFunction) {
-  const expected = process.env.ADMIN_TOKEN;
-  if (!expected || LOOPBACK.test(req.ip ?? '')) return next();
-
-  const header = req.headers['x-admin-token'];
-  if (tokenMatches(Array.isArray(header) ? header[0] : header, expected)) {
-    return next();
-  }
+  if (!process.env.ADMIN_TOKEN || isHostRequest(req)) return next();
   return next(new ForbiddenError('This action is only available from the server host'));
 }

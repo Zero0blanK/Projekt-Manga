@@ -32,6 +32,10 @@ export const queryClient = new QueryClient({
 /** Query keys in one place so an action's invalidation and a hook's subscription can't
  * drift apart — a mismatch there fails silently as a view that just never updates. */
 export const queryKeys = {
+  categories: ['categories'] as const,
+  history: ['history'] as const,
+  mangaLinks: ['manga-links'] as const,
+  downloads: ['downloads'] as const,
   mangaLibrary: ['manga-library'] as const,
   libraryState: ['library-state'] as const,
   sources: ['sources'] as const,
@@ -54,6 +58,7 @@ export function invalidateSavedReadingProgress(): void {
     queryKey: queryKeys.mangaLibrary,
     refetchType: libraryVisible ? 'active' : 'none',
   });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.history, refetchType: 'none' });
 }
 
 /**

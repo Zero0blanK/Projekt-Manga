@@ -63,12 +63,13 @@ function UpdateRow({ update, unread }: { update: MangaUpdate; unread: boolean })
           </p>
         </div>
 
-        <div className="hidden shrink-0 text-right text-[11px] text-muted-foreground md:block">
+        <div className="hidden shrink-0 text-right text-xs text-muted-foreground md:block">
           {update.fetchedAt ? formatRelative(update.fetchedAt) : ''}
         </div>
 
         {count > 1 ? (
           <button
+            type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
             className="flex shrink-0 items-center gap-1 rounded-full border border-border/60 px-3 py-1.5 text-[11px] font-medium text-foreground transition hover:bg-accent"
@@ -79,6 +80,7 @@ function UpdateRow({ update, unread }: { update: MangaUpdate; unread: boolean })
         ) : null}
 
         <button
+          type="button"
           onClick={() =>
             unread
               ? markRead(update.mangaId)
@@ -114,7 +116,7 @@ function UpdateRow({ update, unread }: { update: MangaUpdate; unread: boolean })
                   Chapter {chapter.chapter_number}
                   {chapter.name ? ` · ${chapter.name}` : ''}
                 </span>
-                <span className="shrink-0 text-[10px]">
+                <span className="shrink-0 text-xs">
                   {chapter.fetched_at ? formatRelative(chapter.fetched_at) : ''}
                 </span>
               </Link>
@@ -159,6 +161,7 @@ export function ChapterUpdates() {
         </p>
         {unreadIds.length > 0 && (
           <button
+            type="button"
             onClick={() =>
               applyLibraryAction(
                 libraryActions.markAllNotificationsRead(unreadIds),

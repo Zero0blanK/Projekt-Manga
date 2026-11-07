@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     'The most popular manga across all your installed sources, ranked by reader rating and activity.',
   openGraph: {
     title: 'Popular Manga — Projekt Manga',
-    description: 'Top-ranked manga from every installed source extension.',
+    description: 'Top-ranked manga from every installed source.',
     type: 'website',
   },
   twitter: {

@@ -102,7 +102,7 @@ function Diagnostic({ entry }: { entry: DecodedEntry }) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-foreground">{d.summary}</p>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[11px]">
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt className="text-muted-foreground">{label}</dt>
@@ -139,6 +139,7 @@ function SourceSection({
   return (
     <section className="overflow-hidden rounded-2xl border border-border/60 bg-surface/40">
       <button
+        type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className="flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-accent/30"
@@ -153,7 +154,7 @@ function SourceSection({
           {source.name}
         </span>
         {badge}
-        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{count}</span>
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{count}</span>
         <ChevronDown
           className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition ${open ? 'rotate-180' : ''}`}
         />
@@ -257,6 +258,7 @@ export function UpdateLog() {
     const active = selected.has(key);
     return (
       <button
+        type="button"
         key={key}
         onClick={() => toggle(key)}
         aria-pressed={active}
@@ -308,6 +310,7 @@ export function UpdateLog() {
             )}
           {selected.size > 0 && (
             <button
+              type="button"
               onClick={() => setSelected(new Set())}
               className="text-xs text-primary transition hover:opacity-80"
             >
@@ -321,6 +324,7 @@ export function UpdateLog() {
         <EmptyState>
           Nothing matches the selected categories.
           <button
+            type="button"
             onClick={() => setSelected(new Set())}
             className="mt-3 block w-full text-xs text-primary hover:opacity-80"
           >
@@ -349,6 +353,7 @@ export function UpdateLog() {
                 return (
                   <li key={entry.id}>
                     <button
+                      type="button"
                       onClick={() => toggleExpanded(entry.id)}
                       aria-expanded={isOpen}
                       className="flex w-full items-center gap-3 p-4 text-left transition hover:bg-accent/40"
@@ -362,7 +367,7 @@ export function UpdateLog() {
                         <span className="block truncate text-xs font-medium text-foreground">
                           {entry.message}
                         </span>
-                        <span className="block text-[10px] text-muted-foreground">
+                        <span className="block text-xs text-muted-foreground">
                           {formatRelative(entry.created_at)}
                         </span>
                       </span>
@@ -382,7 +387,7 @@ export function UpdateLog() {
                         {entry.manga && (
                           <Link
                             href={`/manga/${entry.manga.id}`}
-                            className="mt-3 inline-block text-[11px] text-primary hover:opacity-80"
+                            className="mt-3 inline-block text-xs text-primary hover:opacity-80"
                           >
                             View title →
                           </Link>

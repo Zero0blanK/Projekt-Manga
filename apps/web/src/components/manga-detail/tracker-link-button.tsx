@@ -83,6 +83,7 @@ function ScoreControl({ manga }: { manga: Manga }) {
         className="h-8 w-20 text-xs"
       />
       <button
+        type="button"
         onClick={save}
         disabled={saving || !input.trim()}
         className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
@@ -129,6 +130,7 @@ function SyncStatus({ link }: { link: TrackerLink }) {
         {lastSyncedAt ? `Last synced ${formatRelative(lastSyncedAt)}` : 'Not synced yet'}
       </span>
       <button
+        type="button"
         onClick={sync}
         disabled={syncing}
         className="shrink-0 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
@@ -199,6 +201,7 @@ function LinkDialogBody({
         <ScoreControl manga={manga} />
         <SyncStatus link={existingLink} />
         <button
+          type="button"
           onClick={unlink}
           disabled={busyId !== null}
           className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition hover:bg-destructive/20 disabled:opacity-50"
@@ -220,6 +223,7 @@ function LinkDialogBody({
           placeholder={`Search ${TRACKER_LABEL}…`}
         />
         <button
+          type="button"
           onClick={runSearch}
           disabled={searching || !query.trim()}
           className="shrink-0 rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
@@ -236,6 +240,7 @@ function LinkDialogBody({
           >
             <span className="min-w-0 truncate text-xs text-foreground">{result.title}</span>
             <button
+              type="button"
               onClick={() => link(result.tracker_media_id)}
               disabled={busyId !== null}
               className="shrink-0 rounded-lg border border-border/60 px-2.5 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
@@ -289,7 +294,7 @@ export function TrackerLinkButton({ manga }: { manga: Manga }) {
       })
       .catch((error) => {
         if (!controller.signal.aborted)
-          toast({ description: errorMessage(error, 'Could not check tracker connection.') });
+          toast({ description: errorMessage(error, "Couldn't check tracker connection.") });
       });
     return () => controller.abort();
   }, [userId]);
@@ -303,7 +308,7 @@ export function TrackerLinkButton({ manga }: { manga: Manga }) {
       })
       .catch((error) => {
         if (!controller.signal.aborted)
-          toast({ description: errorMessage(error, 'Could not load tracker link.') });
+          toast({ description: errorMessage(error, "Couldn't load tracker link.") });
       });
     return () => controller.abort();
   }, [userId, connection, manga.id]);
@@ -348,6 +353,7 @@ export function TrackerLinkButton({ manga }: { manga: Manga }) {
     >
       <DialogTrigger asChild>
         <button
+          type="button"
           aria-pressed={anyLinked}
           aria-label={buttonLabel}
           title={buttonLabel}
@@ -369,6 +375,7 @@ export function TrackerLinkButton({ manga }: { manga: Manga }) {
           <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Tracker">
             {options.map((o) => (
               <button
+                type="button"
                 key={o.tracker}
                 role="tab"
                 aria-selected={o.tracker === current.tracker}

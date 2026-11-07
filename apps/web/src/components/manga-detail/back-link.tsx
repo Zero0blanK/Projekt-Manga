@@ -40,7 +40,7 @@ export function MangaDetailBackLink({
   }
 
   return (
-    <button onClick={() => router.back()} className={className}>
+    <button type="button" onClick={() => router.back()} className={className}>
       <ChevronLeft className="h-3.5 w-3.5" /> Back to {previous.label}
     </button>
   );

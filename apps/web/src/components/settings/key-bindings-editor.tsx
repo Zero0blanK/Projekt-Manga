@@ -81,7 +81,7 @@ export function KeyBindingsEditor() {
                       </button>
                     </span>
                     {shared.length > 0 && (
-                      <span className="text-[11px] text-amber-600 dark:text-amber-400">
+                      <span className="text-xs text-amber-600 dark:text-amber-400">
                         Also {shared.map(labelOf).join(', ')}
                       </span>
                     )}

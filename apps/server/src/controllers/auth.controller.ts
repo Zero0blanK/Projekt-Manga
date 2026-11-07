@@ -2,11 +2,13 @@ import { Request, Response, NextFunction } from 'express';
 import { HTTPSuccessResponse } from '../utils/responseHandlers.js';
 import authService, { SESSION_COOKIE_NAME } from '../services/auth.service.js';
 import { writeSessionCookie } from '../utils/sessionCookie.js';
+import { isHostRequest } from '../middleware/admin.middleware.js';
 import type {
   RegisterBody,
   LoginBody,
   RegisterDeviceBody,
   DeleteAccountBody,
+  ChangePasswordBody,
 } from '@projekt-manga/schemas';
 
 /** sameSite: "lax" requires the web app and this API to share a registrable domain (see
@@ -30,7 +32,11 @@ function clearSessionCookie(res: Response) {
 const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const body = req.validated as RegisterBody;
-    const { user, token } = await authService.register(body, req.headers['user-agent']);
+    const { user, token } = await authService.register(
+      body,
+      isHostRequest(req),
+      req.headers['user-agent'],
+    );
     setSessionCookie(res, token);
     return HTTPSuccessResponse(res, 201, 'Account created', { user });
   } catch (error) {
@@ -103,12 +109,27 @@ const signOutOtherDevices = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+const changePassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // requireAuth guarantees req.user/req.sessionId are set on this route.
+    const revoked = await authService.changePassword(
+      req.user!.id,
+      req.sessionId!,
+      req.validated as ChangePasswordBody,
+    );
+    return HTTPSuccessResponse(res, 200, 'Password changed', { revoked });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const authController = {
   register,
   login,
   logout,
   me,
   deleteAccount,
+  changePassword,
   registerDevice,
   signOutOtherDevices,
 };

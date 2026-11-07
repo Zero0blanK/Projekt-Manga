@@ -1,12 +1,7 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
-import {
-  getHistory,
-  getDownloadStats,
-  type HistoryEntry,
-  type DownloadStats,
-} from '@projekt-manga/api-client';
+import { getDownloadStats, type HistoryEntry, type DownloadStats } from '@projekt-manga/api-client';
 import { Field, NumberSelect, Panel, Select } from '@/components/settings/field-controls';
 import Link from 'next/link';
 import { ReadingGoalProgress } from '@/components/library/reading-goal';
@@ -24,6 +19,9 @@ import { shelfOf as resolveShelf } from '@/components/library/constants';
 import { StatCardsSkeleton } from '@/components/skeletons';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCurrentUser } from '@/lib/session-resource';
+import { useHistory } from '@/lib/shared-queries';
+import { queryClient, queryKeys } from '@/lib/query-client';
+import { useQuery } from '@tanstack/react-query';
 import {
   BookOpen,
   Clock,
@@ -49,7 +47,7 @@ function StatCard({
         <Icon className="h-3.5 w-3.5" /> {label}
       </div>
       <div className="mt-2 text-2xl font-semibold tabular-nums text-foreground">{value}</div>
-      {detail && <div className="mt-1 text-[11px] text-muted-foreground">{detail}</div>}
+      {detail && <div className="mt-1 text-xs text-muted-foreground">{detail}</div>}
     </div>
   );
 }
@@ -72,7 +70,7 @@ function StatRow({
         <div className={`text-sm ${muted ? 'text-muted-foreground' : 'text-foreground'}`}>
           {label}
         </div>
-        {note && <div className="mt-0.5 text-[11px] text-muted-foreground">{note}</div>}
+        {note && <div className="mt-0.5 text-xs text-muted-foreground">{note}</div>}
       </div>
       <div
         className={`shrink-0 text-sm font-semibold tabular-nums ${
@@ -98,6 +96,8 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 
 const DAY_MS = 24 * 3600_000;
 
+const EMPTY_HISTORY: HistoryEntry[] = [];
+
 /** Consecutive days ending today (or yesterday) that have at least one history entry. */
 function currentStreak(history: HistoryEntry[]): number {
   const days = new Set(history.map((h) => new Date(h.last_read).toDateString()));
@@ -119,41 +119,30 @@ export function StatisticsPanel() {
   const { manga: mangaLibrary, loading: libraryLoading } = useMangaLibrary();
   const { shelf, bookmarks } = useLibraryState();
   const updateRules = useGlobalUpdateRules();
-  const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [downloads, setDownloads] = useState<DownloadStats | null>(null);
-  const [statsLoaded, setStatsLoaded] = useState(false);
-  const [statsError, setStatsError] = useState(false);
-  const [retryToken, setRetryToken] = useState(0);
   const [activityDays, setActivityDays] = useState<7 | 30>(7);
   const { user, loading: sessionLoading } = useCurrentUser();
-  const [loadedOwner, setLoadedOwner] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (sessionLoading) return;
-    const controller = new AbortController();
-    setStatsLoaded(false);
-    setStatsError(false);
-    Promise.all([getHistory(controller.signal), getDownloadStats(controller.signal)])
-      .then(([nextHistory, nextDownloads]) => {
-        if (!controller.signal.aborted) {
-          setHistory(nextHistory);
-          setDownloads(nextDownloads);
-        }
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setStatsError(true);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setStatsLoaded(true);
-          setLoadedOwner(user?.id ?? 'anonymous');
-        }
-      });
-    return () => controller.abort();
-  }, [retryToken, user?.id, sessionLoading]);
+  const historyQuery = useHistory();
+  const downloadsQuery = useQuery(
+    {
+      queryKey: [...queryKeys.downloads, 'stats', user?.id ?? null],
+      queryFn: ({ signal }) => getDownloadStats(signal),
+      enabled: !sessionLoading,
+      retry: false,
+    },
+    queryClient,
+  );
+  const history: HistoryEntry[] = historyQuery.data ?? EMPTY_HISTORY;
+  const downloads: DownloadStats | null = downloadsQuery.data ?? null;
+  const statsError = historyQuery.isError || downloadsQuery.isError;
+  const retry = () => {
+    void historyQuery.refetch();
+    void downloadsQuery.refetch();
+  };
 
   const loading =
-    sessionLoading || libraryLoading || !statsLoaded || loadedOwner !== (user?.id ?? 'anonymous');
+    sessionLoading ||
+    libraryLoading ||
+    (!statsError && (historyQuery.isPending || downloadsQuery.isPending));
 
   if (loading) {
     return (
@@ -176,11 +165,7 @@ export function StatisticsPanel() {
         <p role="alert" className="text-sm text-muted-foreground">
           Statistics are unavailable right now.
         </p>
-        <button
-          type="button"
-          onClick={() => setRetryToken((value) => value + 1)}
-          className="mt-3 text-xs text-primary hover:underline"
-        >
+        <button type="button" onClick={retry} className="mt-3 text-xs text-primary hover:underline">
           Try again
         </button>
       </Panel>

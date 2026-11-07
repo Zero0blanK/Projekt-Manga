@@ -31,15 +31,16 @@ class DownloadRepository {
     });
   }
 
-  async getAllDownloads() {
+  async getAllDownloads(page: { limit?: number; offset?: number } = {}) {
     return await prisma.download.findMany({
       include: {
         manga: true,
         chapter: true,
       },
-      orderBy: {
-        started_at: 'desc',
-      },
+      // The id settles ties (rows not started yet), so paging can't repeat or skip one.
+      orderBy: [{ started_at: 'desc' }, { id: 'asc' }],
+      ...(page.limit !== undefined ? { take: page.limit } : {}),
+      ...(page.offset !== undefined ? { skip: page.offset } : {}),
     });
   }
 

@@ -1,5 +1,6 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from '@/hooks/use-toast';
 import { FolderOpen, Check } from 'lucide-react';
@@ -8,10 +9,7 @@ import { FolderOpen, Check } from 'lucide-react';
  * sandbox rule, not a missing feature — so when the app is running inside Electron this
  * hands off to the shell, and otherwise falls back to surfacing the path. */
 type DesktopBridge = { openPath?: (path: string) => Promise<unknown> };
-function desktopBridge(): DesktopBridge | null {
-  if (typeof window === 'undefined') return null;
-  return (window as unknown as { desktop?: DesktopBridge }).desktop ?? null;
-}
+const desktop = () => desktopBridge<DesktopBridge>();
 
 /**
  * Reveals where a download lives on disk. In the desktop build this opens the folder; in
@@ -47,7 +45,7 @@ export function OpenFolderButton({
       return;
     }
 
-    const bridge = desktopBridge();
+    const bridge = desktop();
     if (bridge?.openPath) {
       bridge.openPath(path).catch(() => toast({ description: "Couldn't open the folder." }));
       return;
@@ -70,6 +68,7 @@ export function OpenFolderButton({
 
   return (
     <button
+      type="button"
       onClick={reveal}
       disabled={!path}
       aria-label={label}

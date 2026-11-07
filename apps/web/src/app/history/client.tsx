@@ -5,11 +5,7 @@ import Link from 'next/link';
 import { toast } from '@/hooks/use-toast';
 import { ToastAction } from '@/components/ui/toast';
 import { formatRelative, formatDuration } from '@/lib/manga-data';
-import {
-  getHistory,
-  deleteHistory,
-  type HistoryEntry as ApiHistoryEntry,
-} from '@projekt-manga/api-client';
+import { deleteHistory, type HistoryEntry as ApiHistoryEntry } from '@projekt-manga/api-client';
 import { historyThumbnailUrl } from '@/lib/history-thumbnail';
 import {
   DropdownMenu,
@@ -34,6 +30,7 @@ import { PageShell, PageHeader, EmptyState, RowList } from '@/components/page-sh
 import { RowListSkeleton } from '@/components/skeletons';
 import { Clock3, Play, Trash2, X, ChevronDown } from 'lucide-react';
 import { historyResumeHref, historyTitleHref } from '@/lib/history-navigation';
+import { invalidateHistory, useHistory } from '@/lib/shared-queries';
 
 type JoinedEntry = {
   source: string;
@@ -82,35 +79,11 @@ function toJoined(e: ApiHistoryEntry): JoinedEntry {
  * reaches the server — gives the "Undo" toast action something to cancel. */
 const REMOVE_GRACE_MS = 5000;
 
-function useHistory() {
-  const [entries, setEntries] = useState<JoinedEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<unknown>(null);
-  const [retryToken, setRetryToken] = useState(0);
+function useHistoryEntries() {
+  const { data, isPending: loading, error, refetch } = useHistory();
+  const entries = useMemo(() => (data ?? []).map(toJoined), [data]);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const pendingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-    getHistory(controller.signal)
-      .then((rows) => {
-        setEntries(rows.map(toJoined));
-        setError(null);
-      })
-      .catch((err) => {
-        // A cancelled request isn't a failure to report. Without this, StrictMode's
-        // mount → cleanup → mount cycle aborts the first fetch and leaves that abort
-        // showing as a permanent error banner over the data the second fetch loaded.
-        if (controller.signal.aborted) return;
-        setError(err);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [retryToken]);
 
   // A scheduled delete still lands if the reader navigates away inside the grace window.
   // The timer handles are kept so the toast's Undo action can cancel them even after
@@ -120,16 +93,21 @@ function useHistory() {
     for (const id of ids) {
       const timer = setTimeout(() => {
         pendingTimers.current.delete(id);
-        deleteHistory(id).catch(() => {
-          // Un-hide it: the row is still on the server, so leaving it hidden would make
-          // the entry silently reappear on the next load with no explanation.
-          setHiddenIds((prev) => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
+        deleteHistory(id)
+          .then(invalidateHistory)
+          .catch(() => {
+            // Un-hide it: the row is still on the server, so leaving it hidden would make
+            // the entry silently reappear on the next load with no explanation.
+            setHiddenIds((prev) => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+            toast({
+              variant: 'destructive',
+              description: "Couldn't remove that entry — it's back.",
+            });
           });
-          toast({ variant: 'destructive', description: "Couldn't remove that entry — it's back." });
-        });
       }, REMOVE_GRACE_MS);
       pendingTimers.current.set(id, timer);
     }
@@ -156,7 +134,7 @@ function useHistory() {
     entries: visible,
     loading,
     error,
-    retry: () => setRetryToken((value) => value + 1),
+    retry: () => void refetch(),
     scheduleRemove,
     undo,
   };
@@ -227,7 +205,7 @@ function ProgressRow({ entry }: { entry: JoinedEntry }) {
           style={{ width: `${entry.progress * 100}%` }}
         />
       </div>
-      <span className="text-[10px] tabular-nums text-muted-foreground">{entry.progressLabel}</span>
+      <span className="text-xs tabular-nums text-muted-foreground">{entry.progressLabel}</span>
     </div>
   );
 }
@@ -260,7 +238,7 @@ function SingleRow({
         </p>
         <ProgressRow entry={e} />
       </div>
-      <div className="hidden shrink-0 text-right text-[11px] text-muted-foreground md:block">
+      <div className="hidden shrink-0 text-right text-xs text-muted-foreground md:block">
         {formatRelative(e.readAt)}
       </div>
       <Link
@@ -270,6 +248,7 @@ function SingleRow({
         <Play className="h-3 w-3 fill-current" /> Resume
       </Link>
       <button
+        type="button"
         onClick={() => onRemove([e])}
         aria-label="Remove from history"
         className="grid h-8 w-8 pointer-coarse:size-11 shrink-0 place-items-center rounded-lg text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
@@ -310,7 +289,7 @@ function GroupedRow({
         </p>
         <ProgressRow entry={latest} />
       </div>
-      <div className="hidden shrink-0 text-right text-[11px] text-muted-foreground md:block">
+      <div className="hidden shrink-0 text-right text-xs text-muted-foreground md:block">
         {formatRelative(latest.readAt)}
       </div>
 
@@ -341,6 +320,7 @@ function GroupedRow({
         <Play className="h-3 w-3 fill-current" /> Resume
       </Link>
       <button
+        type="button"
         onClick={() => onRemove(entries)}
         aria-label={`Remove ${latest.title} from history`}
         className="grid h-8 w-8 pointer-coarse:size-11 shrink-0 place-items-center rounded-lg text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
@@ -360,7 +340,7 @@ function chapterLine(chapter: number | string, title: string) {
 }
 
 export function HistoryPageClient() {
-  const { entries: history, loading, error, retry, scheduleRemove, undo } = useHistory();
+  const { entries: history, loading, error, retry, scheduleRemove, undo } = useHistoryEntries();
   const [filterRange, setFilterRange] = useState<RangeFilter>('All time');
   const [clearOpen, setClearOpen] = useState(false);
   const [selectedDays, setSelectedDays] = useState<Set<string>>(new Set());
@@ -457,7 +437,10 @@ export function HistoryPageClient() {
                 }}
               >
                 <AlertDialogTrigger asChild>
-                  <button className="flex h-9 items-center gap-2 rounded-lg border border-border/60 px-3 text-xs text-muted-foreground hover:text-foreground">
+                  <button
+                    type="button"
+                    className="flex h-9 items-center gap-2 rounded-lg border border-border/60 px-3 text-xs text-muted-foreground hover:text-foreground"
+                  >
                     <Trash2 className="h-3.5 w-3.5" /> Clear history
                   </button>
                 </AlertDialogTrigger>
@@ -476,12 +459,14 @@ export function HistoryPageClient() {
                     </span>
                     <div className="flex gap-3">
                       <button
+                        type="button"
                         onClick={() => setSelectedDays(new Set(dayEntries.map(([day]) => day)))}
                         className="text-primary hover:opacity-80"
                       >
                         Select all
                       </button>
                       <button
+                        type="button"
                         onClick={() => setSelectedDays(new Set())}
                         className="text-primary hover:opacity-80"
                       >
@@ -532,6 +517,7 @@ export function HistoryPageClient() {
           <EmptyState>
             Couldn't load your reading history.
             <button
+              type="button"
               onClick={retry}
               className="mt-3 block w-full text-xs text-primary hover:opacity-80"
             >
@@ -553,6 +539,7 @@ export function HistoryPageClient() {
             No history {filterRange !== 'All time' ? `in ${filterRange.toLowerCase()}` : ''}.
             {filtersActive && (
               <button
+                type="button"
                 onClick={() => setFilterRange('All time')}
                 className="mt-3 block w-full text-xs text-primary hover:opacity-80"
               >

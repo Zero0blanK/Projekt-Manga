@@ -9,7 +9,8 @@
  * threat model as a browser's saved-password store).
  */
 import { safeStorage, app } from 'electron';
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { writeFileAtomic } from './atomic-file';
 import path from 'node:path';
 
 export interface CachedSession {
@@ -41,9 +42,16 @@ function isCachedSession(value: unknown): value is CachedSession {
  * dropped whenever this module writes or deletes the file. */
 let memoized: CachedSession | null = null;
 
+/** On Linux with no keyring, Electron "encrypts" with a hard-coded key (`basic_text`), which
+ * protects nothing: a session token shouldn't be written down on that promise. */
+function encryptionUsable(): boolean {
+  if (!safeStorage.isEncryptionAvailable()) return false;
+  return process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text';
+}
+
 export function getCachedSession(): CachedSession | null {
   const filePath = cacheFilePath();
-  if (!existsSync(filePath) || !safeStorage.isEncryptionAvailable()) {
+  if (!existsSync(filePath) || !encryptionUsable()) {
     memoized = null;
     return null;
   }
@@ -69,7 +77,7 @@ export function getCachedSession(): CachedSession | null {
 }
 
 export function setCachedSession(session: CachedSession): void {
-  if (!safeStorage.isEncryptionAvailable()) {
+  if (!encryptionUsable()) {
     throw new Error('OS-level credential encryption is not available on this machine');
   }
   memoized = null;
@@ -77,7 +85,7 @@ export function setCachedSession(session: CachedSession): void {
   // 0600: the blob is already OS-encrypted and bound to this user account, so this is
   // belt-and-braces — but the default (0644 after a typical umask) leaves a session token
   // world-readable on a shared POSIX machine, and there's no reason to hand it out.
-  writeFileSync(cacheFilePath(), encrypted, { mode: 0o600 });
+  writeFileAtomic(cacheFilePath(), encrypted, { mode: 0o600 });
 }
 
 export function clearCachedSession(): void {

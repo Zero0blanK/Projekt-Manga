@@ -5,6 +5,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/query-client';
 import { usePathname } from 'next/navigation';
 import { LibraryLiveUpdates } from '@/components/library-live-updates';
+import { CategorySync } from '@/components/category-sync';
 import { SourceChallengeAutoOpen } from '@/components/source-challenge-auto-open';
 import { applyRuntimeApiBaseUrl } from '@/lib/api-config';
 import { installClientDiagnostics, recordPageVisit } from '@/lib/client-diagnostics';
@@ -57,6 +58,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <LibraryLiveUpdates />
+      <CategorySync />
       <SourceChallengeAutoOpen />
       {children}
     </QueryClientProvider>

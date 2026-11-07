@@ -11,7 +11,6 @@ import {
   markPreviousChaptersAsRead,
   markPreviousChaptersAsUnread,
   initiateDownload,
-  getAllDownloads,
   type MangaChapterRecord,
   type ChapterBulkPayload,
 } from '@projekt-manga/api-client';
@@ -36,7 +35,10 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuCheckboxItem,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -80,6 +82,7 @@ import { useChapterFilterScroll } from '@/lib/chapter-filter-scroll';
 import { useCurrentUser } from '@/lib/session-resource';
 import { useNewSinceLastVisit } from '@/lib/chapter-visits';
 import { applyMihonChapterState } from '@/lib/mihon-backup/extras';
+import { useDownloads } from '@/lib/shared-queries';
 
 type ChapterRow = {
   /** The stored row's id: reader links, downloads and bookmarks look it up. */
@@ -182,7 +185,7 @@ function ChapterListItem({
             </div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium text-foreground">{c.title}</div>
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-xs text-muted-foreground">
                 {c.date}
                 {c.group && ` · ${c.group}`}
               </div>
@@ -316,9 +319,28 @@ export function ChapterList({ manga }: { manga: Manga }) {
   const [chapterError, setChapterError] = useState(false);
   const [chapterRetry, setChapterRetry] = useState(0);
   /** Chapter ids with a completed download, for the "Offline" badge. */
-  const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
-  const [excludedDownloadIds, setExcludedDownloadIds] = useState<Set<string>>(new Set());
-  const [downloadsAvailable, setDownloadsAvailable] = useState(false);
+  // One list rather than a per-chapter "is downloaded?" check, which would be an N+1
+  // against a chapter list that can run to hundreds of rows.
+  const { data: allDownloads, isSuccess: downloadsAvailable } = useDownloads();
+  const downloadedIds = useMemo(
+    () =>
+      new Set(
+        (allDownloads ?? [])
+          .filter((d) => d.status === 'COMPLETED' && d.chapter_id)
+          .map((d) => d.chapter_id),
+      ),
+    [allDownloads],
+  );
+  const queuedDownloadIds = useRef(new Set<string>());
+  const excludedDownloadIds = useMemo(
+    () =>
+      new Set(
+        (allDownloads ?? [])
+          .filter((download) => download.status !== 'FAILED')
+          .map((download) => download.chapter_id),
+      ),
+    [allDownloads],
+  );
   const [selected, setSelected] = useState<string[]>([]);
   // Bookmarks are kept under the source's key, the one name a chapter has both here and on
   // its source preview.
@@ -335,10 +357,18 @@ export function ChapterList({ manga }: { manga: Manga }) {
     parseChapterFilter,
     DEFAULT_CHAPTER_FILTER,
   );
-  const { status, group } = listFilter;
+  const { status, group, hiddenGroups } = listFilter;
   const setStatus = (next: (typeof STATUS_FILTERS)[number]) =>
     setListFilter((current) => ({ ...current, status: next }));
   const setGroup = (next: string) => setListFilter((current) => ({ ...current, group: next }));
+  const toggleHiddenGroup = (name: string) =>
+    setListFilter((current) => ({
+      ...current,
+      hiddenGroups: current.hiddenGroups.includes(name)
+        ? current.hiddenGroups.filter((entry) => entry !== name)
+        : [...current.hiddenGroups, name],
+      group: current.group === name ? 'All' : current.group,
+    }));
   const [sort, setSort] = useState<SortMode>('latest');
   const [sortDir, setSortDir] = useState<SortDirection>('desc');
   const [batchBusy, setBatchBusy] = useState(false);
@@ -418,37 +448,6 @@ export function ChapterList({ manga }: { manga: Manga }) {
       });
     return () => controller.abort();
   }, [manga.id, manga.slug, manga.source, updateVersion, owner, sessionLoading, chapterRetry]);
-
-  // One list call rather than a per-chapter "is downloaded?" check, which would be an
-  // N+1 against a chapter list that can run to hundreds of rows.
-  useEffect(() => {
-    if (sessionLoading) return;
-    const controller = new AbortController();
-    setDownloadsAvailable(false);
-    setExcludedDownloadIds(new Set());
-    setDownloadedIds(new Set());
-    getAllDownloads(controller.signal)
-      .then((all) => {
-        if (controller.signal.aborted) return;
-        setDownloadsAvailable(true);
-        setExcludedDownloadIds(
-          new Set(
-            all
-              .filter((download) => download.status !== 'FAILED')
-              .map((download) => download.chapter_id),
-          ),
-        );
-        setDownloadedIds(
-          new Set(
-            all.filter((d) => d.status === 'COMPLETED' && d.chapter_id).map((d) => d.chapter_id),
-          ),
-        );
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setDownloadsAvailable(false);
-      });
-    return () => controller.abort();
-  }, [manga.id, owner, sessionLoading]);
 
   const chapters: ChapterRow[] =
     !sessionLoading && recordsOwner === owner ? records.map(toRow) : [];
@@ -579,6 +578,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
     )
       return false;
     if (group !== 'All' && c.group !== group) return false;
+    if (hiddenGroups.includes(c.group)) return false;
     if (q && !String(c.n).includes(q) && !c.title.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -602,7 +602,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
     [records, showGaps, sort],
   );
   const sorted = [...filtered].sort((a, b) => flip * compare(a, b));
-  const filterKey = JSON.stringify([q, status, group, sort, sortDir]);
+  const filterKey = JSON.stringify([q, status, group, hiddenGroups, sort, sortDir]);
   useChapterFilterScroll(filterKey);
   const chapterWindow = useChapterWindow(
     sorted.length,
@@ -634,14 +634,14 @@ export function ChapterList({ manga }: { manga: Manga }) {
               failed.push(c.id);
               continue;
             }
-            if (excludedDownloadIds.has(c.id)) continue;
+            if (excludedDownloadIds.has(c.id) || queuedDownloadIds.current.has(c.id)) continue;
             await initiateDownload({
               sourceId: manga.source,
               mangaSlug: manga.slug,
               mangaTitle: manga.title,
               chapter: { id: c.key, name: c.title, chapter_number: c.n },
             });
-            if (current()) setExcludedDownloadIds((existing) => new Set(existing).add(c.id));
+            if (current()) queuedDownloadIds.current.add(c.id);
           } else {
             const read = action === 'read';
             await (read ? markChapterAsRead : markChapterAsUnread)(manga.slug, c.key, {
@@ -728,6 +728,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
             />
             {query && (
               <button
+                type="button"
                 onClick={() => setQuery('')}
                 aria-label="Clear search"
                 className="hover:text-foreground"
@@ -739,6 +740,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
 
           {STATUS_FILTERS.map((s) => (
             <button
+              type="button"
               key={s}
               onClick={() => setStatus(s)}
               aria-pressed={status === s}
@@ -775,6 +777,20 @@ export function ChapterList({ manga }: { manga: Manga }) {
                   >
                     {g}
                   </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                  Hide groups
+                </DropdownMenuLabel>
+                {allGroups.map((g) => (
+                  <DropdownMenuCheckboxItem
+                    key={g}
+                    checked={hiddenGroups.includes(g)}
+                    onCheckedChange={() => toggleHiddenGroup(g)}
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    {g}
+                  </DropdownMenuCheckboxItem>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
@@ -821,6 +837,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
             {selected.length} selected
           </span>
           <button
+            type="button"
             disabled={batchBusy || !downloadsAvailable}
             onClick={() => void batch('download')}
             className="inline-flex items-center gap-1 text-primary disabled:opacity-40"
@@ -828,10 +845,16 @@ export function ChapterList({ manga }: { manga: Manga }) {
             <Download size={14} />
             Download
           </button>
-          <button disabled={batchBusy} onClick={() => void batch('read')} className="text-primary">
+          <button
+            type="button"
+            disabled={batchBusy}
+            onClick={() => void batch('read')}
+            className="text-primary"
+          >
             Mark read
           </button>
           <button
+            type="button"
             disabled={batchBusy}
             onClick={() => void batch('unread')}
             className="text-primary"

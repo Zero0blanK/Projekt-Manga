@@ -21,12 +21,15 @@ vi.mock('@projekt-manga/api-client', async (importOriginal) => {
 vi.mock('@/lib/query-client', () => ({
   queryClient: {
     setQueryData: mocks.setQueryData,
+    removeQueries: vi.fn(),
     invalidateQueries: mocks.invalidateQueries,
   },
   queryKeys: {
     session: ['session'],
     mangaLibrary: ['manga-library'],
     libraryState: ['library-state'],
+    history: ['history'],
+    downloads: ['downloads'],
   },
 }));
 

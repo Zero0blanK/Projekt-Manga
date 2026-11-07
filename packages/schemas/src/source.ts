@@ -51,7 +51,6 @@ export type ImageProxyQuery = z.infer<typeof imageProxyQuerySchema>;
 
 export const fetchMangaUpdatesBodySchema = z.object({
   manga_id: z.string().optional(),
-  mangaId: z.string().optional(),
 });
 export type FetchMangaUpdatesBody = z.infer<typeof fetchMangaUpdatesBodySchema>;
 

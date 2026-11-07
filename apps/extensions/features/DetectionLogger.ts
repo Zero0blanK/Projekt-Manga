@@ -1,3 +1,12 @@
+/** A proxy URL without its credentials, for anything written down. "direct" is left alone. */
+export function redactProxyUrl(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url === 'direct' ? url : '[invalid proxy URL]';
+  }
+}
+
 /** Structured logging for anti-detection events. */
 
 import * as fs from 'fs';
@@ -131,7 +140,7 @@ export class DetectionLogger {
       event,
       source: data.source || 'unknown',
       url: data.url,
-      proxy: data.proxy,
+      proxy: data.proxy && redactProxyUrl(data.proxy),
       fingerprint: data.fingerprint,
       details: data.details || {},
       error: data.error,

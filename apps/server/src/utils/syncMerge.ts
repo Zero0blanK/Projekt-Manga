@@ -13,6 +13,18 @@
  * own WHERE clause makes the decision and the write a single atomic statement.
  */
 
+/** How far ahead of this server a device's clock may run before its time is pulled back. */
+export const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * A time reported by a device, no later than this server allows.
+ *
+ * Last-write-wins trusts these, so a device whose clock says next year would otherwise win
+ * every merge for that row until next year, and every later edit would lose.
+ */
+export const clampClientTime = (reported: string, now = Date.now()): Date =>
+  new Date(Math.min(new Date(reported).getTime(), now + MAX_CLOCK_SKEW_MS));
+
 /** Prisma's unique-constraint violation. Duck-typed rather than imported so this stays
  * usable under the test suite's mocked Prisma client, which throws plain objects. */
 function isUniqueViolation(error: unknown): boolean {

@@ -4,13 +4,15 @@ import { withBusyRetry } from '../utils/sqliteRetry.js';
 import { DuplicateResourceError } from '../utils/customErrors.js';
 import chapterRepository from './chapter.repository.js';
 
-const getHistory = async (user_id?: string) => {
+const getHistory = async (user_id?: string, page: { limit?: number; offset?: number } = {}) => {
   const rows = await prisma.history.findMany({
     // Anonymous reads only ever see anonymous rows (user_id: null) — without this filter,
     // once an account exists every browser session would see that account's private
     // reading history by default.
     where: { user_id: user_id ?? null, deleted_at: null },
     orderBy: [{ last_read: 'desc' }, { id: 'desc' }],
+    ...(page.limit !== undefined ? { take: page.limit } : {}),
+    ...(page.offset !== undefined ? { skip: page.offset } : {}),
     include: {
       chapter: {
         select: {
@@ -203,6 +205,76 @@ const addHistory = async (input: MangaHistory, user_id?: string) => {
   );
 };
 
+/** addHistory for many chapters of one title: a bulk mark-read would otherwise be a
+ * transaction per chapter against SQLite's single writer. Rows are grouped by what they
+ * set, so a batch is a few statements however long it is. */
+const addHistoryBatch = async (
+  rows: Array<{ chapter_id: string; pages_read: number }>,
+  meta: {
+    source: string;
+    manga_id?: string;
+    manga_slug: string;
+    source_manga_id?: string;
+    title?: string;
+    thumbnail_url?: string;
+  },
+  user_id?: string,
+) => {
+  if (rows.length === 0) return;
+  await withBusyRetry(
+    () =>
+      prisma.$transaction(async (tx) => {
+        const existing = await tx.history.findMany({
+          where: {
+            source: meta.source,
+            manga_slug: meta.manga_slug,
+            user_id: user_id ?? null,
+            chapter_id: { in: rows.map((row) => row.chapter_id) },
+          },
+          select: { id: true, chapter_id: true, sync_updated_at: true },
+        });
+        const now = new Date();
+        const byChapter = new Map(existing.map((row) => [row.chapter_id, row]));
+        const newest = Math.max(0, ...existing.map((row) => row.sync_updated_at?.getTime() ?? 0));
+        const sync_updated_at = new Date(Math.max(now.getTime(), newest + 1));
+
+        const updates = new Map<number, string[]>();
+        const creates = [];
+        for (const { chapter_id, pages_read } of rows) {
+          const row = byChapter.get(chapter_id);
+          if (row) updates.set(pages_read, [...(updates.get(pages_read) ?? []), row.id]);
+          else
+            creates.push({
+              ...meta,
+              chapter_id,
+              pages_read: pages_read || 1,
+              read_at: now,
+              last_read: now,
+              sync_updated_at,
+              user_id: user_id ?? null,
+            });
+        }
+        for (const [pages_read, ids] of updates) {
+          await tx.history.updateMany({
+            where: { id: { in: ids } },
+            data: {
+              pages_read,
+              last_read: now,
+              sync_updated_at,
+              deleted_at: null,
+              ...(meta.manga_id ? { manga_id: meta.manga_id } : {}),
+              ...(meta.source_manga_id ? { source_manga_id: meta.source_manga_id } : {}),
+              ...(meta.title ? { title: meta.title } : {}),
+              ...(meta.thumbnail_url ? { thumbnail_url: meta.thumbnail_url } : {}),
+            },
+          });
+        }
+        if (creates.length > 0) await tx.history.createMany({ data: creates });
+      }),
+    'addHistoryBatch',
+  );
+};
+
 const getHistoryByMangaSlug = async (manga_slug: string, user_id?: string, source?: string) => {
   return await prisma.history.findMany({
     where: {
@@ -343,6 +415,7 @@ const claimAllAnonymous = async (user_id: string) => {
 const historyRepository = {
   getHistory,
   addHistory,
+  addHistoryBatch,
   getHistoryByMangaSlug,
   deleteHistory,
   softDeleteHistory,

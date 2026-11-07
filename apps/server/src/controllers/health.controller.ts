@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { HTTPErrorResponse, HTTPSuccessResponse } from '../utils/responseHandlers.js';
 import { getRecentDiagnosticEvents } from '../utils/diagnosticLog.js';
-import prisma from '../configs/prisma.config.js';
+import healthRepository from '../repositories/health.repository.js';
 /**
  * Loaded on demand rather than imported at module scope.
  *
@@ -57,7 +57,7 @@ const getLiveness = (_req: Request, res: Response) => {
 const getReadiness = async (_req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    await prisma.$queryRawUnsafe('SELECT 1');
+    await healthRepository.ping();
   } catch (error) {
     console.error('[health] Readiness check failed:', error);
     return HTTPErrorResponse(res, 503, 'Database is not reachable');
@@ -132,17 +132,6 @@ const getRecentDiagnostics = (_req: Request, res: Response) => {
   );
 };
 
-/** One count for the runtime report, or null when the table can't be read — itself a
- * signal when the schema is the problem. Fixed SQL only; nothing here takes input. */
-async function countRows(sql: string): Promise<number | null> {
-  try {
-    const rows = await prisma.$queryRawUnsafe<Array<{ n: bigint | number }>>(sql);
-    return Number(rows[0]?.n ?? 0);
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Process and database facts for the diagnostic report, behind requireAdmin like the
  * other host-level routes. Every field is chosen explicitly: no paths, no environment
@@ -155,11 +144,7 @@ const getRuntimeDiagnostics = async (_req: Request, res: Response) => {
 
   let migrations: { applied: number; latest: string | null; failed: number } | null = null;
   try {
-    const rows = await prisma.$queryRawUnsafe<
-      Array<{ migration_name: string; finished_at: unknown; rolled_back_at: unknown }>
-    >(
-      'SELECT migration_name, finished_at, rolled_back_at FROM _prisma_migrations ORDER BY started_at',
-    );
+    const rows = await healthRepository.listMigrations();
     const applied = rows.filter((row) => row.finished_at && !row.rolled_back_at);
     migrations = {
       applied: applied.length,
@@ -172,9 +157,7 @@ const getRuntimeDiagnostics = async (_req: Request, res: Response) => {
 
   let downloads: Record<string, number> | null = null;
   try {
-    const rows = await prisma.$queryRawUnsafe<Array<{ status: string; n: bigint | number }>>(
-      'SELECT status, COUNT(*) AS n FROM downloads GROUP BY status',
-    );
+    const rows = await healthRepository.countDownloadsByStatus();
     downloads = Object.fromEntries(
       rows
         .filter((row) => /^[A-Z_]{1,32}$/.test(row.status))
@@ -184,6 +167,7 @@ const getRuntimeDiagnostics = async (_req: Request, res: Response) => {
     // Same: null says the table could not be read.
   }
 
+  const { countRows } = healthRepository;
   const [titles, libraryEntries, chapters, categories, users, extensions, repositories] =
     await Promise.all([
       countRows('SELECT COUNT(*) AS n FROM mangas'),

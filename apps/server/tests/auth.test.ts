@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 import bcrypt from 'bcrypt';
 import app from '../src/app.js';
@@ -127,9 +127,11 @@ describe('POST /api/auth/register', () => {
     prismaMock.chapter.findMany.mockResolvedValueOnce([
       { id: 'ch-1', is_read: true, is_bookmark: false, last_page_read: 12 },
     ]);
-    prismaMock.manga_category.findMany.mockResolvedValueOnce([
-      { manga_id: 'm-1', category_id: 'action' },
+    prismaMock.category.findMany.mockResolvedValueOnce([
+      { name: 'Action', manga_category: [{ manga_id: 'm-1' }] },
     ]);
+    prismaMock.category.findFirst.mockResolvedValueOnce(null);
+    prismaMock.category.create.mockResolvedValueOnce({ id: 'own-action', name: 'Action' });
 
     prismaMock.user_library.createMany.mockResolvedValueOnce({ count: 2 });
     prismaMock.user_manga_state.createMany.mockResolvedValueOnce({ count: 1 });
@@ -163,6 +165,78 @@ describe('POST /api/auth/register', () => {
       where: { user_id: null },
       data: { user_id: 'user-1', sync_updated_at: expect.any(Date) },
     });
+    // Categories are copied into the account's own list, not shared with it.
+    expect(prismaMock.user_manga_category.createMany).toHaveBeenCalledWith({
+      data: [{ user_id: 'user-1', manga_id: 'm-1', category_id: 'own-action' }],
+    });
+  });
+
+  it('leaves the anonymous library alone when the first account registers remotely', async () => {
+    prismaMock.user.findUnique.mockResolvedValueOnce(null);
+    prismaMock.user.count.mockResolvedValueOnce(0);
+    prismaMock.user.create.mockResolvedValueOnce({
+      id: 'user-1',
+      email: 'first@example.com',
+      display_name: null,
+      password_hash: 'hashed',
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    prismaMock.session.create.mockResolvedValueOnce({ id: 'sess-1' });
+    const ip = vi.spyOn(app.request, 'ip', 'get').mockReturnValue('203.0.113.7');
+
+    try {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'first@example.com', password: 'correct-horse-battery' });
+
+      expect(res.status).toBe(201);
+      expect(prismaMock.history.updateMany).not.toHaveBeenCalled();
+    } finally {
+      ip.mockRestore();
+    }
+  });
+
+  it('refuses a remote registration when REGISTRATION is closed', async () => {
+    process.env.REGISTRATION = 'closed';
+    const ip = vi.spyOn(app.request, 'ip', 'get').mockReturnValue('203.0.113.7');
+
+    try {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'someone@example.com', password: 'correct-horse-battery' });
+
+      expect(res.status).toBe(403);
+      expect(prismaMock.user.create).not.toHaveBeenCalled();
+    } finally {
+      ip.mockRestore();
+      delete process.env.REGISTRATION;
+    }
+  });
+
+  it('still registers from the server itself when REGISTRATION is closed', async () => {
+    process.env.REGISTRATION = 'closed';
+    prismaMock.user.findUnique.mockResolvedValueOnce(null);
+    prismaMock.user.count.mockResolvedValueOnce(1);
+    prismaMock.user.create.mockResolvedValueOnce({
+      id: 'user-2',
+      email: 'host@example.com',
+      display_name: null,
+      password_hash: 'hashed',
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    prismaMock.session.create.mockResolvedValueOnce({ id: 'sess-2' });
+
+    try {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'host@example.com', password: 'correct-horse-battery' });
+
+      expect(res.status).toBe(201);
+    } finally {
+      delete process.env.REGISTRATION;
+    }
   });
 
   it('does not claim anonymous data for the second account', async () => {

@@ -106,7 +106,7 @@ export function SourceSessionManager({
             ))}
           </dd>
           <dt className="text-muted-foreground">User-Agent</dt>
-          <dd className="truncate font-mono text-[11px]" title={data.userAgent ?? undefined}>
+          <dd className="truncate font-mono text-xs" title={data.userAgent ?? undefined}>
             {data.userAgent}
           </dd>
           <dt className="text-muted-foreground">Saved</dt>

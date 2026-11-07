@@ -111,7 +111,9 @@ export async function serverRequest<T>(
     headers: { Accept: 'application/json', ...request.headers },
     timeout: 15000,
     maxRedirects: 0,
-    ...(privateUrlsAllowed() ? {} : { httpAgent: guardedHttpAgent, httpsAgent: guardedHttpsAgent }),
+    ...(privateUrlsAllowed()
+      ? {}
+      : { proxy: false as const, httpAgent: guardedHttpAgent, httpsAgent: guardedHttpsAgent }),
   };
   try {
     const response = await requestWithRetry(() => axios.request<T>(config));

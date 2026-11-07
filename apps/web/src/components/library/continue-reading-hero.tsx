@@ -160,6 +160,7 @@ export function ContinueReadingHero({
                   .join(' · ')}
               </p>
               <button
+                type="button"
                 onClick={toggleBookmark}
                 className={`grid h-9 w-9 place-items-center rounded-full border transition ${
                   isBookmarked

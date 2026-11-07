@@ -545,7 +545,7 @@ export function SourceMigration({ manga }: { manga: Manga }) {
           originalReadCount={originalReadCount}
           options={appliedOptions}
           transfer={transfer}
-          error="Could not load the comparison. Please try again."
+          error="Couldn't load the comparison. Try again."
           onBack={returnToMatches}
           onEdit={edit}
           onRetryPreview={() => void preview(selected, true)}

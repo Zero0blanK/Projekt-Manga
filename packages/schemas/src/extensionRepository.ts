@@ -102,6 +102,10 @@ export const extensionListingEntrySchema = z.object({
     })
     .optional(),
 
+  /** When a signed listing stops being accepted. Covered by the signature, so a repository
+   * that sets it can't have an old listing replayed to hold an install on an old version. */
+  expires_at: z.string().datetime({ offset: true }).optional(),
+
   /** Ed25519 signature over the canonical listing envelope documented in
    * docs/extension-repository.md. It is authenticated only when the server operator has
    * configured a matching out-of-band public key for this repository URL. */

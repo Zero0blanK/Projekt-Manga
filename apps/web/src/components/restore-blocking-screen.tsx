@@ -160,7 +160,7 @@ export function RestoreBlockingScreen() {
                       'Processing has started; this restore can no longer be cancelled.',
                     );
                 })
-                .catch(() => setCancelMessage('Could not check cancellation status.'));
+                .catch(() => setCancelMessage("Couldn't check cancellation status."));
             }}
           >
             Cancel before processing starts
@@ -179,7 +179,7 @@ export function RestoreBlockingScreen() {
                 void acknowledgeUnknownRestoreStatus()
                   .catch(() =>
                     setUnknownStatusMessage(
-                      'Could not refresh the current library. Keep this screen open and try again.',
+                      "Couldn't refresh the current library. Keep this screen open and try again.",
                     ),
                   )
                   .finally(() => setRefreshingUnknownStatus(false));

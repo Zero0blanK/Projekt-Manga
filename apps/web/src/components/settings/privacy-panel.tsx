@@ -1,10 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type MouseEvent, useMemo } from 'react';
 import { toast } from '@/hooks/use-toast';
 import {
   exportReadingDataFromServer,
-  getHistory,
   previewRestore as previewServerRestore,
   startReplaceRestore,
   ApiError,
@@ -12,6 +11,8 @@ import {
 import { replaceBackupBodySchema, RESTORE_UPLOAD_LIMIT_BYTES } from '@projekt-manga/schemas';
 import { savePendingRestore, clearPendingRestore, getPendingRestore } from '@/lib/restore-job';
 import { parseBackup, previewBackupMerge, type BackupPayload } from '@/lib/backup-validation';
+import { useHistory } from '@/lib/shared-queries';
+import { ChangePasswordField } from '@/components/settings/change-password-field';
 import { Panel, Field, Group, ActionButton, Toggle } from '@/components/settings/field-controls';
 import { INCOGNITO_MODE } from '@/lib/incognito';
 import { DesktopPrivacyControls } from '@/components/settings/desktop-privacy-controls';
@@ -131,45 +132,27 @@ export function PrivacyPanel() {
   const restoreTrigger = useRef<HTMLButtonElement | null>(null);
   const { user, loading: sessionLoading } = useCurrentUser();
   const { manga: currentLibrary, loading: libraryLoading } = useMangaLibrary();
-  const [currentHistory, setCurrentHistory] = useState<Array<{
-    source: string;
-    manga_slug: string;
-    chapter_id?: string;
-    source_chapter_key?: string;
-  }> | null>(null);
-  const [historyPreviewUnavailable, setHistoryPreviewUnavailable] = useState(false);
   const [serverPreview, setServerPreview] = useState<Awaited<
     ReturnType<typeof previewServerRestore>
   > | null>(null);
   const [serverPreviewMode, setServerPreviewMode] = useState<RestoreMode | null>(null);
   const [serverPreviewError, setServerPreviewError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!backup || sessionLoading) {
-      setCurrentHistory(null);
-      setHistoryPreviewUnavailable(false);
-      return;
-    }
-    const controller = new AbortController();
-    setCurrentHistory(null);
-    setHistoryPreviewUnavailable(false);
-    getHistory(controller.signal)
-      .then((entries) => {
-        if (!controller.signal.aborted)
-          setCurrentHistory(
-            entries.map(({ source, manga_slug, chapter_id, source_chapter_key }) => ({
-              source,
-              manga_slug,
-              chapter_id,
-              source_chapter_key,
-            })),
-          );
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setHistoryPreviewUnavailable(true);
-      });
-    return () => controller.abort();
-  }, [backup, sessionLoading, user?.id]);
+  // What a merge would keep: only asked for once there's a backup to compare with.
+  const historyPreview = useHistory({ enabled: !!backup });
+  const historyPreviewUnavailable = !!backup && historyPreview.isError;
+  const currentHistory = useMemo(
+    () =>
+      backup && historyPreview.data
+        ? historyPreview.data.map(({ source, manga_slug, chapter_id, source_chapter_key }) => ({
+            source,
+            manga_slug,
+            chapter_id,
+            source_chapter_key,
+          }))
+        : null,
+    [backup, historyPreview.data],
+  );
 
   useEffect(() => {
     if (!backup || !restoreOpen || sessionLoading) {
@@ -322,7 +305,7 @@ export function PrivacyPanel() {
     const recoveryExport =
       mode === 'replace'
         ? exportReadingData(user?.id ?? 'anonymous').catch(() => {
-            throw new Error('Could not prepare a recovery export. Your data was not changed.');
+            throw new Error("Couldn't prepare a recovery export. Your data was not changed.");
           })
         : Promise.resolve();
     void recoveryExport
@@ -421,7 +404,10 @@ export function PrivacyPanel() {
         >
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <button className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent">
+              <button
+                type="button"
+                className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent"
+              >
                 Reset preferences
               </button>
             </AlertDialogTrigger>
@@ -466,6 +452,7 @@ export function PrivacyPanel() {
               className="hidden"
             />
             <button
+              type="button"
               ref={restoreTrigger}
               onClick={chooseBackup}
               disabled={restorePending}
@@ -615,6 +602,7 @@ export function PrivacyPanel() {
               <AlertDialogCancel disabled={restoring}>Cancel</AlertDialogCancel>
               {!confirmReplace && (
                 <button
+                  type="button"
                   onClick={(event) => restore('merge', event)}
                   disabled={
                     restoring ||
@@ -640,6 +628,7 @@ export function PrivacyPanel() {
                 </AlertDialogAction>
               ) : (
                 <button
+                  type="button"
                   onClick={() => setConfirmReplace(true)}
                   disabled={restoring || sessionLoading}
                   className="rounded-md bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground transition hover:bg-destructive/90 disabled:opacity-50"
@@ -650,6 +639,7 @@ export function PrivacyPanel() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        {user && <ChangePasswordField />}
         {user ? (
           <Field label="Delete account" hint="Permanently deletes your account and its data">
             <AlertDialog
@@ -662,7 +652,10 @@ export function PrivacyPanel() {
               }}
             >
               <AlertDialogTrigger asChild>
-                <button className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition hover:bg-destructive/20">
+                <button
+                  type="button"
+                  className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition hover:bg-destructive/20"
+                >
                   Delete account
                 </button>
               </AlertDialogTrigger>

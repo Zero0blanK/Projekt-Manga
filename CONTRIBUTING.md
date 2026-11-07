@@ -59,6 +59,7 @@ the web app is served from). The settings you are most likely to need:
 | Variable                          | What it is for                                                        |
 | --------------------------------- | --------------------------------------------------------------------- |
 | `ADMIN_TOKEN`                     | Restricts host-level routes when set (see below). Unset by default    |
+| `REGISTRATION`                    | `open` (default) or `closed`: who can create accounts                 |
 | `TRUST_PROXY`                     | Which proxies to trust for the client address. Defaults to `loopback` |
 | `EXTENSION_REPOSITORY_TRUST_KEYS` | Public keys for signed extension repositories                         |
 

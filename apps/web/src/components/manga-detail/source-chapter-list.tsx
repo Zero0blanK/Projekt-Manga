@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { ChapterSelectionLink } from './chapter-selection-link';
 import { useChapterWindow } from '@/lib/chapter-window';
 import { useCoarsePointer } from '@/lib/use-coarse-pointer';
@@ -13,7 +13,6 @@ import {
   addHistory,
   type ChapterBulkPayload,
   type HistoryEntry,
-  getAllDownloads,
 } from '@projekt-manga/api-client';
 import { toast } from '@/hooks/use-toast';
 import { toastWithUndo } from '@/lib/undo-toast';
@@ -55,6 +54,7 @@ import { copySourceChapterLink } from '@/lib/source-url';
 import { useChapterBookmarks } from '@/lib/chapter-bookmarks';
 import { useChapterFilterScroll } from '@/lib/chapter-filter-scroll';
 import { useCurrentUser } from '@/lib/session-resource';
+import { fetchDownloads, useDownloads } from '@/lib/shared-queries';
 import { queryClient, queryKeys } from '@/lib/query-client';
 import type { PublicUser } from '@projekt-manga/api-client';
 
@@ -113,41 +113,24 @@ export function SourceChapterList({
     return () => window.removeEventListener('keydown', clear);
   }, [batchBusy]);
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
-  const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
-  const [downloadsError, setDownloadsError] = useState(false);
   const { user, loading: sessionLoading } = useCurrentUser();
   const owner = user?.id ?? 'anonymous';
-  const [downloadsOwner, setDownloadsOwner] = useState<string | null>(null);
+  const { data: allDownloads, isError: downloadsError } = useDownloads();
+  const downloadedIds = useMemo(
+    () =>
+      new Set(
+        (allDownloads ?? [])
+          .filter(
+            (download) =>
+              download.source_id === sourceId &&
+              download.status === 'COMPLETED' &&
+              download.downloaded_path,
+          )
+          .map((download) => download.source_chapter_key),
+      ),
+    [allDownloads, sourceId],
+  );
   const { isBookmarked, toggle: toggleBookmark } = useChapterBookmarks(chapters);
-  useEffect(() => {
-    if (sessionLoading) return;
-    const controller = new AbortController();
-    setDownloadedIds(new Set());
-    setDownloadsError(false);
-    setDownloadsOwner(null);
-    getAllDownloads(controller.signal)
-      .then((downloads) => {
-        if (controller.signal.aborted) return;
-        setDownloadedIds(
-          new Set(
-            downloads
-              .filter(
-                (download) =>
-                  download.source_id === sourceId &&
-                  download.status === 'COMPLETED' &&
-                  download.downloaded_path,
-              )
-              .map((download) => download.source_chapter_key),
-          ),
-        );
-        setDownloadsError(false);
-        setDownloadsOwner(owner);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) setDownloadsError(true);
-      });
-    return () => controller.abort();
-  }, [sourceId, mangaSlug, owner, sessionLoading]);
   const chapterHref = (chapter: Chapters) => {
     const href = new URL(readerHref(chapter.chapter_number), 'https://reader.invalid');
     // The library reader is addressed by its own row ids, which this list does not have,
@@ -357,7 +340,7 @@ export function SourceChapterList({
     setDownloading(new Set(targets.map((c) => c.id)));
     const failed: string[] = [];
     try {
-      const existing = await getAllDownloads();
+      const existing = await fetchDownloads(user?.id ?? null);
       const excluded = new Set(
         existing.filter((d) => d.status !== 'FAILED').map((d) => d.source_chapter_key),
       );
@@ -429,7 +412,7 @@ export function SourceChapterList({
   const filtered = chapters.filter((c) => {
     if (
       status === 'Downloaded'
-        ? sessionLoading || downloadsOwner !== owner || !downloadedIds.has(c.id)
+        ? sessionLoading || !allDownloads || !downloadedIds.has(c.id)
         : status === 'Bookmarked'
           ? !isBookmarked(c.id)
           : !passesChapterStatusFilter(readIds.has(c.id), status)
@@ -478,6 +461,7 @@ export function SourceChapterList({
             />
             {query && (
               <button
+                type="button"
                 onClick={() => setQuery('')}
                 aria-label="Clear search"
                 className="hover:text-foreground"
@@ -489,6 +473,7 @@ export function SourceChapterList({
 
           {STATUS_FILTERS.map((s) => (
             <button
+              type="button"
               key={s}
               onClick={() => setStatus(s)}
               aria-pressed={status === s}
@@ -531,6 +516,7 @@ export function SourceChapterList({
           )}
 
           <button
+            type="button"
             onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
             // No aria-label: the visible text is the name, so it matches what someone
             // would say to a voice control. What pressing it *does* goes in the title,
@@ -558,10 +544,16 @@ export function SourceChapterList({
           <span role="status" className="font-semibold">
             {selected.length} selected
           </span>
-          <button disabled={batchBusy} className="text-primary" onClick={() => void download()}>
+          <button
+            type="button"
+            disabled={batchBusy}
+            className="text-primary"
+            onClick={() => void download()}
+          >
             Download
           </button>
           <button
+            type="button"
             disabled={batchBusy}
             className="text-primary"
             onClick={() => void markSelected(true)}
@@ -569,13 +561,14 @@ export function SourceChapterList({
             Mark read
           </button>
           <button
+            type="button"
             disabled={batchBusy}
             className="text-primary"
             onClick={() => void markSelected(false)}
           >
             Mark unread
           </button>
-          <button disabled={batchBusy} onClick={() => setSelected([])}>
+          <button type="button" disabled={batchBusy} onClick={() => setSelected([])}>
             Clear
           </button>
         </div>
@@ -649,7 +642,7 @@ export function SourceChapterList({
                         <div className="truncate text-sm font-medium text-foreground">
                           {c.name || `Chapter ${c.chapter_number}`}
                         </div>
-                        <div className="text-[11px] text-muted-foreground">
+                        <div className="text-xs text-muted-foreground">
                           {c.release_date ? formatRelative(c.release_date) : 'Unknown date'}
                           {knownGroup(c.scanlator) && ` · ${knownGroup(c.scanlator)}`}
                         </div>

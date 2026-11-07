@@ -11,6 +11,8 @@
  * successful login (see ipc.ts) — this module only ever reads it. The renderer invokes
  * runSync() through IPC for scheduled and user-requested synchronization.
  */
+import { halve, pushableRows, splitIntoBatches } from './sync-rows';
+import type { PendingSyncPush } from './db/local-store';
 import { session as electronSession } from 'electron';
 import { localStore } from './db/local-store';
 import { getCachedSession, clearCachedSession } from './auth-cache';
@@ -120,6 +122,21 @@ export function runSync(apiBaseUrl: string): Promise<SyncResult | null> {
   return promise;
 }
 
+function addPushCounts(total: PushCounts | null, next: PushCounts): PushCounts {
+  if (!total) return next;
+  const sum = (a: DomainPushResult, b: DomainPushResult): DomainPushResult => ({
+    applied: a.applied + b.applied,
+    failed: [...a.failed, ...b.failed],
+  });
+  return {
+    library: sum(total.library, next.library),
+    manga_state: sum(total.manga_state, next.manga_state),
+    chapter_state: sum(total.chapter_state, next.chapter_state),
+    manga_category: sum(total.manga_category, next.manga_category),
+    history: sum(total.history, next.history),
+  };
+}
+
 /** Returns null (rather than throwing) when no account is cached locally — "not logged
  * in" is an expected, common state, not a sync failure. */
 async function runSyncOnce(
@@ -172,20 +189,45 @@ async function runSyncOnce(
       // completing is still guaranteed to be picked up by the *next* push (its updated_at
       // will be >= this cursor), so nothing is silently dropped.
       const pushStartedAt = new Date().toISOString();
-      pushed = await callJson<PushCounts>(
-        `${apiBaseUrl}/sync/push`,
-        headers,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...pending, generation: serverGeneration.generation }),
-        },
-        signal,
-      );
-      assertSameAccount();
+      const { rows, rejected } = pushableRows(pending);
+      if (rejected > 0) console.warn(`[sync] Skipped ${rejected} local rows the server can't take`);
+
+      /** One batch, narrowed down if the server refuses it: a row it won't take shouldn't
+       * hold back the rows around it, or every sync after this one. */
+      const pushBatch = async (batch: PendingSyncPush): Promise<void> => {
+        try {
+          const counts = await callJson<PushCounts>(
+            `${apiBaseUrl}/sync/push`,
+            headers,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...batch, generation: serverGeneration.generation }),
+            },
+            signal,
+          );
+          assertSameAccount();
+          pushed = addPushCounts(pushed, counts);
+        } catch (error) {
+          if (!(error instanceof SyncHttpError) || error.status !== 400) throw error;
+          const halves = halve(batch);
+          if (!halves) {
+            console.warn('[sync] Skipped a local row the server refused');
+            return;
+          }
+          await pushBatch(halves[0]);
+          await pushBatch(halves[1]);
+        }
+      };
+
+      for (const batch of splitIntoBatches(rows)) await pushBatch(batch);
       // A 200 response can still contain row-level failures. Keep the old cursor so
       // those rows are retried; successful rows are idempotent on the server.
-      if (Object.values(pushed).every((domain) => domain.failed.length === 0)) {
+      if (
+        Object.values((pushed ?? {}) as Partial<PushCounts>).every(
+          (domain) => domain.failed.length === 0,
+        )
+      ) {
         localStore.setSyncCursor({ last_pushed_at: pushStartedAt });
       } else {
         // Pull would overwrite a rejected local row with the server's older copy.

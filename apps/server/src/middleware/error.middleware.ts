@@ -16,7 +16,7 @@ function isPrismaLikeError(err: unknown): err is PrismaLikeError {
     err !== null &&
     'code' in err &&
     typeof (err as { code: unknown }).code === 'string' &&
-    /^Pd{4}$/.test((err as { code: string }).code)
+    /^P\d{4}$/.test((err as { code: string }).code)
   );
 }
 

@@ -75,7 +75,7 @@ beforeEach(() => {
 describe('Extension catalogue language sections', () => {
   it('groups regional languages, multilingual and English first, with readable labels', () => {
     render(<SourceCatalog />);
-    expect(screen.getByRole('status')).toHaveTextContent('5 catalogue results');
+    expect(screen.getByRole('status')).toHaveTextContent('5 catalog results');
     const available = screen.getByRole('region', { name: 'Available extensions' });
     expect(
       within(available)
@@ -95,7 +95,7 @@ describe('Extension catalogue language sections', () => {
     const { rerender } = render(<SourceCatalog language="ja" />);
     expect(screen.getByText('Japanese source')).toBeVisible();
     expect(screen.queryByText('English source')).not.toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('1 catalogue results');
+    expect(screen.getByRole('status')).toHaveTextContent('1 catalog results');
     rerender(<SourceCatalog repositoryId="repo-b" />);
     expect(screen.getByText('Other repository source')).toBeVisible();
     expect(screen.queryByText('Japanese source')).not.toBeInTheDocument();
@@ -113,7 +113,7 @@ describe('Extension catalogue language sections', () => {
     const { rerender } = render(
       <SourceCatalog filters={{ ...emptySourceFilters, name: 'English' }} />,
     );
-    expect(screen.getByRole('status')).toHaveTextContent('1 catalogue results');
+    expect(screen.getByRole('status')).toHaveTextContent('1 catalog results');
     expect(screen.queryByText('English adult')).not.toBeInTheDocument();
     rerender(<SourceCatalog filters={{ ...emptySourceFilters, status: 'installed' }} />);
     expect(screen.getByText('English source')).toBeInTheDocument();
@@ -180,7 +180,7 @@ describe('Extension catalogue language sections', () => {
     expect(screen.queryByText('No sources match the current filters.')).not.toBeInTheDocument();
     mocks.loading = false;
     rerender(<SourceCatalog filters={{ ...emptySourceFilters, name: 'nothing matches' }} />);
-    expect(screen.getByRole('status')).toHaveTextContent('0 catalogue results');
+    expect(screen.getByRole('status')).toHaveTextContent('0 catalog results');
     expect(screen.getByText('No sources match the current filters.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh Offline repository' })).toBeInTheDocument();
   });

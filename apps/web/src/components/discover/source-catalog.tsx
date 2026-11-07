@@ -246,7 +246,7 @@ export function SourceCatalog({
   if (loading) {
     return (
       <section className="mt-12">
-        <h2 className="text-sm font-semibold text-foreground">Extensions</h2>
+        <h2 className="text-sm font-semibold text-foreground">Available sources</h2>
         <div className="mt-4 space-y-2">
           <Skeleton className="h-16 w-full rounded-xl" />
           <Skeleton className="h-16 w-full rounded-xl" />
@@ -279,7 +279,7 @@ export function SourceCatalog({
   return (
     <section id="source-catalog" className="mt-12">
       <div className="flex items-center justify-between gap-4">
-        <h2 className="text-sm font-semibold text-foreground">Extensions</h2>
+        <h2 className="text-sm font-semibold text-foreground">Available sources</h2>
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -300,7 +300,7 @@ export function SourceCatalog({
       </div>
       <div className="mt-4">
         <p role="status" className="mt-2 text-xs text-muted-foreground">
-          {resultCount} catalogue results
+          {resultCount} catalog results
         </p>
         {resultCount === 0 && (
           <p className="mt-4 text-sm text-muted-foreground">
@@ -408,6 +408,7 @@ export function SourceCatalog({
                                   <div className="flex shrink-0 items-center gap-2">
                                     {installed && item.updateAvailable && (
                                       <button
+                                        type="button"
                                         onClick={() => handleUpdate(item)}
                                         disabled={busy}
                                         aria-label={`Update ${repairSourceName(item.entry.name)}`}
@@ -418,6 +419,7 @@ export function SourceCatalog({
                                     )}
                                     {installed ? (
                                       <button
+                                        type="button"
                                         onClick={() => handleUninstall(item)}
                                         disabled={busy}
                                         aria-label={`Remove ${repairSourceName(item.entry.name)}`}
@@ -427,6 +429,7 @@ export function SourceCatalog({
                                       </button>
                                     ) : (
                                       <button
+                                        type="button"
                                         onClick={() => handleInstall(item)}
                                         disabled={busy || item.conflictsWithInstalled}
                                         aria-label={`Install ${repairSourceName(item.entry.name)}`}

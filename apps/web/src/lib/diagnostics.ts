@@ -1,5 +1,6 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
 import {
   getHealth,
   getApiBaseUrl,
@@ -556,7 +557,7 @@ export function likelyProblems(input: {
  * broken is useless precisely when it is needed.
  */
 export async function buildDiagnosticReport(): Promise<string> {
-  const bridge = (window as unknown as { desktop?: DesktopDiagnosticsBridge }).desktop;
+  const bridge = desktopBridge<DesktopDiagnosticsBridge>();
 
   const [desktop, health, installed, scraper, serverEvents, runtime, sourceHealth, browser] =
     await Promise.all([

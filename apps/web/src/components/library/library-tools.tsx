@@ -176,6 +176,7 @@ export function LibrarySelectionBar({
           {busy ? 'Updating…' : `${selected.length} selected`}
         </span>
         <button
+          type="button"
           disabled={busy}
           onClick={() => setSelected(visible.map((item) => item.id))}
           className="text-xs text-primary"
@@ -249,6 +250,7 @@ export function LibrarySelectionBar({
           </DropdownMenuContent>
         </DropdownMenu>
         <button
+          type="button"
           disabled={busy}
           aria-label="Clear title selection"
           onClick={() => setSelected([])}

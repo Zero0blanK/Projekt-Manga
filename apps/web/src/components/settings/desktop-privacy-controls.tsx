@@ -1,5 +1,6 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
 import { useEffect, useState } from 'react';
 import { SelectMenu } from '@/components/ui/select-menu';
 import { ActionButton, Field, Group, ToggleSwitch } from '@/components/settings/field-controls';
@@ -25,8 +26,7 @@ type DesktopPrivacyBridge = {
 };
 
 function bridge(): DesktopPrivacyBridge | null {
-  if (typeof window === 'undefined') return null;
-  const desktop = (window as unknown as { desktop?: Partial<DesktopPrivacyBridge> }).desktop;
+  const desktop = desktopBridge<DesktopPrivacyBridge>();
   return desktop?.lock && desktop.capture ? (desktop as DesktopPrivacyBridge) : null;
 }
 
@@ -124,7 +124,7 @@ export function DesktopPrivacyControls() {
               .setHidden(!hidden)
               .then((result) => setHidden(result.data === true))
               .catch(() =>
-                toast({ variant: 'destructive', description: 'Could not change this setting.' }),
+                toast({ variant: 'destructive', description: "Couldn't change this setting." }),
               )
           }
         />
@@ -134,7 +134,7 @@ export function DesktopPrivacyControls() {
         hint={
           lock?.enabled
             ? `On: asks for your PIN ${IDLE_OPTIONS.find((o) => o.value === lock.idleMinutes)?.label.toLowerCase() ?? 'on start'}`
-            : 'Ask for a PIN or password when the app opens and after it sits idle'
+            : "Asks for a PIN or password to open the app. It keeps people at this computer out of the app; it doesn't encrypt your library"
         }
       >
         <div className="flex flex-wrap justify-end gap-2">
@@ -174,11 +174,11 @@ export function DesktopPrivacyControls() {
           {mode !== 'clear' && (
             <>
               <label className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                New PIN or password (4–64 characters)
+                New PIN or password (6–64 characters)
                 <input
                   type="password"
                   autoComplete="new-password"
-                  minLength={4}
+                  minLength={6}
                   maxLength={64}
                   value={newPin}
                   onChange={(event) => setNewPin(event.target.value)}
@@ -208,7 +208,7 @@ export function DesktopPrivacyControls() {
                   className="w-full sm:w-56"
                 />
               </div>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 There is no way to recover a forgotten PIN from inside the app. The app also locks
                 when the computer's screen locks.
               </p>

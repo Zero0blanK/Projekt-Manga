@@ -14,6 +14,7 @@ import {
   isDisallowedRedirectHost,
   guardedHttpAgent,
   guardedHttpsAgent,
+  UnsafeUrlError,
 } from '../utils/ssrfGuard.js';
 import {
   extensionRepositoryIndexSchema,
@@ -30,6 +31,7 @@ import {
   UpstreamError,
 } from '../utils/customErrors.js';
 import {
+  isTrustedRepository,
   parseTrustedExtensionSigningKeys,
   verifyTrustedExtensionListing,
 } from '../utils/extensionSignature.js';
@@ -54,6 +56,7 @@ async function fetchWithSizeCap(url: string, maxBytes: number): Promise<Buffer> 
     maxBodyLength: maxBytes,
     // Validates the address every hop actually connects to, which beforeRedirect
     // (hostname only) and a pre-flight DNS check (TOCTOU) both miss.
+    proxy: false,
     httpAgent: guardedHttpAgent,
     httpsAgent: guardedHttpsAgent,
     beforeRedirect: (options) => {
@@ -99,8 +102,12 @@ const fetchRepositoryIndex = async (
   try {
     raw = await fetchWithSizeCap(options.bustCache ? withCacheBuster(url) : url, MAX_INDEX_BYTES);
   } catch (error) {
+    // The underlying message can name resolved addresses or local paths; a client only
+    // needs to tell "not allowed" from "didn't answer".
     throw new UpstreamError(
-      `Could not fetch the repository index: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof UnsafeUrlError
+        ? 'That repository address is not allowed'
+        : 'Could not fetch the repository index',
     );
   }
 
@@ -524,7 +531,7 @@ const installExtension = async (
   const trustedKeys = parseTrustedExtensionSigningKeys(
     process.env.EXTENSION_REPOSITORY_TRUST_KEYS ?? '{}',
   );
-  if (!trustedKeys.has(repository.url) && !acknowledgeUnsigned) {
+  if (!isTrustedRepository(trustedKeys, repository.url) && !acknowledgeUnsigned) {
     throw new AppError(
       `${UNSIGNED_REPOSITORY_ERROR}: this repository does not sign its sources, so nothing verifies who wrote "${source_key}". Confirm to install it anyway.`,
       409,
@@ -599,12 +606,10 @@ const installExtension = async (
   try {
     const dir = await bundleDirFor(created.id);
     await fs.writeFile(path.join(dir, 'bundle.js'), bundleBuffer);
-  } catch (error) {
+  } catch {
     await extensionRepositoryRepository.deleteInstalledExtension(created.id).catch(() => {});
     await removeBundleFile(created.id);
-    throw new UpstreamError(
-      `Could not store the bundle for "${entry.source_key}": ${error instanceof Error ? error.message : String(error)}`,
-    );
+    throw new UpstreamError(`Could not store the bundle for "${entry.source_key}"`);
   }
   await storeIconQuietly(created.id, entry.icon_url);
 

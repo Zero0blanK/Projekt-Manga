@@ -85,9 +85,7 @@ export function TapZonesHint({
           className={`flex flex-col items-center justify-center gap-1 p-4 text-center ${index === 1 ? 'border-x border-dashed border-white/30' : ''}`}
         >
           <span className="text-sm font-semibold">{describe(action, rtl)}</span>
-          <span className="text-[11px] text-white/60">
-            {['Left', 'Middle', 'Right'][index]} third
-          </span>
+          <span className="text-xs text-white/60">{['Left', 'Middle', 'Right'][index]} third</span>
         </div>
       ))}
       <p className="absolute inset-x-0 bottom-8 text-center text-xs text-white/70">

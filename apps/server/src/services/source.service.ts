@@ -505,6 +505,8 @@ export interface LibraryUpdateResult {
   checked: number;
   mangaWithNewChapters: number;
   totalNewChapters: number;
+  /** Titles that couldn't be checked, such as ones whose source was uninstalled. */
+  failed: number;
   /** True when this call joined a sweep that was already running instead of starting
    * a second one. The counts then describe that shared sweep. */
   alreadyRunning: boolean;
@@ -532,12 +534,20 @@ const runLibraryUpdateSweep = async (): Promise<LibraryUpdateResult> => {
   const mangaList = await mangaRepository.listLibraryBasic();
   let mangaWithNewChapters = 0;
   let totalNewChapters = 0;
+  let failed = 0;
 
   for (const m of mangaList) {
-    const result = await fetchMangaUpdates(m.source, m.slug, m.id);
-    if (result.newChapters > 0) {
-      mangaWithNewChapters += 1;
-      totalNewChapters += result.newChapters;
+    // One title can't stop the rest: fetchMangaUpdates throws for a source that's no longer
+    // installed, and nobody is waiting on this request to hear about it.
+    try {
+      const result = await fetchMangaUpdates(m.source, m.slug, m.id);
+      if (result.failed) failed += 1;
+      if (result.newChapters > 0) {
+        mangaWithNewChapters += 1;
+        totalNewChapters += result.newChapters;
+      }
+    } catch {
+      failed += 1;
     }
   }
 
@@ -545,6 +555,7 @@ const runLibraryUpdateSweep = async (): Promise<LibraryUpdateResult> => {
     checked: mangaList.length,
     mangaWithNewChapters,
     totalNewChapters,
+    failed,
     alreadyRunning: false,
   };
 };
@@ -584,6 +595,9 @@ const keysFromUrls = async (sourceId: string, body: SourceUrlKeysBody): Promise<
   }
 };
 
+/** The last sweep that finished, for anyone who started one and came back to look. */
+let lastSweep: (LibraryUpdateResult & { finished_at: string }) | null = null;
+
 const checkAllLibraryUpdates = async (): Promise<LibraryUpdateResult> => {
   if (inFlightSweep) {
     const result = await inFlightSweep;
@@ -592,11 +606,28 @@ const checkAllLibraryUpdates = async (): Promise<LibraryUpdateResult> => {
 
   inFlightSweep = runLibraryUpdateSweep();
   try {
-    return await inFlightSweep;
+    const result = await inFlightSweep;
+    lastSweep = { ...result, finished_at: new Date().toISOString() };
+    return result;
   } finally {
     inFlightSweep = null;
   }
 };
+
+/**
+ * Starts a sweep and returns straight away: it scrapes every title in turn, so it can
+ * outlast any request. `getLibrarySweepStatus` reports on it, and open apps hear about it
+ * through the library event stream when it finishes.
+ */
+const startLibrarySweep = (): { started: boolean } => {
+  if (inFlightSweep) return { started: false };
+  void checkAllLibraryUpdates()
+    .then(() => announceLibraryChange(EVERYONE, 'library'))
+    .catch((error) => console.error('[source.service] Library update sweep failed:', error));
+  return { started: true };
+};
+
+const getLibrarySweepStatus = () => ({ running: inFlightSweep !== null, last: lastSweep });
 
 const sourceService = {
   getCapabilities,
@@ -612,6 +643,8 @@ const sourceService = {
   fetchMangaUpdates,
   keysFromUrls,
   checkAllLibraryUpdates,
+  startLibrarySweep,
+  getLibrarySweepStatus,
 };
 
 export default sourceService;

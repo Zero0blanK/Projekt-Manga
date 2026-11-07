@@ -212,6 +212,7 @@ export function SourceSearchCarousel({ source, query }: { source: DisplaySource;
         {items.length > 0 && (
           <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={() => nudge(-1)}
               aria-label={`Scroll ${source.name} results left`}
               className="grid h-8 w-8 place-items-center rounded-full border border-border/60 text-muted-foreground transition hover:text-foreground"
@@ -219,6 +220,7 @@ export function SourceSearchCarousel({ source, query }: { source: DisplaySource;
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
+              type="button"
               onClick={() => nudge(1)}
               aria-label={`Scroll ${source.name} results right`}
               className="grid h-8 w-8 place-items-center rounded-full border border-border/60 text-muted-foreground transition hover:text-foreground"
@@ -294,7 +296,7 @@ export function SourceSearchCarousel({ source, query }: { source: DisplaySource;
               onClick={() => loadMore(true)}
               className="mt-2 text-xs font-medium text-primary hover:underline"
             >
-              Could not load more results · Retry
+              Couldn&apos;t load more results · Retry
             </button>
           )}
         </>

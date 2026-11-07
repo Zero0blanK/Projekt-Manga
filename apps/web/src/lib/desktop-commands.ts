@@ -18,13 +18,7 @@ type ProgressBridge = {
   setBadge?: (count: number, image?: string) => Promise<unknown>;
 };
 
-function desktop() {
-  if (typeof window === 'undefined') return null;
-  return (
-    (window as unknown as { desktop?: { commands?: CommandsBridge; window?: ProgressBridge } })
-      .desktop ?? null
-  );
-}
+const desktop = () => desktopBridge<{ commands: CommandsBridge; window: ProgressBridge }>();
 
 /** An app path the menus may open: one of this app's own pages, never another site. */
 const APP_PATH = /^\/(?!\/)[A-Za-z0-9\-._~/?#=&%]*$/;
@@ -88,3 +82,4 @@ export function setTaskbarBadge(count: number) {
   if (!bridge?.setBadge) return;
   void bridge.setBadge(count, count > 0 ? drawBadge(count) : undefined).catch(() => undefined);
 }
+import { desktopBridge } from '@/lib/desktop-bridge';

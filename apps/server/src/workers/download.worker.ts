@@ -87,6 +87,10 @@ export class DownloadWorker extends EventEmitter {
   /** Pending backoff timers, so pausing or cancelling can call one off instead of having
    * it re-queue a download the reader has already stopped. */
   private retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Abort-if-silent timers, re-armed as each page starts — see armStallTimer. */
+  private stallTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Downloads the stall guard failed, whose aborted run must not overwrite that. */
+  private stalledDownloads = new Set<string>();
   private maxConcurrent = 3;
   private rateLimiter = new RateLimiter(200);
   private fallbackTimer: ReturnType<typeof setInterval> | null = null;
@@ -154,7 +158,9 @@ export class DownloadWorker extends EventEmitter {
   async resumeDownload(downloadId: string): Promise<void> {
     this.pausedDownloads.delete(downloadId);
     this.retryCounts.delete(downloadId);
-    if (!this.queue.includes(downloadId) && !this.downloadThreads.has(downloadId)) {
+    // A run that was paused is unwinding, not running: it left activeDownloads when it was
+    // aborted, though its thread is still settling. processQueue holds the id until then.
+    if (!this.queue.includes(downloadId) && !this.activeDownloads.has(downloadId)) {
       this.queue.push(downloadId);
     }
     this.processQueue();
@@ -187,28 +193,39 @@ export class DownloadWorker extends EventEmitter {
   }
 
   /**
-   * Returns downloads left mid-flight by a previous run to the queue.
+   * Returns downloads a previous run left unfinished to the queue.
    *
    * The queue, retry counts and abort controllers live in memory, so after a restart or
-   * crash a row left at IN_PROGRESS would otherwise never advance. Called once at startup,
-   * after sources are loaded.
+   * crash a row left at IN_PROGRESS or waiting at PENDING would otherwise never advance,
+   * and a paused one couldn't be told from a queued one. Called once at startup, after
+   * sources are loaded. Pushed past MAX_QUEUE_SIZE on purpose: that cap turns away new
+   * requests, and these were already accepted.
    */
   async recoverInterruptedDownloads(): Promise<number> {
     try {
-      const stranded = await downloadRepository.getDownloadsByStatus('IN_PROGRESS');
-      for (const download of stranded) {
+      const paused = await downloadRepository.getDownloadsByStatus('PAUSED');
+      for (const download of paused) this.pausedDownloads.add(download.id);
+
+      const interrupted = await downloadRepository.getDownloadsByStatus('IN_PROGRESS');
+      for (const download of interrupted) {
         await downloadRepository.updateDownloadStatus(download.id, 'PENDING');
-        this.addToQueue(download.id);
       }
-      if (stranded.length > 0) {
+      const waiting = await downloadRepository.getDownloadsByStatus('PENDING');
+      const stranded = [...interrupted, ...waiting.filter((d) => !interrupted.includes(d))];
+      const ids = [...new Set(stranded.map((download) => download.id))];
+      for (const id of ids) {
+        if (!this.queue.includes(id)) this.queue.push(id);
+      }
+      this.processQueue();
+      if (ids.length > 0) {
         recordDiagnosticEvent({
           level: 'info',
           area: 'download',
           event: 'download.jobs_recovered',
-          counts: { recovered: stranded.length },
+          counts: { recovered: ids.length },
         });
       }
-      return stranded.length;
+      return ids.length;
     } catch {
       // Never fatal to startup: downloads are a background feature, and failing to
       // recover them must not stop the server coming up.
@@ -224,27 +241,6 @@ export class DownloadWorker extends EventEmitter {
 
   isPaused(downloadId: string): boolean {
     return this.pausedDownloads.has(downloadId);
-  }
-
-  updateRateLimit(requestsPerSecond: number): void {
-    this.rateLimiter.setInterval(Math.max(100, 1000 / requestsPerSecond));
-    recordDiagnosticEvent({
-      level: 'info',
-      area: 'download',
-      event: 'download.rate_limit_changed',
-      counts: { requestsPerSecond },
-    });
-  }
-
-  setMaxConcurrent(max: number): void {
-    this.maxConcurrent = Math.max(1, Math.min(max, 10));
-    downloadService.setMaxConcurrentDownloads(this.maxConcurrent);
-    recordDiagnosticEvent({
-      level: 'info',
-      area: 'download',
-      event: 'download.concurrency_changed',
-      counts: { maxConcurrent: this.maxConcurrent },
-    });
   }
 
   getStatus() {
@@ -324,38 +320,7 @@ export class DownloadWorker extends EventEmitter {
     const promise = this.executeDownload(downloadId);
     this.downloadThreads.set(downloadId, promise);
 
-    // Stall guard: abort a download that hangs for >30 min.
-    //
-    // Deliberately does NOT delete the downloadThreads entry — launchDownload treats that
-    // map as "is this id already running", so releasing it here while the promise was
-    // still unwinding let a re-queue start a second executeDownload for the same id, with
-    // two writers on one file_path. The entry is released in the `finally` below, when
-    // the promise has actually settled.
-    const stallTimer = setTimeout(() => {
-      if (this.downloadThreads.has(downloadId)) {
-        recordDiagnosticEvent({
-          level: 'error',
-          area: 'download',
-          event: 'download.stall_timeout',
-          jobId: downloadId,
-          code: 'STALL_TIMEOUT',
-        });
-        const ctrl = this.activeDownloads.get(downloadId);
-        if (ctrl) {
-          ctrl.abort();
-          this.activeDownloads.delete(downloadId);
-        }
-        downloadRepository.updateDownloadStatus(downloadId, 'FAILED').catch((err) => {
-          recordDiagnosticEvent({
-            level: 'error',
-            area: 'download',
-            event: 'download.status_persist_failed',
-            jobId: downloadId,
-            code: 'DATABASE_ERROR',
-          });
-        });
-      }
-    }, DownloadWorker.STALL_TIMEOUT_MS);
+    this.armStallTimer(downloadId);
 
     promise
       .then(() =>
@@ -376,16 +341,69 @@ export class DownloadWorker extends EventEmitter {
         }),
       )
       .finally(() => {
-        clearTimeout(stallTimer);
+        this.clearStallTimer(downloadId);
+        this.stalledDownloads.delete(downloadId);
         this.downloadThreads.delete(downloadId);
         this.lastProgressWrite.delete(downloadId);
         this.processQueue();
       });
   }
 
+  private clearStallTimer(downloadId: string): void {
+    const timer = this.stallTimers.get(downloadId);
+    if (timer) {
+      clearTimeout(timer);
+      this.stallTimers.delete(downloadId);
+    }
+  }
+
+  /**
+   * Stall guard: fails a download that makes no progress for STALL_TIMEOUT_MS. Re-armed as
+   * each page starts, so a long chapter that keeps moving is left alone.
+   *
+   * Deliberately does NOT delete the downloadThreads entry — launchDownload treats that
+   * map as "is this id already running", so releasing it here while the promise was
+   * still unwinding let a re-queue start a second executeDownload for the same id, with
+   * two writers on one file_path. The entry is released when the promise has settled.
+   */
+  private armStallTimer(downloadId: string): void {
+    this.clearStallTimer(downloadId);
+    const timer = setTimeout(() => {
+      this.stallTimers.delete(downloadId);
+      if (!this.downloadThreads.has(downloadId)) return;
+      recordDiagnosticEvent({
+        level: 'error',
+        area: 'download',
+        event: 'download.stall_timeout',
+        jobId: downloadId,
+        code: 'STALL_TIMEOUT',
+      });
+      this.stalledDownloads.add(downloadId);
+      const ctrl = this.activeDownloads.get(downloadId);
+      if (ctrl) {
+        ctrl.abort();
+        this.activeDownloads.delete(downloadId);
+      }
+      this.emit('failed', downloadId);
+      downloadRepository.updateDownloadStatus(downloadId, 'FAILED').catch(() => {
+        recordDiagnosticEvent({
+          level: 'error',
+          area: 'download',
+          event: 'download.status_persist_failed',
+          jobId: downloadId,
+          code: 'DATABASE_ERROR',
+        });
+      });
+    }, DownloadWorker.STALL_TIMEOUT_MS);
+    timer.unref?.();
+    this.stallTimers.set(downloadId, timer);
+  }
+
   private async executeDownload(downloadId: string): Promise<void> {
     const download = await downloadRepository.getDownloadById(downloadId);
     if (!download) throw new NotFoundError('Download record not found');
+    // Resumed while it was finishing: the queued repeat finds the work already done.
+    if (download.status === 'COMPLETED') return;
 
     const chapter = await chapterRepository.getChapterWithMangaById(download.chapter_id);
     if (!chapter?.manga) throw new NotFoundError('Chapter or manga not found');
@@ -423,6 +441,7 @@ export class DownloadWorker extends EventEmitter {
     downloadId: string,
     currentPage: number,
     totalPages: number,
+    pagesDownloaded: number,
   ): Promise<void> {
     const now = Date.now();
     const lastWrite = this.lastProgressWrite.get(downloadId) ?? 0;
@@ -433,7 +452,10 @@ export class DownloadWorker extends EventEmitter {
     }
 
     this.lastProgressWrite.set(downloadId, now);
-    await downloadRepository.updateDownloadProgress(downloadId, { current_page: currentPage });
+    await downloadRepository.updateDownloadProgress(downloadId, {
+      current_page: currentPage,
+      pages_downloaded: pagesDownloaded,
+    });
   }
 
   /**
@@ -518,14 +540,14 @@ export class DownloadWorker extends EventEmitter {
         if (abortController.signal.aborted) throw new Error('Cancelled');
 
         try {
-          await this.reportPageProgress(downloadId, i + 1, pages.length);
+          this.armStallTimer(downloadId);
+          await this.reportPageProgress(downloadId, i + 1, pages.length, successCount);
           await this.rateLimiter.wait();
 
           const pageUrl = this.normalizePageUrl(pages[i].image_url, source.base_url, chapter.url);
           if (!pageUrl) throw new UpstreamError(`Invalid URL for page ${i + 1}`);
 
           await downloadService.downloadPageWithRetry(
-            downloadId,
             pageUrl,
             i + 1,
             download.file_path,
@@ -535,9 +557,6 @@ export class DownloadWorker extends EventEmitter {
           );
 
           successCount++;
-          await downloadRepository.updateDownloadProgress(downloadId, {
-            pages_downloaded: successCount,
-          });
 
           this.emit('progress', {
             downloadId,
@@ -560,6 +579,8 @@ export class DownloadWorker extends EventEmitter {
       const downloadedPath = path.join(downloadDir, download.file_path);
       await downloadRepository.updateDownloadProgress(downloadId, {
         downloaded_path: downloadedPath,
+        current_page: pages.length,
+        pages_downloaded: successCount,
       });
       await downloadRepository.updateDownloadStatus(downloadId, 'COMPLETED');
 
@@ -578,7 +599,11 @@ export class DownloadWorker extends EventEmitter {
       const msg = (error as Error).message;
 
       if (msg === 'Cancelled') {
-        await downloadRepository.updateDownloadStatus(downloadId, 'PENDING').catch(() => {
+        // The stall guard already recorded its outcome, and a paused download has to read
+        // as paused after a restart.
+        if (this.stalledDownloads.has(downloadId)) return;
+        const status = this.pausedDownloads.has(downloadId) ? 'PAUSED' : 'PENDING';
+        await downloadRepository.updateDownloadStatus(downloadId, status).catch(() => {
           recordDiagnosticEvent({
             level: 'error',
             area: 'download',
@@ -595,7 +620,7 @@ export class DownloadWorker extends EventEmitter {
         // the existing Resume action. Retrying or cleaning it would waste source requests
         // and discard data simply because the quota did its job.
         this.pausedDownloads.add(downloadId);
-        await downloadRepository.updateDownloadStatus(downloadId, 'PENDING').catch(() => {
+        await downloadRepository.updateDownloadStatus(downloadId, 'PAUSED').catch(() => {
           recordDiagnosticEvent({
             level: 'error',
             area: 'download',

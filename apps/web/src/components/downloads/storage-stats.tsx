@@ -195,7 +195,7 @@ export function StorageStats() {
               <h3 className="text-sm font-medium text-foreground">Orphaned download folders</h3>
               <p className="mt-1 text-xs text-muted-foreground">
                 {orphanError
-                  ? 'Could not refresh orphaned folder status.'
+                  ? "Couldn't refresh orphaned folder status."
                   : `${orphans.length} unreferenced chapter folder${orphans.length === 1 ? '' : 's'} older than 24 hours · ${formatBytes(orphans.reduce((total, folder) => total + folder.sizeBytes, 0))} estimated`}
               </p>
               {orphanError && (

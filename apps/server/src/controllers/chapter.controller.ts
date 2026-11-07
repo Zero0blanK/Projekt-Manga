@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { HTTPSuccessResponse } from '../utils/responseHandlers.js';
 import chapterService from '../services/chapter.service.js';
+import { ValidationError } from '../utils/customErrors.js';
 import type {
   ChapterMetaBody,
   ChaptersBulkBody,
@@ -58,7 +59,7 @@ const markChapterByLastPage = async (req: Request, res: Response, next: NextFunc
     const chapter_meta = req.validated as ChapterMetaBody;
     const lastPageRead = Number.parseInt(last_page_read, 10);
     if (!Number.isFinite(lastPageRead)) {
-      return res.status(400).json({ success: false, message: 'last_page_read must be a number' });
+      throw new ValidationError('last_page_read must be a number');
     }
 
     const chapter = await chapterService.markChapterByLastPage(

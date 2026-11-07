@@ -128,11 +128,18 @@ const withOverride = async <T extends OverlayTarget>(row: T | null, user_id: str
   return applyOverride(row, (await mangaOverrideRepository.find(row.id, user_id)) ?? undefined);
 };
 
+const pageOf = ({ limit, offset }: GetMangaOptions) => ({
+  ...(limit !== undefined ? { take: limit } : {}),
+  ...(offset !== undefined ? { skip: offset } : {}),
+});
+
 const getManga = async (options: GetMangaOptions) => {
   const manga = await prisma.manga.findMany({
     // Rows created purely to back a preview read or download aren't library entries.
     where: { in_library: true },
-    orderBy: resolveOrderBy(options),
+    // The id settles ties, so a row can't appear on two pages or neither.
+    orderBy: [resolveOrderBy(options), { id: 'asc' }],
+    ...pageOf(options),
     include: {
       _count: {
         select: { chapter: true },
@@ -163,12 +170,14 @@ const getMangaForUser = async (user_id: string, options: GetMangaOptions) => {
   const [mangaPages, readCounts] = await Promise.all([
     (async () => {
       const pages = [];
-      for (let skip = 0; ; skip += USER_LIBRARY_QUERY_BATCH_SIZE) {
+      const wanted = options.limit ?? Infinity;
+      for (let skip = options.offset ?? 0; pages.length < wanted;) {
+        const take = Math.min(USER_LIBRARY_QUERY_BATCH_SIZE, wanted - pages.length);
         const page = await prisma.manga.findMany({
           where: { user_library: membershipFilter },
           orderBy,
           skip,
-          take: USER_LIBRARY_QUERY_BATCH_SIZE,
+          take,
           include: {
             _count: { select: { chapter: true } },
             chapter: {
@@ -189,8 +198,10 @@ const getMangaForUser = async (user_id: string, options: GetMangaOptions) => {
           },
         });
         pages.push(...page);
-        if (page.length < USER_LIBRARY_QUERY_BATCH_SIZE) return pages;
+        if (page.length < take) break;
+        skip += take;
       }
+      return pages;
     })(),
     prisma.$queryRaw<Array<{ manga_id: string; read_count: number | bigint }>>(Prisma.sql`
       SELECT c.manga_id, COUNT(s.chapter_id) AS read_count
@@ -235,26 +246,15 @@ const getMangaByCategoryIdForUser = async (
     where: { user_id, category_id, deleted_at: null },
     select: { manga_id: true },
   });
-  const mangaIds = assignments.map((a) => a.manga_id);
-  if (mangaIds.length === 0) {
+  if (assignments.length === 0) {
     return [];
   }
 
-  const manga = await prisma.manga.findMany({
-    where: { id: { in: mangaIds } },
-    orderBy: resolveOrderBy(options),
-    include: {
-      _count: { select: { chapter: true } },
-      chapter: {
-        take: 1,
-        select: { release_date: true },
-        orderBy: { release_date: 'desc' },
-      },
-      cache: { select: { sha256_url: true } },
-    },
-  });
-
-  return withOverrides(await withListingCounts(manga), user_id);
+  // Through getMangaForUser so unread counts come from this account's own chapter state,
+  // not the shared chapter.is_read, and a title it removed from its library stays out.
+  const members = new Set(assignments.map((a) => a.manga_id));
+  const library = await getMangaForUser(user_id, options);
+  return library.filter((manga) => members.has(manga.id));
 };
 
 /** Per-account equivalent of getMangaDetailsById: overlays is_read/is_bookmark/
@@ -369,6 +369,63 @@ const refreshDetails = async (
   ]);
 };
 
+/** Which of these ids are real titles, for bulk writes that skip the unknown ones. */
+const filterExistingIds = async (manga_ids: string[]) => {
+  const found = new Set<string>();
+  for (let start = 0; start < manga_ids.length; start += USER_LIBRARY_QUERY_BATCH_SIZE) {
+    const rows = await prisma.manga.findMany({
+      where: { id: { in: manga_ids.slice(start, start + USER_LIBRARY_QUERY_BATCH_SIZE) } },
+      select: { id: true },
+    });
+    for (const row of rows) found.add(row.id);
+  }
+  return found;
+};
+
+/** getMangaDetailsById for many titles in a few queries, for a backup. In input order;
+ * a title that no longer exists is left out. */
+const getMangaDetailsByIds = async (manga_ids: string[], user_id?: string) => {
+  const rows = [];
+  for (let start = 0; start < manga_ids.length; start += USER_LIBRARY_QUERY_BATCH_SIZE) {
+    const ids = manga_ids.slice(start, start + USER_LIBRARY_QUERY_BATCH_SIZE);
+    const batch = await prisma.manga.findMany({
+      where: { id: { in: ids } },
+      include: { manga_detail: true, chapter: true, cache: { select: { sha256_url: true } } },
+    });
+    if (!user_id) {
+      rows.push(...(await withOverrides(batch, null)));
+      continue;
+    }
+    const [memberships, states] = await Promise.all([
+      prisma.user_library.findMany({
+        where: { user_id, manga_id: { in: ids }, deleted_at: null },
+        select: { manga_id: true },
+      }),
+      prisma.user_chapter_state.findMany({
+        where: { user_id, chapter: { manga_id: { in: ids } } },
+      }),
+    ]);
+    const members = new Set(memberships.map((row) => row.manga_id));
+    const stateByChapter = new Map(states.map((state) => [state.chapter_id, state]));
+    const overlaid = batch.map((manga) => ({
+      ...manga,
+      in_library: members.has(manga.id),
+      chapter: manga.chapter.map((c) => {
+        const state = stateByChapter.get(c.id);
+        return {
+          ...c,
+          is_read: state?.is_read ?? false,
+          is_bookmark: state?.is_bookmark ?? false,
+          last_page_read: state?.last_page_read ?? 0,
+        };
+      }),
+    }));
+    rows.push(...(await withOverrides(overlaid, user_id)));
+  }
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return manga_ids.flatMap((id) => byId.get(id) ?? []);
+};
+
 const getMangaById = async (manga_id: string) => {
   const byId = await prisma.manga.findFirst({ where: { id: manga_id } });
   if (byId) return byId;
@@ -400,32 +457,6 @@ const getMangaIdBySlug = async (manga_slug: string, source?: string) => {
 const getMangaBySlug = async (manga_slug: string, source: string) => {
   return await prisma.manga.findFirst({
     where: { source, slug: manga_slug },
-  });
-};
-
-const getMangaByCategory = async (category_id: string) => {
-  return await prisma.manga_category.findMany({
-    where: {
-      category_id: category_id,
-    },
-    include: {
-      manga: true,
-    },
-  });
-};
-
-const searchMangaByQuery = async (query: string) => {
-  return await prisma.manga.findMany({
-    where: {
-      OR: [{ title: { contains: query } }, { author: { contains: query } }],
-    },
-    include: {
-      manga_detail: {
-        // artist and rating are included: the library listing feeds the detail header for
-        // a title reached from Discover.
-        select: { status: true, genres: true, description: true, artist: true, rating: true },
-      },
-    },
   });
 };
 
@@ -790,13 +821,13 @@ const mangaRepository = {
   getMangaForUser,
   listLibraryMangaIds,
   getMangaById,
+  filterExistingIds,
   getMangaIdBySlug,
   getMangaBySlug,
   listLibraryBasic,
   getMangaDetailsById,
   getMangaDetailsByIdForUser,
-  getMangaByCategory,
-  searchMangaByQuery,
+  getMangaDetailsByIds,
   addManga,
   deleteManga,
   setInLibrary,

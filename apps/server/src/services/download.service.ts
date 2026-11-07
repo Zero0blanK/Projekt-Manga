@@ -29,6 +29,7 @@ import {
 import { detectRasterImageType } from '../utils/imageContent.js';
 import { fetchSuwayomiImage, isSuwayomiImageUrl, SuwayomiError } from './suwayomi/client.js';
 import { DownloadPathPolicy } from '../utils/downloadPathPolicy.js';
+import { mapConcurrent } from '../utils/mapConcurrent.js';
 import { currentRequestId } from '../utils/requestContext.js';
 import {
   listOrphanedDownloadFolders,
@@ -85,12 +86,24 @@ class DownloadService {
   private static readonly MAX_PAGE_BYTES = 50 * 1024 * 1024;
   private downloadDir: string =
     process.env.DOWNLOAD_DIR || DownloadService.resolveDefaultDownloadDir();
-  private maxConcurrentDownloads: number = 3;
-  private activeDownloads: Map<string, AbortController> = new Map();
   private storageUsageBytes: number | null = null;
   private storageWriteLock: Promise<void> = Promise.resolve();
   private folderMaintenanceLock: Promise<void> = Promise.resolve();
   private pathPolicy!: DownloadPathPolicy;
+  /** A reader asks for a chapter's pages one at a time, and every request needs the sorted
+   * list. A finished chapter's folder doesn't change, so it is listed once per reading burst
+   * rather than once per page. Short-lived so a folder removed by hand is noticed. */
+  private pageListCache = new Map<
+    string,
+    { downloadPath: string; files: string[]; expiresAt: number }
+  >();
+  private static readonly PAGE_LIST_TTL_MS = 60_000;
+  private static readonly PAGE_LIST_CACHE_SIZE = 64;
+  /** Folders checked complete recently, by download id, so listing downloads doesn't re-read
+   * every chapter folder on each call. */
+  private verifiedFolders = new Map<string, number>();
+  private static readonly VERIFIED_FOLDER_TTL_MS = 5 * 60_000;
+  private static readonly FOLDER_CHECK_CONCURRENCY = 8;
 
   private static resolveDefaultDownloadDir(): string {
     return path.join(os.homedir(), 'Downloads', 'ProjektManga');
@@ -272,10 +285,6 @@ class DownloadService {
     });
   }
 
-  setMaxConcurrentDownloads(max: number) {
-    this.maxConcurrentDownloads = Math.max(1, Math.min(max, 10));
-  }
-
   async initiateDownload(data: {
     sourceId: string;
     mangaSlug: string;
@@ -283,7 +292,6 @@ class DownloadService {
     mangaTitle: string;
     chapterTitle: string;
     chapterNumber: number;
-    downloadPath?: string;
   }) {
     return this.withFolderMaintenanceLock(() => this.initiateDownloadUnlocked(data));
   }
@@ -295,7 +303,6 @@ class DownloadService {
     mangaTitle: string;
     chapterTitle: string;
     chapterNumber: number;
-    downloadPath?: string;
   }) {
     try {
       if ((await this.getDownloadStorageUsage()) >= this.getDownloadStorageLimitBytes()) {
@@ -458,7 +465,6 @@ class DownloadService {
   }
 
   async downloadPageWithRetry(
-    downloadId: string,
     pageUrl: string,
     pageNumber: number,
     filePathDir: string,
@@ -495,6 +501,7 @@ class DownloadService {
             headers: requestHeaders,
             // Validates the address every hop actually connects to, which beforeRedirect
             // (hostname only) and a pre-flight DNS check (TOCTOU) both miss.
+            proxy: false,
             httpAgent: guardedHttpAgent,
             httpsAgent: guardedHttpsAgent,
             beforeRedirect: (options) => {
@@ -624,7 +631,7 @@ class DownloadService {
       }
 
       await downloadWorker.pauseDownload(downloadId);
-      await downloadRepository.updateDownloadStatus(downloadId, 'PENDING');
+      await downloadRepository.updateDownloadStatus(downloadId, 'PAUSED');
     } catch (error) {
       rethrowKnownOrWrap(error, new PrismaError('Failed to pause download'));
     }
@@ -637,9 +644,16 @@ class DownloadService {
         throw new NotFoundError('Download not found');
       }
 
-      // Only allow resume if download is in PENDING or was manually paused
-      if (download.status === 'COMPLETED' || download.status === 'FAILED') {
+      if (download.status === 'COMPLETED') {
         throw new ValidationError(`Cannot resume download with status ${download.status}`);
+      }
+
+      // A failed download's partial files are gone, so it starts over.
+      if (download.status === 'FAILED') {
+        await downloadRepository.updateDownloadProgress(downloadId, {
+          current_page: 0,
+          pages_downloaded: 0,
+        });
       }
 
       // Reset to PENDING and re-queue
@@ -655,12 +669,6 @@ class DownloadService {
 
   async cancelDownload(downloadId: string) {
     try {
-      const abortController = this.activeDownloads.get(downloadId);
-      if (abortController) {
-        abortController.abort();
-        this.activeDownloads.delete(downloadId);
-      }
-
       await downloadWorker.cancelDownload(downloadId);
 
       const download = await downloadRepository.getDownloadById(downloadId);
@@ -679,6 +687,8 @@ class DownloadService {
 
         await downloadRepository.deleteDownload(downloadId);
         this.invalidateDownloadStorageUsage();
+        this.pageListCache.delete(download.chapter_id);
+        this.verifiedFolders.delete(downloadId);
       }
     } catch (error) {
       rethrowKnownOrWrap(error, new PrismaError('Failed to cancel download'));
@@ -705,55 +715,69 @@ class DownloadService {
     }
   }
 
-  async getAllDownloads() {
+  async getAllDownloads(page?: { limit?: number; offset?: number }) {
     try {
-      const downloads = await downloadRepository.getAllDownloads();
-      return await Promise.all(
-        downloads.map(async (d) => {
-          const recordedPath = d.downloaded_path
-            ? path.isAbsolute(d.downloaded_path)
-              ? d.downloaded_path
-              : path.resolve(this.downloadDir, d.downloaded_path)
-            : path.resolve(this.downloadDir, d.file_path);
-          // Do not expose filesystem paths from untrusted/corrupt DB rows to the renderer.
-          // The UI can only reveal folders that resolve inside an explicitly approved root.
-          let safeDownloadPath = this.pathPolicy.resolveAllowedExistingPath(recordedPath) ?? '';
-          if (
-            safeDownloadPath &&
-            d.status === 'COMPLETED' &&
-            !(await this.hasExpectedDownloadedPages(
-              safeDownloadPath,
-              Math.max(d.pages_downloaded, d.pages_total),
-            ))
-          ) {
-            safeDownloadPath = '';
-          }
+      const downloads = await downloadRepository.getAllDownloads(page);
+      return await mapConcurrent(downloads, DownloadService.FOLDER_CHECK_CONCURRENCY, async (d) => {
+        const recordedPath = d.downloaded_path
+          ? path.isAbsolute(d.downloaded_path)
+            ? d.downloaded_path
+            : path.resolve(this.downloadDir, d.downloaded_path)
+          : path.resolve(this.downloadDir, d.file_path);
+        // Do not expose filesystem paths from untrusted/corrupt DB rows to the renderer.
+        // The UI can only reveal folders that resolve inside an explicitly approved root.
+        let safeDownloadPath = this.pathPolicy.resolveAllowedExistingPath(recordedPath) ?? '';
+        if (
+          safeDownloadPath &&
+          d.status === 'COMPLETED' &&
+          !(await this.folderLooksComplete(
+            d.id,
+            safeDownloadPath,
+            Math.max(d.pages_downloaded, d.pages_total),
+          ))
+        ) {
+          safeDownloadPath = '';
+        }
 
-          return {
-            id: d.id,
-            manga_id: d.manga_id,
-            chapter_id: d.chapter_id,
-            source_chapter_key: d.chapter.source_chapter_key,
-            source_id: d.source_id,
-            mangaSlug: d.manga.slug,
-            status: downloadWorker.isPaused(d.id) ? 'PAUSED' : d.status,
-            mangaTitle: d.manga.title,
-            chapterTitle: d.chapter.name || `Chapter ${d.chapter.chapter_number}`,
-            chapterNumber: d.chapter.chapter_number,
-            pages_total: d.pages_total,
-            pages_downloaded: d.pages_downloaded,
-            current_page: d.current_page,
-            filePath: safeDownloadPath,
-            downloaded_path: safeDownloadPath,
-            createdAt: d.created_at,
-            startedAt: d.started_at,
-            completedAt: d.completed_at,
-          };
-        }),
-      );
+        return {
+          id: d.id,
+          manga_id: d.manga_id,
+          chapter_id: d.chapter_id,
+          source_chapter_key: d.chapter.source_chapter_key,
+          source_id: d.source_id,
+          mangaSlug: d.manga.slug,
+          status: downloadWorker.isPaused(d.id) ? 'PAUSED' : d.status,
+          mangaTitle: d.manga.title,
+          chapterTitle: d.chapter.name || `Chapter ${d.chapter.chapter_number}`,
+          chapterNumber: d.chapter.chapter_number,
+          pages_total: d.pages_total,
+          pages_downloaded: d.pages_downloaded,
+          current_page: d.current_page,
+          filePath: safeDownloadPath,
+          downloaded_path: safeDownloadPath,
+          createdAt: d.created_at,
+          startedAt: d.started_at,
+          completedAt: d.completed_at,
+        };
+      });
     } catch (error) {
       rethrowKnownOrWrap(error, new PrismaError('Failed to get downloads'));
     }
+  }
+
+  /** Only a pass is remembered: a folder found incomplete is checked again next time. */
+  private async folderLooksComplete(
+    downloadId: string,
+    directory: string,
+    expectedCount: number,
+  ): Promise<boolean> {
+    const now = Date.now();
+    if ((this.verifiedFolders.get(downloadId) ?? 0) > now) return true;
+    const complete = await this.hasExpectedDownloadedPages(directory, expectedCount);
+    if (complete) {
+      this.verifiedFolders.set(downloadId, now + DownloadService.VERIFIED_FOLDER_TTL_MS);
+    }
+    return complete;
   }
 
   private async hasExpectedDownloadedPages(
@@ -765,9 +789,8 @@ class DownloadService {
       const pageNumbers = new Set<number>();
       for (const entry of entries) {
         const match = /^page_(\d+)\.(?:jpg|png|gif|webp|avif)$/i.exec(entry.name);
+        // isFile() is false for a symlink, so nothing counted here can point elsewhere.
         if (!match || !entry.isFile()) continue;
-        const pagePath = path.join(directory, entry.name);
-        if (!this.pathPolicy.containsRealPath(directory, pagePath)) continue;
         pageNumbers.add(Number(match[1]));
       }
       if (pageNumbers.size === 0) return false;
@@ -791,6 +814,10 @@ class DownloadService {
   private async listDownloadedPageFiles(
     chapterId: string,
   ): Promise<{ downloadPath: string; files: string[] }> {
+    const cached = this.pageListCache.get(chapterId);
+    if (cached && cached.expiresAt > Date.now()) return cached;
+    this.pageListCache.delete(chapterId);
+
     const download = await downloadRepository.getDownloadByChapterId(chapterId);
 
     if (download?.status !== 'COMPLETED' || !download.downloaded_path) {
@@ -802,20 +829,13 @@ class DownloadService {
       throw new NotFoundError('Downloaded chapter path is outside the configured download folders');
     }
 
-    if (!fs.existsSync(downloadPath)) {
+    const entries = await fsp.readdir(downloadPath, { withFileTypes: true }).catch(() => {
       throw new NotFoundError('Downloaded chapter files not found');
-    }
-
-    const files = fs.readdirSync(downloadPath).filter((filename) => {
-      if (!/^page_\d+\.(?:jpg|png|gif|webp|avif)$/.test(filename)) return false;
-      const file = path.join(downloadPath, filename);
-      try {
-        if (!fs.lstatSync(file).isFile()) return false;
-      } catch {
-        return false;
-      }
-      return this.pathPolicy.containsRealPath(downloadPath, file);
     });
+    // isFile() is false for a symlink, so a listed page can't point out of the folder.
+    const files = entries
+      .filter((entry) => entry.isFile() && /^page_\d+\.(?:jpg|png|gif|webp|avif)$/.test(entry.name))
+      .map((entry) => entry.name);
 
     files.sort((a, b) => {
       const aNum = Number.parseInt(a.match(/\d+/)![0], 10);
@@ -823,6 +843,14 @@ class DownloadService {
       return aNum - bNum;
     });
 
+    if (this.pageListCache.size >= DownloadService.PAGE_LIST_CACHE_SIZE) {
+      this.pageListCache.delete(this.pageListCache.keys().next().value!);
+    }
+    this.pageListCache.set(chapterId, {
+      downloadPath,
+      files,
+      expiresAt: Date.now() + DownloadService.PAGE_LIST_TTL_MS,
+    });
     return { downloadPath, files };
   }
 
@@ -857,11 +885,10 @@ class DownloadService {
         throw new NotFoundError('Page not found in downloaded chapter');
       }
 
-      const absolute = path.resolve(downloadPath, filename);
-      if (!this.pathPolicy.containsRealPath(downloadPath, absolute)) {
+      return await fsp.realpath(path.resolve(downloadPath, filename)).catch(() => {
+        this.pageListCache.delete(chapterId);
         throw new NotFoundError('Page not found in downloaded chapter');
-      }
-      return fs.realpathSync(absolute);
+      });
     } catch (error) {
       rethrowKnownOrWrap(error, new PrismaError('Failed to read downloaded page'));
     }
@@ -880,10 +907,12 @@ class DownloadService {
       if (files.length === 0) throw new NotFoundError('Downloaded chapter has no pages');
       const download = await downloadRepository.getDownloadByChapterId(chapterId);
       const width = Math.max(3, String(files.length).length);
-      const entries = files.map((filename, index) => ({
-        name: `page_${String(index + 1).padStart(width, '0')}${path.extname(filename)}`,
-        path: fs.realpathSync(path.resolve(downloadPath, filename)),
-      }));
+      const entries = await Promise.all(
+        files.map(async (filename, index) => ({
+          name: `page_${String(index + 1).padStart(width, '0')}${path.extname(filename)}`,
+          path: await fsp.realpath(path.resolve(downloadPath, filename)),
+        })),
+      );
       const title = download?.manga?.title ?? 'Chapter';
       const number = download?.chapter?.chapter_number;
       return {
@@ -899,14 +928,6 @@ class DownloadService {
     return await downloadRepository.isChapterDownloaded(chapterId);
   }
 
-  async getDownloadedChapterPath(chapterId: string): Promise<string | null> {
-    const download = await downloadRepository.getDownloadByChapterId(chapterId);
-    if (download?.status === 'COMPLETED') {
-      return path.join(this.downloadDir, download.file_path);
-    }
-    return null;
-  }
-
   async getDownloadStats() {
     try {
       const downloads = await downloadRepository.getAllDownloads();
@@ -914,14 +935,8 @@ class DownloadService {
       const inProgress = downloads.filter((d) => d.status === 'IN_PROGRESS');
       const failed = downloads.filter((d) => d.status === 'FAILED');
 
-      // Calculate total size. Sequential on purpose: this walks the disk, and running
-      // every download's traversal at once would trade a blocked event loop for a
-      // saturated one.
-      let totalSize = 0;
-      for (const d of completed) {
-        const filePath = path.join(this.downloadDir, d.file_path);
-        totalSize += await this.getDirectorySize(filePath).catch(() => 0);
-      }
+      // The running total the storage limit keeps, so this doesn't walk the disk per call.
+      const totalSize = await this.getDownloadStorageUsage();
 
       let freeBytes: number | null = null;
       try {

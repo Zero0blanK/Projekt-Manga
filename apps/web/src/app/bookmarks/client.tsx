@@ -50,6 +50,7 @@ export function BookmarksPageClient() {
         {manga.length > 0 && (
           <div className="relative">
             <button
+              type="button"
               onClick={() => setSortOpen((v) => !v)}
               className="flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
             >
@@ -67,6 +68,7 @@ export function BookmarksPageClient() {
                 <div className="absolute right-0 top-11 z-20 w-44 overflow-hidden rounded-xl border border-border/70 bg-popover shadow-lg">
                   {sorts.map((s) => (
                     <button
+                      type="button"
                       key={s.value}
                       onClick={() => {
                         setSort(s.value);

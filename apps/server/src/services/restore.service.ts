@@ -1,7 +1,7 @@
 import type { PreviewBackupBody, ReplaceBackupBody } from '@projekt-manga/schemas';
-import prisma from '../configs/prisma.config.js';
 import { previewBackupConflicts, replaceBackup } from '../repositories/restore.repository.js';
-import { DuplicateResourceError, NotFoundError } from '../utils/customErrors.js';
+import restoreJobRepository from '../repositories/restoreJob.repository.js';
+import { NotFoundError } from '../utils/customErrors.js';
 import { withAccountWriteLock } from '../utils/accountWriteLock.js';
 import { currentRequestId, withRequestId } from '../utils/requestContext.js';
 import { recordDiagnosticEvent } from '../utils/diagnosticLog.js';
@@ -22,6 +22,7 @@ export async function previewRestore(backup: PreviewBackupBody, userId?: string)
 const scheduled = new Set<string>();
 const progressByJob = new Map<string, Job['progress']>();
 const RESTORE_CANCELLATION_GRACE_MS = 3_000;
+const FINISHED_JOB_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 function publicJob(row: { id: string; owner: string; state: string; result: string | null }): Job {
   if (!['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(row.state))
@@ -58,12 +59,8 @@ function schedule(id: string, requestId = currentRequestId()): void {
 }
 
 async function run(id: string): Promise<void> {
-  const claimed = await prisma.restore_job.updateMany({
-    where: { id, state: 'queued' },
-    data: { state: 'running' },
-  });
-  if (claimed.count !== 1) return;
-  const row = await prisma.restore_job.findUniqueOrThrow({ where: { id } });
+  if (!(await restoreJobRepository.claim(id))) return;
+  const row = await restoreJobRepository.getByIdOrThrow(id);
   try {
     const backup = JSON.parse(row.payload) as ReplaceBackupBody;
     const total =
@@ -93,10 +90,7 @@ async function run(id: string): Promise<void> {
       jobId: id,
       code: 'RESTORE_FAILED',
     });
-    await prisma.restore_job.updateMany({
-      where: { id, state: 'running' },
-      data: { state: 'failed', payload: '' },
-    });
+    await restoreJobRepository.markFailed(id);
     progressByJob.delete(id);
   }
 }
@@ -106,21 +100,11 @@ export async function startRestore(backup: ReplaceBackupBody, userId?: string): 
   const requestId = currentRequestId() ?? null;
   const payload = JSON.stringify(backup);
   const row = await withAccountWriteLock(owner, () =>
-    prisma.$transaction(async (tx) => {
-      const existing = await tx.restore_job.findUnique({ where: { id: backup.jobId } });
-      if (existing) {
-        if (existing.owner !== owner || (existing.payload && existing.payload !== payload))
-          throw new NotFoundError('Restore job not found');
-        return existing;
-      }
-      const active = await tx.restore_job.findFirst({
-        where: { owner, state: { in: ['queued', 'running'] } },
-        select: { id: true },
-      });
-      if (active) throw new DuplicateResourceError('A restore is already running for this library');
-      return tx.restore_job.create({
-        data: { id: backup.jobId, owner, request_id: requestId, state: 'queued', payload },
-      });
+    restoreJobRepository.createOrGetExisting({
+      id: backup.jobId,
+      owner,
+      request_id: requestId,
+      payload,
     }),
   );
   if (row.state === 'queued') {
@@ -137,7 +121,7 @@ export async function startRestore(backup: ReplaceBackupBody, userId?: string): 
 }
 
 export async function getRestore(id: string, userId?: string): Promise<Job> {
-  const row = await prisma.restore_job.findUnique({ where: { id } });
+  const row = await restoreJobRepository.getById(id);
   if (!row || row.owner !== (userId ?? 'anonymous'))
     throw new NotFoundError('Restore job not found');
   return publicJob(row);
@@ -146,21 +130,14 @@ export async function getRestore(id: string, userId?: string): Promise<Job> {
 /** Cancels only jobs that have not been claimed by the worker; running replacement stays atomic. */
 export async function cancelRestore(id: string, userId?: string): Promise<Job> {
   const owner = userId ?? 'anonymous';
-  await prisma.restore_job.updateMany({
-    where: { id, owner, state: 'queued' },
-    data: { state: 'cancelled', payload: '' },
-  });
+  await restoreJobRepository.cancelQueued(id, owner);
   return getRestore(id, userId);
 }
 
 /** Resume interrupted work before the API starts accepting requests. */
 export async function recoverRestoreJobs(): Promise<void> {
-  await prisma.restore_job.updateMany({ where: { state: 'running' }, data: { state: 'queued' } });
-  const queued = await prisma.restore_job.findMany({
-    where: { state: 'queued' },
-    select: { id: true, request_id: true },
-    orderBy: { created_at: 'asc' },
-  });
+  await restoreJobRepository.pruneFinished(new Date(Date.now() - FINISHED_JOB_RETENTION_MS));
+  const queued = await restoreJobRepository.requeueInterrupted();
   for (const job of queued) {
     recordDiagnosticEvent({
       level: 'info',

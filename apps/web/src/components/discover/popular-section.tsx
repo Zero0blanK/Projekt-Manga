@@ -68,6 +68,7 @@ export function SourceResultCard({ sourceId, item }: { sourceId: string; item: M
           transparent button still captures clicks and would block the cover's top-right
           corner. */}
       <button
+        type="button"
         onClick={add}
         disabled={added || adding}
         aria-label={added ? `"${item.title}" is in your library` : `Add "${item.title}" to library`}

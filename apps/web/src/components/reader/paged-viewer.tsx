@@ -1,5 +1,6 @@
 'use client';
 
+import { useLatest } from '@/lib/use-latest';
 import { useEffect, useRef, useState } from 'react';
 import { TapZonesHint } from '@/components/reader/tap-zones-hint';
 import { ChevronLeft, ChevronRight, ArrowRight, ArrowLeft } from 'lucide-react';
@@ -155,6 +156,8 @@ export function PagedViewer({
     rtl,
   });
   const units = readerUnits.map((unit) => unit.pages);
+  // New arrays each render: the effects below follow their length, and read the rest here.
+  const layout = useLatest({ readerUnits, units, onVisiblePage, onPositionChange });
   // The end-of-chapter panel is announced only while the final spread is showing.
   const atLastSpread = units.length === 0 || units[units.length - 1].includes(page);
 
@@ -174,7 +177,7 @@ export function PagedViewer({
     )
       return;
     const sameHalf = visibleHalf.current?.page === page ? visibleHalf.current.half : undefined;
-    const unitIndex = readerUnits.findIndex(
+    const unitIndex = layout.current.readerUnits.findIndex(
       (u) => u.pages.includes(page) && (sameHalf === undefined || u.half === sameHalf),
     );
     const target = unitRefs.current[unitIndex === -1 ? 0 : unitIndex];
@@ -189,8 +192,7 @@ export function PagedViewer({
         });
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, manga.id, totalPages, offsetFirstPage, units.length]);
+  }, [page, manga.id, totalPages, offsetFirstPage, units.length, layout]);
 
   useEffect(() => {
     const root = scrollRef.current;
@@ -204,6 +206,7 @@ export function PagedViewer({
         // See pendingInitialJump — don't report until the resume jump has landed.
         if (pendingInitialJump.current) return;
         const idx = Number((mostVisible.target as HTMLElement).dataset.unit);
+        const { units, readerUnits, onVisiblePage, onPositionChange } = layout.current;
         const unit = units[idx];
         visibleUnit.current = idx;
         if (unit) {
@@ -222,8 +225,7 @@ export function PagedViewer({
     );
     unitRefs.current.forEach((el) => el && observer.observe(el));
     return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [units.length, totalPages, pagesPerView, offsetFirstPage, pageUrls]);
+  }, [units.length, totalPages, pagesPerView, offsetFirstPage, pageUrls, layout]);
 
   // Scroll to a specific child rather than by a pixel offset: `scrollBy` on a
   // `snap-mandatory` container gets overridden by the snap algorithm (Firefox in
@@ -404,6 +406,7 @@ export function PagedViewer({
         </span>
       )}
       <button
+        type="button"
         onClick={leftAction}
         aria-label="Previous"
         className="absolute left-6 z-30 grid h-12 w-12 place-items-center rounded-full border border-white/10 bg-black/50 text-white/70 backdrop-blur transition hover:text-white"
@@ -499,6 +502,7 @@ export function PagedViewer({
           >
             <p className="text-sm">Start of this chapter.</p>
             <button
+              type="button"
               onClick={onRequestPrevChapter}
               className="flex items-center gap-2 rounded-full border border-white/20 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10"
             >
@@ -588,6 +592,7 @@ export function PagedViewer({
             <p className="text-sm">You&apos;ve reached the end of this chapter.</p>
             {hasNextChapter && (
               <button
+                type="button"
                 onClick={onRequestNextChapter}
                 className="flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-glow transition hover:opacity-90"
               >
@@ -631,6 +636,7 @@ export function PagedViewer({
       )}
 
       <button
+        type="button"
         onClick={rightAction}
         aria-label="Next"
         className="absolute right-6 z-30 grid h-12 w-12 place-items-center rounded-full border border-white/10 bg-black/50 text-white/70 backdrop-blur transition hover:text-white"

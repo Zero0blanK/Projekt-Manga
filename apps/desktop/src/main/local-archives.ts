@@ -316,6 +316,9 @@ async function readEntry(zip: yauzl.ZipFile, entry: yauzl.Entry, limit: number):
   return Buffer.concat(chunks);
 }
 
+/** How long one library scan may spend reading comics. */
+const SCAN_BUDGET_MS = 5 * 60_000;
+
 /**
  * Walks a CBZ, ZIP or EPUB once. With `extractTo` every page is unpacked and checked as an
  * image (the copy import); without it only the entries' names and sizes are checked, and
@@ -331,6 +334,7 @@ async function walkArchive(
 ): Promise<{ pages: string[]; info: ComicInfo | null }> {
   const zip = await openZip(file);
   const images: { name: string; output: string }[] = [];
+  const seenNames = new Set<string>();
   const documents = new Map<string, string>();
   let documentBytes = 0;
   let info: ComicInfo | null = null;
@@ -379,7 +383,9 @@ async function walkArchive(
       if (entry.uncompressedSize > IMAGE_LIMIT)
         throw new Error('A page exceeds the 32 MiB page limit.');
       if (!extractTo) {
-        images.push({ name, output: name });
+        // A zip may repeat a name. Read in place, either copy would answer for that page.
+        if (!seenNames.has(name)) images.push({ name, output: name });
+        seenNames.add(name);
         continue;
       }
       declaredExpanded += entry.uncompressedSize;
@@ -460,6 +466,31 @@ async function folderPages(
   return { pages: pages.sort(naturalCompare), info };
 }
 
+/** Entries by name for archives being read, so turning a page doesn't walk the zip's whole
+ * directory again. Keyed by size and time too: a changed file is a different archive. */
+const entryIndexes = new Map<string, Map<string, yauzl.Entry>>();
+const ENTRY_INDEXES_KEPT = 4;
+
+async function entryIndex(
+  source: ArchiveSource,
+  zip: yauzl.ZipFile,
+): Promise<Map<string, yauzl.Entry>> {
+  const key = `${source.path}\0${source.size}\0${source.mtimeMs}`;
+  const known = entryIndexes.get(key);
+  if (known) return known;
+  const entries = new Map<string, yauzl.Entry>();
+  for (;;) {
+    const entry = await nextEntry(zip);
+    if (!entry) break;
+    if (!entries.has(entry.fileName)) entries.set(entry.fileName, entry);
+  }
+  if (entryIndexes.size >= ENTRY_INDEXES_KEPT) {
+    entryIndexes.delete(entryIndexes.keys().next().value!);
+  }
+  entryIndexes.set(key, entries);
+  return entries;
+}
+
 /** Reads one page of a comic kept in place, checking the source still is what was found. */
 async function readSourcePage(source: ArchiveSource, name: string): Promise<Buffer> {
   if (!safeSourceName(name)) throw new Error('Invalid archive page');
@@ -469,13 +500,10 @@ async function readSourcePage(source: ArchiveSource, name: string): Promise<Buff
       throw new Error('The comic changed on disk. Rescan the library folder.');
     const zip = await openZip(source.path);
     try {
-      for (;;) {
-        const entry = await nextEntry(zip);
-        if (!entry) throw new Error('Invalid archive page');
-        if (entry.fileName !== name) continue;
-        checkEntry(entry);
-        return await readEntry(zip, entry, IMAGE_LIMIT);
-      }
+      const entry = (await entryIndex(source, zip)).get(name);
+      if (!entry) throw new Error('Invalid archive page');
+      checkEntry(entry);
+      return await readEntry(zip, entry, IMAGE_LIMIT);
     } finally {
       zip.close();
     }
@@ -603,6 +631,7 @@ async function scanLibrary(
   const unreachable = new Set<string>();
   let added = 0;
   let failed = 0;
+  const deadline = Date.now() + SCAN_BUDGET_MS;
   for (const folder of folders) {
     // An unplugged drive or a folder renamed elsewhere: keep what was found there before.
     if (
@@ -616,6 +645,9 @@ async function scanLibrary(
     }
     for (const candidate of await findComics(folder)) {
       seen.add(candidate.path);
+      // A very large folder finishes over several rescans. Whatever wasn't reached keeps
+      // what is listed for it, because it is still marked as seen.
+      if (Date.now() > deadline) continue;
       try {
         const status = await fs.stat(candidate.path);
         const previous = existing.get(candidate.path);

@@ -108,7 +108,7 @@ describe('source display languages', () => {
     expect(screen.getByRole('heading', { name: 'B' })).toBeInTheDocument();
     expect(screen.getByLabelText('A language')).toHaveTextContent('en');
     expect(screen.getByLabelText('B language')).toHaveTextContent('all');
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Extensions' }), { button: 0 });
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Add sources' }), { button: 0 });
     expect(screen.getByText('Extension catalogue')).toBeInTheDocument();
   });
   it('only sends a language filter advertised by that source', () => {

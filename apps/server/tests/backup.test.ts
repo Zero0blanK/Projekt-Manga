@@ -22,12 +22,9 @@ beforeEach(async () => {
   prismaMock.manga_link.findMany.mockResolvedValue([] as never);
   // Shapes as the services return them: Dates, not strings, and nullable columns as null.
   vi.spyOn(mangaService, 'getManga').mockResolvedValue([{ id: 'm1' }, { id: 'gone' }] as never);
-  vi.spyOn(mangaService, 'getMangaDetailsById').mockImplementation(async (id) => {
-    if (id === 'gone') {
-      const { MangaNotFoundError } = await import('../src/utils/customErrors.js');
-      throw new MangaNotFoundError('Manga not found');
-    }
-    return {
+  // 'gone' was removed between the list and this read, so it isn't answered for.
+  vi.spyOn(mangaService, 'getMangaDetailsByIds').mockResolvedValue([
+    {
       id: 'm1',
       source: 'src',
       slug: 'title',
@@ -57,8 +54,8 @@ beforeEach(async () => {
           page_count: null,
         },
       ],
-    } as never;
-  });
+    },
+  ] as never);
   vi.spyOn(libraryService, 'getLibraryState').mockResolvedValue([
     { manga_id: 'm1', is_bookmarked: true, shelf_status: 'READING', notification_read: false },
     // A state row for a title no longer in the library must not poison the export.

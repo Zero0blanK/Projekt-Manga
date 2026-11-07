@@ -89,6 +89,7 @@ function ServerStatus() {
             {label}
           </span>
           <button
+            type="button"
             onClick={check}
             className="rounded-lg border border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
           >
@@ -97,7 +98,7 @@ function ServerStatus() {
         </div>
       </Field>
       <Field label="API endpoint" hint="Set with NEXT_PUBLIC_API_URL">
-        <span className="max-w-64 truncate font-mono text-[11px] text-muted-foreground">
+        <span className="max-w-64 truncate font-mono text-xs text-muted-foreground">
           {baseUrl || '—'}
         </span>
       </Field>

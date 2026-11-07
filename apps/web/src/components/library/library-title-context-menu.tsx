@@ -82,7 +82,7 @@ export function LibraryTitleContextMenu({
       } else await libraryActions.setShelf(target.id, action);
       if (current()) refresh();
     } catch {
-      if (current()) toast({ description: 'Could not update this title. Please retry.' });
+      if (current()) toast({ description: "Couldn't update this title. Try again." });
     } finally {
       if (current()) setBusy(false);
     }

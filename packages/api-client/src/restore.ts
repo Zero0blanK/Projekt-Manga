@@ -1,22 +1,7 @@
 import { request } from './client.js';
 import type { PreviewBackupBody, ReplaceBackupBody } from '@projekt-manga/schemas';
-
-export type RestoreJob = {
-  id: string;
-  state: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-  result: { restoredManga: number; restoredProgress: number; restoredHistory: number } | null;
-  progress: { phase: string; completed: number; total: number } | null;
-};
-
-export type RestorePreview = {
-  matchingTitles: number;
-  addedTitles: number;
-  importedTitles: number;
-  catalogRowsUpdated: number;
-  catalogUpdateExamples: string[];
-  retainedHistory: number;
-  addedHistory: number;
-};
+import type { RestoreJob, RestorePreview } from '@projekt-manga/types';
+export type { RestoreJob, RestorePreview } from '@projekt-manga/types';
 
 export const previewRestore = (backup: PreviewBackupBody, signal?: AbortSignal) =>
   request<RestorePreview>('/restore/preview', { method: 'POST', body: backup, signal });

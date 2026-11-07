@@ -46,7 +46,16 @@ const pendingStates = new Map<
   { user_id: string; code_verifier: string; expires_at: number }
 >();
 
+/** Abandoned flows are never consumed, so each new one clears out the expired. */
+function sweepExpiredStates() {
+  const now = Date.now();
+  for (const [state, entry] of pendingStates) {
+    if (entry.expires_at < now) pendingStates.delete(state);
+  }
+}
+
 function issueState(user_id: string): { state: string; code_verifier: string } {
+  sweepExpiredStates();
   const state = crypto.randomBytes(24).toString('base64url');
   const code_verifier = crypto.randomBytes(48).toString('base64url'); // 64 chars, within PKCE's 43-128 range
   pendingStates.set(state, {

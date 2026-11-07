@@ -1,5 +1,7 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
+
 /**
  * The desktop app's self-update bridge (apps/desktop/src/main/updater.ts, exposed by its
  * preload as `window.desktop.update`). Absent in a plain browser.
@@ -46,5 +48,5 @@ export interface UpdateBridge {
 
 export function updateBridge(): UpdateBridge | null {
   if (typeof window === 'undefined') return null;
-  return (window as unknown as { desktop?: { update?: UpdateBridge } }).desktop?.update ?? null;
+  return desktopBridge<{ update: UpdateBridge }>()?.update ?? null;
 }

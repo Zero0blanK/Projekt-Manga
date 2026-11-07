@@ -118,6 +118,7 @@ export function UpdateLibraryButton() {
           the primary fill because it is the one action in that row rather than a toggle.
           Progress is shown by LibraryUpdateDial, so the toolbar never resizes. */}
       <button
+        type="button"
         onClick={updateLibrary}
         disabled={running || titleCount === 0}
         aria-label={

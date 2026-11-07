@@ -11,7 +11,7 @@ import historyService from './history.service.js';
 import downloadService from './download.service.js';
 import userRepository from '../repositories/user.repository.js';
 import mangaLinkRepository from '../repositories/mangaLink.repository.js';
-import { MangaNotFoundError, NotFoundError } from '../utils/customErrors.js';
+import { NotFoundError } from '../utils/customErrors.js';
 import {
   listBackups,
   ownerDir,
@@ -22,26 +22,6 @@ import {
   writeBackup,
   writeBackupConfig,
 } from '../utils/backupStore.js';
-
-/** Detail reads in flight at once, matching the browser export this replaced. */
-const EXPORT_CONCURRENCY = 6;
-
-async function mapConcurrent<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await fn(items[index]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
-}
 
 /**
  * Builds the version-2 export for one owner (`undefined` = anonymous), exactly as the
@@ -59,16 +39,11 @@ export async function buildExport(userId?: string): Promise<ReadingDataExport> {
     historyService.getHistory(userId),
     downloadService.getAllDownloads(),
   ]);
-  const details = await mapConcurrent(libraryManga, EXPORT_CONCURRENCY, async (entry) => {
-    try {
-      return await mangaService.getMangaDetailsById(entry.id, userId);
-    } catch (error) {
-      // Removed between the list and the detail read; it is no longer in the library.
-      if (error instanceof MangaNotFoundError) return null;
-      throw error;
-    }
-  });
-  const found = details.filter((entry) => entry !== null);
+  // A title removed between the list and this read is left out: it's no longer in the library.
+  const found = await mangaService.getMangaDetailsByIds(
+    libraryManga.map((entry) => entry.id),
+    userId,
+  );
   // Each title's linked sources travel with it, by source and slug: a linked title is
   // usually outside the library, so it isn't an entry of its own.
   const links = await mangaLinkRepository.linksForPrimaries(

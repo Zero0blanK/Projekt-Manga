@@ -18,6 +18,7 @@ export function ReaderProgressBar({
         <div className="flex flex-1 items-center gap-0.5">
           {pages.map((p) => (
             <button
+              type="button"
               key={p}
               onClick={() => onSeek(p)}
               aria-label={`Go to page ${p}`}
@@ -27,7 +28,7 @@ export function ReaderProgressBar({
             />
           ))}
         </div>
-        <span className="tabular-nums text-white/40">{Math.round((page / totalPages) * 100)}%</span>
+        <span className="tabular-nums text-white/70">{Math.round((page / totalPages) * 100)}%</span>
       </div>
     </div>
   );

@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 const getHistory = vi.fn();
+vi.mock('@/lib/session-resource', () => ({
+  useCurrentUser: () => ({ user: null, loading: false }),
+}));
 vi.mock('@projekt-manga/api-client', () => ({
   getHistory,
   buildImageProxyUrl: (url: string) => url,

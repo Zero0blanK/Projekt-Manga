@@ -1,9 +1,10 @@
 import express from 'express';
 import downloadController from '../controllers/download.controller.js';
-import { validateBody } from '../middleware/validate.middleware.js';
+import { validateBody, validateQuery } from '../middleware/validate.middleware.js';
 import { requireAdmin } from '../middleware/admin.middleware.js';
 import {
   initiateDownloadBodySchema,
+  listPageQuerySchema,
   updateDownloadDirectoryBodySchema,
   updateDownloadStorageLimitBodySchema,
   cleanupOrphanedDownloadsBodySchema,
@@ -56,7 +57,7 @@ router.patch(
 );
 
 // GET /api/downloads - Get all downloads
-router.get('/', downloadController.getAllDownloads);
+router.get('/', validateQuery(listPageQuerySchema), downloadController.getAllDownloads);
 
 // GET /api/downloads/:downloadId - Get download status
 router.get('/:downloadId', downloadController.getDownloadStatus);

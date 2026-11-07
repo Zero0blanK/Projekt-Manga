@@ -1,5 +1,6 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
 import {
   ApiError,
   getCurrentUser,
@@ -36,13 +37,16 @@ export function useCurrentUser() {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
 
-  const { data, isPending, error } = useQuery({
-    queryKey: queryKeys.session,
-    queryFn: async ({ signal }) => (await getCurrentUser(signal)).user,
-    // "Who am I" is cheap and load-bearing for whether account-only UI renders at all;
-    // an unnecessary refetch is far less costly than showing a stale signed-out state.
-    staleTime: 30_000,
-  });
+  const { data, isPending, error } = useQuery(
+    {
+      queryKey: queryKeys.session,
+      queryFn: async ({ signal }) => (await getCurrentUser(signal)).user,
+      // "Who am I" is cheap and load-bearing for whether account-only UI renders at all;
+      // an unnecessary refetch is far less costly than showing a stale signed-out state.
+      staleTime: 30_000,
+    },
+    queryClient,
+  );
 
   return {
     user: hydrated ? (data ?? EMPTY_USER) : EMPTY_USER,
@@ -56,6 +60,8 @@ function setSessionUser(user: PublicUser | null) {
   queryClient.setQueryData(queryKeys.session, user);
   queryClient.setQueryData(queryKeys.mangaLibrary, []);
   queryClient.setQueryData(queryKeys.libraryState, []);
+  queryClient.removeQueries({ queryKey: queryKeys.history });
+  queryClient.removeQueries({ queryKey: queryKeys.downloads });
   void queryClient.invalidateQueries({ queryKey: queryKeys.mangaLibrary });
   void queryClient.invalidateQueries({ queryKey: queryKeys.libraryState });
 }
@@ -97,7 +103,7 @@ type DesktopAuthBridge = {
 };
 function desktopAuthBridge(): DesktopAuthBridge | null {
   if (typeof window === 'undefined') return null;
-  return (window as unknown as { desktop?: { auth?: DesktopAuthBridge } }).desktop?.auth ?? null;
+  return desktopBridge<{ auth: DesktopAuthBridge }>()?.auth ?? null;
 }
 
 export const sessionActions = {

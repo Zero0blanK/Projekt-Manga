@@ -4,9 +4,8 @@
 # and supervised by the main process (src/main/servers.ts), rather than being started by
 # hand as they are in the dev setup.
 #
-# appId is a placeholder (reverse-DNS style, but not a domain anyone owns) — replace it
-# before any real distribution; it's what Windows/macOS use to identify updates and
-# app-specific storage.
+# appId is what Windows and macOS use to identify updates and app-specific storage. It's
+# final now that releases have shipped: changing it would stop installed apps updating.
 appId: com.projektmanga.desktop
 productName: Projekt Manga
 copyright: Copyright © 2026 Projekt Manga
@@ -19,11 +18,11 @@ directories:
 # Configuring this is also what makes electron-builder emit `latest.yml` next to the installer
 # — that file *is* the update feed, and without it a client has nothing to check against. The
 # `.exe.blockmap` emitted alongside is what lets electron-updater download only the changed
-# blocks of the next installer rather than all ~640MB of it.
+# blocks of the next installer rather than all of it.
 #
 # The repository is public, so the app reads releases anonymously and no token is shipped
 # inside it. A release must carry all three files (exe + latest.yml + blockmap) to be usable —
-# see .claude/plans/auto-update.md.
+# see docs/releasing.md.
 publish:
   provider: github
   owner: Zero0blanK

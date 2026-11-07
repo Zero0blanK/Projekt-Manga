@@ -1,5 +1,6 @@
 'use client';
 
+import { desktopBridge } from '@/lib/desktop-bridge';
 import { ApiError } from '@projekt-manga/api-client';
 
 /** What the desktop app's source window reports once it is closed (main/source-browser.ts). */
@@ -16,7 +17,7 @@ type SourceBrowserBridge = {
  * browser check on the server's behalf. */
 export function sourceBrowserBridge(): SourceBrowserBridge | undefined {
   if (typeof window === 'undefined') return;
-  return (window as unknown as { desktop?: { source?: SourceBrowserBridge } }).desktop?.source;
+  return desktopBridge<{ source: SourceBrowserBridge }>()?.source;
 }
 
 export const CHALLENGE_REQUIRED = 'CHALLENGE_REQUIRED';

@@ -18,7 +18,14 @@ import { loadEnv, resolveDatabaseConfig } from './env.js';
  * server.ts. The connection is derived from DATABASE_URL — the same variable the Prisma
  * CLI uses for migrations — rather than a second, separate set of variables.
  */
-const adapter = new PrismaLibSql({ url: resolveDatabaseConfig(loadEnv()).url });
+export const BUSY_TIMEOUT_MS = 5000;
+
+// `timeout` becomes each connection's busy timeout. libSQL opens a fresh connection after
+// an interactive transaction, so a pragma run once at startup wouldn't reach those.
+const adapter = new PrismaLibSql({
+  url: resolveDatabaseConfig(loadEnv()).url,
+  timeout: BUSY_TIMEOUT_MS,
+});
 
 const prisma = new PrismaClient({ adapter });
 
@@ -45,7 +52,5 @@ export async function applySqlitePragmas(): Promise<void> {
     console.warn('[db] Could not apply SQLite pragmas:', error);
   }
 }
-
-export const BUSY_TIMEOUT_MS = 5000;
 
 export default prisma;

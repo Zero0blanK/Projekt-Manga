@@ -90,7 +90,7 @@ export function LibraryListRow({
         >
           {manga.title}
         </Link>
-        <div className="mt-0.5 text-[11px] text-muted-foreground">
+        <div className="mt-0.5 text-xs text-muted-foreground">
           {authorLine(manga)} · {manga.latestChapter} · {formatRelative(manga.updatedAt)}
         </div>
         <div className="mt-2 h-1 w-full max-w-48 overflow-hidden rounded-full bg-muted">
@@ -116,7 +116,7 @@ export function LibraryListRow({
                 );
                 toast({ description: `${manga.title} moved to ${f.label}` });
               }}
-              className={`text-[11px] ${f.value === shelf ? 'text-primary' : ''}`}
+              className={`text-xs ${f.value === shelf ? 'text-primary' : ''}`}
             >
               {f.label}
             </DropdownMenuItem>
@@ -130,7 +130,7 @@ export function LibraryListRow({
                 );
                 toast({ description: `${manga.title} removed from ${shelf}` });
               }}
-              className="text-[11px] text-muted-foreground"
+              className="text-xs text-muted-foreground"
             >
               Clear shelf
             </DropdownMenuItem>
@@ -160,7 +160,7 @@ export function LibraryListRow({
                     e.preventDefault();
                     actions.toggleCategoryMember(c, manga.id);
                   }}
-                  className="flex items-center justify-between gap-2 text-[11px]"
+                  className="flex items-center justify-between gap-2 text-xs"
                 >
                   {c}
                   {active && <Check className="h-3.5 w-3.5 text-primary" />}

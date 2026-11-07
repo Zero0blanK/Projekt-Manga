@@ -4,49 +4,13 @@ import type {
   InstallExtensionBody,
   ExtensionListingEntry,
 } from '@projekt-manga/schemas';
+import type { ExtensionRepository, InstalledExtension } from '@projekt-manga/types';
+export type { ExtensionRepository, InstalledExtension } from '@projekt-manga/types';
 
-export interface ExtensionRepository {
-  id: string;
-  url: string;
-  /** From the repository's own `repository` block; null when it publishes none, in which
-   * case the UI shows the URL instead. */
-  name: string | null;
-  badge_label: string | null;
-  description: string | null;
-  website: string | null;
-  added_at: string;
-  last_fetched_at: string | null;
-  enabled: boolean;
-}
-
+/** Stays here: its listing entries are defined by the schema that validates them. */
 export interface ExtensionRepositoryWithListing extends ExtensionRepository {
   sources: ExtensionListingEntry[];
   fetchError: string | null;
-}
-
-export interface InstalledExtension {
-  id: string;
-  repository_id: string;
-  source_key: string;
-  name: string;
-  lang: string;
-  base_url: string;
-  is_nsfw: boolean;
-  /** `safe` | `mixed` | `nsfw`, captured at install time. Null for a row installed before
-   * it was recorded — `is_nsfw` is the fallback, and cannot distinguish mixed from safe. */
-  content_rating: string | null;
-  allowed_hosts: string[];
-  version: string;
-  api_version: number;
-  version_code: number | null;
-  entry_url: string;
-  description: string | null;
-  homepage: string | null;
-  icon_url: string | null;
-  source_code_hash: string;
-  installed_at: string;
-  updated_at: string;
-  enabled: boolean;
 }
 
 export const listExtensionRepositories = (signal?: AbortSignal) =>

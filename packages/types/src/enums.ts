@@ -24,7 +24,13 @@ export const MANGA_STATUS_VALUES = [
 ] as const;
 export type MangaStatus = (typeof MANGA_STATUS_VALUES)[number];
 
-export const DOWNLOAD_STATUS_VALUES = ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED'] as const;
+export const DOWNLOAD_STATUS_VALUES = [
+  'PENDING',
+  'PAUSED',
+  'IN_PROGRESS',
+  'COMPLETED',
+  'FAILED',
+] as const;
 export type DownloadStatus = (typeof DOWNLOAD_STATUS_VALUES)[number];
 
 export const SHELF_STATUS_VALUES = ['READING', 'COMPLETED', 'ON_HOLD', 'PLAN', 'DROPPED'] as const;
@@ -47,6 +53,12 @@ export const TRACKER_SERVICE_VALUES = [
   'KAVITA',
 ] as const;
 export type TrackerService = (typeof TRACKER_SERVICE_VALUES)[number];
+
+export const NOTIFICATION_CHANNEL_KIND_VALUES = ['ntfy', 'discord', 'telegram', 'webhook'] as const;
+export type NotificationChannelKind = (typeof NOTIFICATION_CHANNEL_KIND_VALUES)[number];
+
+export const TRANSLATE_PROVIDER_VALUES = ['libretranslate', 'deepl'] as const;
+export type TranslateProvider = (typeof TRANSLATE_PROVIDER_VALUES)[number];
 
 /** Narrowing helper for the many places that read one of these back out of the database,
  * where the column's type is now only `string`. */

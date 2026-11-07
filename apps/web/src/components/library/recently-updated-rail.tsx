@@ -56,11 +56,11 @@ export function RecentlyUpdatedRail() {
                       <div className="truncate text-sm font-medium text-foreground group-hover:text-primary">
                         {m.title}
                       </div>
-                      <div className="mt-0.5 text-[11px] text-muted-foreground">
+                      <div className="mt-0.5 text-xs text-muted-foreground">
                         Chapter {m.latestChapterNum}
                       </div>
                     </div>
-                    <div className="text-[10px] text-muted-foreground">
+                    <div className="text-xs text-muted-foreground">
                       {formatRelative(m.updatedAt)}
                     </div>
                   </Link>

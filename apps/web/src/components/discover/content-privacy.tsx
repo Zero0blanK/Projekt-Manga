@@ -37,7 +37,7 @@ export function ContentPrivacyControls() {
           [
             'hideAdult',
             'Hide adult sources',
-            'Exclude adult-only sources from discovery and search. Mixed catalogues stay visible.',
+            'Exclude adult-only sources from discovery and search. Mixed catalogs stay visible.',
           ],
           [
             'blurAdult',

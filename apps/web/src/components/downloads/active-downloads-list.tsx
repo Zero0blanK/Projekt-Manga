@@ -149,7 +149,7 @@ export function ActiveDownloadsList({
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-3">
                 <div className="truncate text-sm font-semibold text-foreground">{r.title}</div>
-                <div className="shrink-0 text-[11px] text-muted-foreground">
+                <div className="shrink-0 text-xs text-muted-foreground">
                   {r.chapters} · {r.pages}
                 </div>
               </div>
@@ -160,7 +160,7 @@ export function ActiveDownloadsList({
                     style={{ width: `${r.progress * 100}%` }}
                   />
                 </div>
-                <span className="w-10 text-right text-[10px] tabular-nums text-muted-foreground">
+                <span className="w-10 text-right text-xs tabular-nums text-muted-foreground">
                   {Math.round(r.progress * 100)}%
                 </span>
                 <StatusPill status={r.status} />

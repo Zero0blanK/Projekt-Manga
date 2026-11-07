@@ -1,9 +1,16 @@
 import { z } from 'zod';
-import { sortBySchema, sortOrderSchema } from './pagination.js';
+import {
+  sortBySchema,
+  sortOrderSchema,
+  limitQuerySchema,
+  offsetQuerySchema,
+} from './pagination.js';
 
 export const getMangaQuerySchema = z.object({
   sortBy: sortBySchema,
   sortOrder: sortOrderSchema,
+  limit: limitQuerySchema,
+  offset: offsetQuerySchema,
 });
 export type GetMangaQuery = z.infer<typeof getMangaQuerySchema>;
 

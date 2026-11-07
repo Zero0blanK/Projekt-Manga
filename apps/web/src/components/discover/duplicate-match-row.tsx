@@ -33,6 +33,7 @@ export function MatchRow({
       </div>
       <div className="flex shrink-0 gap-2">
         <button
+          type="button"
           onClick={onShow}
           disabled={busy}
           className="rounded-lg border border-border/60 px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
@@ -40,6 +41,7 @@ export function MatchRow({
           Show entry
         </button>
         <button
+          type="button"
           onClick={onMigrate}
           disabled={busy}
           className="rounded-lg border border-primary/50 bg-primary/10 px-2.5 py-1.5 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-50"

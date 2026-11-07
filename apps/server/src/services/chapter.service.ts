@@ -163,41 +163,80 @@ const markChapterByLastPage = async (
   }
 };
 
-/** One chapter's worth of `markChaptersBulk` work. Chapters have no ordering dependency,
- * so the caller runs these concurrently via Promise.allSettled. `chapter.id` is the
- * source's key, as in every chapter payload a client sends. */
-const markOneChapterBulk = async (
-  chapter: ChapterBulkPayload & { id: string },
+/** Chapters written together. Short enough that one slice doesn't hold SQLite's single
+ * writer against every other request for long. */
+const BULK_MARK_SLICE = 200;
+
+type BulkChapter = ChapterBulkPayload & { id: string };
+
+/** The stored row for each chapter, in as few queries as the list allows. Only a chapter
+ * with no usable row yet costs a write of its own. One that can't be resolved goes in
+ * `failed`; the rest carry on. */
+const resolveBulkRows = async (slice: BulkChapter[], manga_id: string, manga_slug: string) => {
+  const stored = new Map<string, Awaited<ReturnType<typeof resolveForWrite>>>();
+  const sources = new Set(slice.flatMap((chapter) => chapter.source ?? []));
+  for (const source of sources) {
+    const keys = slice.filter((chapter) => chapter.source === source).map((chapter) => chapter.id);
+    const rows = await chapterRepository.findByKeys(source, manga_slug, keys);
+    for (const row of rows) stored.set(`${source}\0${row.source_chapter_key}`, row);
+  }
+
+  const resolved: Array<{
+    chapter: BulkChapter;
+    row: Awaited<ReturnType<typeof resolveForWrite>>;
+  }> = [];
+  const failed: string[] = [];
+  for (const chapter of slice) {
+    const row = stored.get(`${chapter.source}\0${chapter.id}`);
+    // A placeholder gets its title and number filled in by resolveChapter.
+    const settled = row && row.chapter_number !== 0 && (row.manga_id || !manga_id);
+    try {
+      resolved.push({
+        chapter,
+        row: settled ? row : await resolveForWrite(manga_slug, chapter.id, chapter),
+      });
+    } catch {
+      failed.push(chapter.id);
+    }
+  }
+  return { resolved, failed };
+};
+
+/** Read state and history for one slice. All or nothing: the caller reports the slice. */
+const writeBulkSlice = async (
+  resolved: Array<{ chapter: BulkChapter; row: { id: string } }>,
   manga_id: string,
   manga_slug: string,
   markAsRead: boolean,
   mangaMeta: BulkMangaMeta | undefined,
   user_id: string | undefined,
-): Promise<void> => {
-  const row = await resolveForWrite(manga_slug, chapter.id, chapter);
-
+) => {
+  const ids = resolved.map(({ row }) => row.id);
   if (user_id) {
-    await userChapterStateRepository.upsert(user_id, row.id, {
-      is_read: markAsRead,
-      ...(markAsRead ? {} : { last_page_read: 0 }),
-    });
-  } else if (markAsRead) {
-    await chapterRepository.markChapterAsRead(manga_id, row.id);
+    await (markAsRead
+      ? userChapterStateRepository.markManyRead(user_id, ids)
+      : userChapterStateRepository.markManyUnread(user_id, ids));
   } else {
-    await chapterRepository.markChapterAsUnread(manga_id, row.id);
+    await chapterRepository.setReadMany(manga_id, ids, markAsRead);
   }
 
-  if (chapter.source) {
-    await historyRepository.addHistory(
+  const bySource = new Map<string, typeof resolved>();
+  for (const entry of resolved) {
+    const { source } = entry.chapter;
+    if (source) bySource.set(source, [...(bySource.get(source) ?? []), entry]);
+  }
+  for (const [source, entries] of bySource) {
+    await historyRepository.addHistoryBatch(
+      entries.map(({ chapter, row }) => ({
+        chapter_id: row.id,
+        pages_read: markAsRead ? chapter.page_count || 0 : 0,
+      })),
       {
-        source: chapter.source,
+        source,
         manga_id: manga_id || undefined,
         manga_slug,
         source_manga_id: mangaMeta?.source_manga_id,
-        source_chapter_key: chapter.id,
-        pages_read: markAsRead ? chapter.page_count || 0 : 0,
-        // Only meaningful when there's no manga row to join from; addHistory leaves
-        // the stored values alone when these are absent.
+        // Only meaningful when there's no manga row to join from.
         title: mangaMeta?.title,
         thumbnail_url: mangaMeta?.thumbnail_url,
       },
@@ -205,8 +244,6 @@ const markOneChapterBulk = async (
     );
   }
 };
-
-const BULK_MARK_CONCURRENCY = 25;
 
 const markChaptersBulk = async (
   manga_slug: string,
@@ -222,36 +259,28 @@ const markChaptersBulk = async (
       manga_id = manga.id;
     }
 
-    const validChapters = chapters.filter((c): c is ChapterBulkPayload & { id: string } => !!c?.id);
-    // Settled in slices: each chapter is several writes against SQLite's single writer, so
-    // launching thousands at once only queues them ahead of every other request.
-    const outcomes: PromiseSettledResult<unknown>[] = [];
-    for (let start = 0; start < validChapters.length; start += BULK_MARK_CONCURRENCY) {
-      outcomes.push(
-        ...(await Promise.allSettled(
-          validChapters
-            .slice(start, start + BULK_MARK_CONCURRENCY)
-            .map((chapter) =>
-              markOneChapterBulk(chapter, manga_id, manga_slug, markAsRead, mangaMeta, user_id),
-            ),
-        )),
+    const validChapters = chapters.filter((c): c is BulkChapter => !!c?.id);
+    const written: BulkChapter[] = [];
+    const failed_source_chapter_keys: string[] = [];
+    for (let start = 0; start < validChapters.length; start += BULK_MARK_SLICE) {
+      const { resolved, failed } = await resolveBulkRows(
+        validChapters.slice(start, start + BULK_MARK_SLICE),
+        manga_id,
+        manga_slug,
       );
+      failed_source_chapter_keys.push(...failed);
+      try {
+        await writeBulkSlice(resolved, manga_id, manga_slug, markAsRead, mangaMeta, user_id);
+        written.push(...resolved.map(({ chapter }) => chapter));
+      } catch {
+        failed_source_chapter_keys.push(...resolved.map(({ chapter }) => chapter.id));
+      }
     }
 
-    let count = 0;
-    const failed_source_chapter_keys: string[] = [];
-    outcomes.forEach((outcome, i) => {
-      if (outcome.status === 'fulfilled') {
-        count += 1;
-      } else {
-        failed_source_chapter_keys.push(validChapters[i].id);
-      }
-    });
+    const count = written.length;
     await shareReadState(
       manga_id,
-      validChapters
-        .filter((_, i) => outcomes[i].status === 'fulfilled')
-        .map((chapter) => Number(chapter.chapter_number)),
+      written.map((chapter) => Number(chapter.chapter_number)),
       markAsRead,
       user_id,
     );

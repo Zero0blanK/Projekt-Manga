@@ -27,6 +27,7 @@ function ThemeCard({
 }) {
   return (
     <button
+      type="button"
       onClick={onSelect}
       aria-pressed={selected}
       className={`group overflow-hidden rounded-xl border text-left transition ${
@@ -62,7 +63,7 @@ function ThemeCard({
         <div className={`text-xs font-medium ${selected ? 'text-primary' : 'text-foreground'}`}>
           {option.label}
         </div>
-        <div className="text-[10px] text-muted-foreground">{option.hint}</div>
+        <div className="text-xs text-muted-foreground">{option.hint}</div>
       </div>
     </button>
   );
@@ -101,6 +102,7 @@ export function AppearancePanel() {
             <div className="flex flex-wrap justify-end gap-2">
               {ACCENTS.map((c) => (
                 <button
+                  type="button"
                   key={c.value}
                   onClick={() => actions.setSetting('accent', c.value)}
                   title={c.label}
@@ -115,7 +117,7 @@ export function AppearancePanel() {
                 />
               ))}
             </div>
-            <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
               <span className={customAccent ? 'text-primary' : ''}>Custom</span>
               <input
                 type="color"
@@ -127,6 +129,7 @@ export function AppearancePanel() {
                 }`}
               />
               <button
+                type="button"
                 onClick={() => actions.setSetting('accent', DEFAULT_ACCENT)}
                 className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
               >

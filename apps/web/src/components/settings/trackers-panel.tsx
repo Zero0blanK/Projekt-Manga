@@ -1,5 +1,6 @@
 'use client';
 
+import { useLatest } from '@/lib/use-latest';
 import { useEffect, useState, type FormEvent } from 'react';
 import {
   getAvailableTrackers,
@@ -26,6 +27,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { toast } from '@/hooks/use-toast';
+import { websiteUrl } from '@/lib/source-url';
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
@@ -139,6 +141,7 @@ function CredentialForm({
  * settings section already lives in the hash. Cleared immediately after reading so a
  * refresh doesn't re-show the same toast. */
 function useOAuthRedirectToast(onHandled: () => void) {
+  const handled = useLatest(onHandled);
   useEffect(() => {
     const hash = window.location.hash;
     const queryIndex = hash.indexOf('?');
@@ -153,14 +156,13 @@ function useOAuthRedirectToast(onHandled: () => void) {
         OAUTH_LABELS[connected.toUpperCase()] ??
         connected.charAt(0).toUpperCase() + connected.slice(1).toLowerCase();
       toast({ description: `Connected to ${label}.` });
-      onHandled();
+      handled.current();
     } else if (error) {
       toast({ description: error });
     }
 
     window.history.replaceState(null, '', hash.slice(0, queryIndex));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [handled]);
 }
 
 export function TrackersPanel() {
@@ -193,7 +195,9 @@ export function TrackersPanel() {
     setBusy(tracker);
     getTrackerAuthorizeUrl(tracker)
       .then(({ url }) => {
-        window.location.href = url;
+        const target = websiteUrl(url);
+        if (!target) throw new Error('The tracker sent an address that cannot be opened.');
+        window.location.href = target;
       })
       .catch((error) => {
         toast({ description: errorMessage(error, "Couldn't start that connection.") });
@@ -256,12 +260,18 @@ export function TrackersPanel() {
           >
             {account ? (
               <div className="flex items-center gap-2">
-                <button onClick={handleSyncNow} disabled={syncing || isBusy} className={BUTTON}>
+                <button
+                  type="button"
+                  onClick={handleSyncNow}
+                  disabled={syncing || isBusy}
+                  className={BUTTON}
+                >
                   {syncing ? 'Syncing…' : 'Sync now'}
                 </button>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <button
+                      type="button"
                       disabled={isBusy}
                       className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition hover:bg-destructive/20 disabled:opacity-50"
                     >
@@ -296,6 +306,7 @@ export function TrackersPanel() {
               />
             ) : (
               <button
+                type="button"
                 onClick={() => handleConnect(entry)}
                 disabled={isBusy || loading || !entry.available}
                 className={BUTTON}

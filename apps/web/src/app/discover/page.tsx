@@ -7,10 +7,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 export const metadata: Metadata = {
   title: 'Browse Sources — Projekt Manga',
   description:
-    'Browse manga through your installed source extensions — MangaDex, KissManga, MangaGeko and more — with popular and latest feeds per source.',
+    'Browse manga through your installed sources — MangaDex, KissManga, MangaGeko and more — with popular and latest feeds per source.',
   openGraph: {
     title: 'Browse Sources — Projekt Manga',
-    description: 'Popular and latest titles from each installed extension.',
+    description: 'Popular and latest titles from each installed source.',
     type: 'website',
   },
   twitter: {

@@ -52,7 +52,7 @@ function SourceAvatar({ name, accent, url }: { name: string; accent: string; url
           loading="lazy"
           onError={() => setFailed(true)}
           onLoad={(event) => setFailed(isProxyPlaceholder(event.currentTarget))}
-          className="size-7 rounded-md object-contain"
+          className="size-7 pointer-coarse:size-11 rounded-md object-contain"
         />
       </span>
     );
@@ -204,7 +204,7 @@ export function InstalledSourceCard({
             health === 'failing' ||
             health === 'cooling-down' ||
             privateReading) && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs font-medium">
               {rating === 'nsfw' && (
                 <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-destructive">
                   Adult
@@ -241,6 +241,7 @@ export function InstalledSourceCard({
           )}
         </div>
         <button
+          type="button"
           aria-label={`${pinned ? 'Unpin' : 'Pin'} ${source.name}`}
           title={pinned ? 'Unpin source' : 'Pin source'}
           aria-pressed={pinned}

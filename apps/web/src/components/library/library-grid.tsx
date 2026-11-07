@@ -66,8 +66,9 @@ export function LibraryGrid({
         </div>
       </EmptyState>
     );
+  const selectedIds = new Set(selected);
   const selection = (item: Manga) => ({
-    selected: selected.includes(item.id),
+    selected: selectedIds.has(item.id),
     selectionMode: selected.length > 0,
     onSelect: onSelect ? () => onSelect(item.id) : undefined,
   });

@@ -24,7 +24,9 @@ export const chapterMetaSchema = z
 export type ChapterMetaBody = z.infer<typeof chapterMetaSchema>;
 
 export const chaptersBulkBodySchema = z.object({
-  chapters: z.array(chapterMetaSchema).optional(),
+  // Each chapter is several writes, so this bounds how long one request holds SQLite's
+  // single writer. Long enough for the longest-running titles.
+  chapters: z.array(chapterMetaSchema).max(5000).optional(),
   source_manga_id: z.string().min(1).optional(),
   /** Manga-level display fields for the history rows this writes. Needed for titles read
    * straight from a source, which have no `manga` row to join a title/cover from — these

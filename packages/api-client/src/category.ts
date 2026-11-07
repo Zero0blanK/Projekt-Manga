@@ -1,11 +1,21 @@
 import { request } from './client.js';
+import type { Category, CategoryWithMembers } from '@projekt-manga/types';
+export type { Category, CategoryWithMembers } from '@projekt-manga/types';
 
-export interface Category {
-  id: string;
-  name: string;
-  created_at: string;
-  updated_at: string;
-}
+export const getCategoryState = (signal?: AbortSignal) =>
+  request<CategoryWithMembers[]>('/category/state', { signal });
+
+export const setCategoryMembership = (categoryId: string, mangaId: string, member: boolean) =>
+  request<void>(
+    `/category/${encodeURIComponent(categoryId)}/manga/${encodeURIComponent(mangaId)}`,
+    { method: member ? 'PUT' : 'DELETE' },
+  );
+
+export const importCategories = (categories: { name: string; manga_ids: string[] }[]) =>
+  request<{ categories: number; assignments: number }>('/category/import', {
+    method: 'POST',
+    body: { categories },
+  });
 
 export const getCategories = (signal?: AbortSignal) => request<Category[]>('/category', { signal });
 

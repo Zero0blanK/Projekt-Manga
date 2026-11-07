@@ -1,9 +1,10 @@
 /** Manages cookies and sessions, isolated per proxy. */
 
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { SessionConfig, BrowserFingerprint } from '../config/anon.config.js';
-import { getLogger } from './DetectionLogger.js';
+import { getLogger, redactProxyUrl } from './DetectionLogger.js';
 
 export interface Cookie {
   name: string;
@@ -28,6 +29,20 @@ export interface Session {
 }
 
 const DEFAULT_AUTOSAVE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+/** A stored entry worth loading: the file is read back as data, not trusted as a Session. */
+function isStoredSession(value: unknown): value is { key: string; session: Session } {
+  if (typeof value !== 'object' || value === null) return false;
+  const { key, session } = value as { key?: unknown; session?: Partial<Session> | null };
+  return (
+    typeof key === 'string' &&
+    typeof session === 'object' &&
+    session !== null &&
+    typeof session.id === 'string' &&
+    typeof session.createdAt === 'number' &&
+    Array.isArray(session.cookies)
+  );
+}
 
 /** Host-vs-cookie-domain match, honouring the leading-dot subdomain convention. */
 export function domainMatches(host: string, cookieDomain: string): boolean {
@@ -112,14 +127,15 @@ export class SessionManager {
   /**
    * Generates the session key from the proxy URL.
    *
-   * The URL is used verbatim rather than hashed: a short hash could collide, making two
-   * proxies silently share cookies and fingerprint, which this map exists to prevent.
+   * A proxy URL can carry credentials and these keys are written to disk, so it's hashed.
+   * The full SHA-256: a short hash could collide, making two proxies silently share cookies
+   * and fingerprint, which this map exists to prevent.
    */
   private getSessionKey(proxyUrl: string | null): string {
     if (!this.config.isolatePerProxy || !proxyUrl) {
       return 'direct';
     }
-    return `proxy_${proxyUrl}`;
+    return `proxy_${crypto.createHash('sha256').update(proxyUrl).digest('hex')}`;
   }
 
   private generateSessionId(): string {
@@ -259,11 +275,15 @@ export class SessionManager {
 
     const sessionsArray = Array.from(this.sessions.entries()).map(([key, session]) => ({
       key,
-      session,
+      session: { ...session, proxyUrl: session.proxyUrl && redactProxyUrl(session.proxyUrl) },
     }));
 
+    // Cookies are credentials: readable by this user only, and swapped in whole so a crash
+    // can't leave half a file.
     const filePath = path.join(this.storagePath, 'sessions.json');
-    await fs.promises.writeFile(filePath, JSON.stringify(sessionsArray, null, 2));
+    const temporary = `${filePath}.${process.pid}.tmp`;
+    await fs.promises.writeFile(temporary, JSON.stringify(sessionsArray, null, 2), { mode: 0o600 });
+    await fs.promises.rename(temporary, filePath);
   }
 
   async loadFromStorage(): Promise<void> {
@@ -280,10 +300,8 @@ export class SessionManager {
 
     try {
       const data = await fs.promises.readFile(filePath, 'utf-8');
-      const sessionsArray = JSON.parse(data) as Array<{
-        key: string;
-        session: Session;
-      }>;
+      const parsed: unknown = JSON.parse(data);
+      const sessionsArray = Array.isArray(parsed) ? parsed.filter(isStoredSession) : [];
 
       this.sessions.clear();
       for (const { key, session } of sessionsArray) {

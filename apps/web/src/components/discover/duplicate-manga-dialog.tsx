@@ -172,6 +172,7 @@ export function useDuplicateCheckedAdd(onAdded?: (mangaId: string) => void) {
 
         <div className="flex justify-end gap-2">
           <button
+            type="button"
             onClick={close}
             disabled={busy}
             className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
@@ -179,6 +180,7 @@ export function useDuplicateCheckedAdd(onAdded?: (mangaId: string) => void) {
             Cancel
           </button>
           <button
+            type="button"
             onClick={addAnyway}
             disabled={busy}
             className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"

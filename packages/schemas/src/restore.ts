@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { addMangaBodySchema } from './manga.js';
 import { addHistoryBodySchema } from './history.js';
+import { SHELF_STATUSES } from './library.js';
 
 /** Maximum serialized restore upload accepted by both the browser and API. */
 export const RESTORE_UPLOAD_LIMIT_BYTES = 10 * 1024 * 1024;
@@ -83,7 +84,7 @@ const restoreBackupSchema = z.object({
       z.object({
         manga_id: z.string().min(1).max(512),
         is_bookmarked: z.boolean(),
-        shelf_status: z.enum(['READING', 'COMPLETED', 'ON_HOLD', 'PLAN', 'DROPPED']).nullable(),
+        shelf_status: z.enum(SHELF_STATUSES).nullable(),
         notification_read: z.boolean(),
         score: z.number().int().min(0).max(100).nullable().optional(),
       }),

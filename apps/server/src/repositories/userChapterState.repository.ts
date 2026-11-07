@@ -64,6 +64,29 @@ const markManyRead = async (user_id: string, chapter_ids: string[]): Promise<voi
   });
 };
 
+/** The other half of markManyRead: unread, and the saved page goes with it. */
+const markManyUnread = async (user_id: string, chapter_ids: string[]): Promise<void> => {
+  if (chapter_ids.length === 0) {
+    return;
+  }
+  const existing = await prisma.user_chapter_state.findMany({
+    where: { user_id, chapter_id: { in: chapter_ids } },
+    select: { chapter_id: true },
+  });
+  const toCreate = excludeExisting(
+    chapter_ids.map((chapter_id) => ({ user_id, chapter_id })),
+    existing.map((r) => r.chapter_id),
+    (r) => r.chapter_id,
+  );
+  if (toCreate.length > 0) {
+    await prisma.user_chapter_state.createMany({ data: toCreate });
+  }
+  await prisma.user_chapter_state.updateMany({
+    where: { user_id, chapter_id: { in: chapter_ids } },
+    data: { is_read: false, last_page_read: 0 },
+  });
+};
+
 /** Each row names its chapter by source key, the way devices push it: their own rows for
  * the same chapter have their own ids. */
 const getChangedSince = async (user_id: string, since: Date, limit?: number, afterId?: string) => {
@@ -142,6 +165,7 @@ const userChapterStateRepository = {
   getForChapters,
   upsert,
   markManyRead,
+  markManyUnread,
   getChangedSince,
   mergeIncoming,
   claimFromAnonymous,

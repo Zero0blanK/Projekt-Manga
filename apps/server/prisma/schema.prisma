@@ -39,8 +39,6 @@ model manga {
   linked_to            manga_link[]     @relation("manga_link_linked")
 
   @@index([title])
-  @@index([author])
-  @@index([source])
   @@index([slug])
   @@unique([source, slug])
   @@index([updated_at])
@@ -61,7 +59,6 @@ model manga_detail {
   updated_at  DateTime    @updatedAt
   manga       manga       @relation(fields: [manga_id], references: [id], onDelete: Cascade)
 
-  @@index([manga_id])
   @@map("manga_details")
 }
 
@@ -94,19 +91,27 @@ model chapter {
   user_chapter_state user_chapter_state[]
 
   @@unique([source, manga_slug, source_chapter_key])
-  @@index([last_page_read])
+  @@index([manga_id, chapter_number])
   @@index([manga_id])
   @@map("chapters")
 }
 
+/** One list of categories per account, plus one for anonymous use (`user_id` null).
+ * `key` is the name in canonical form (lowercased, spaces to hyphens), the only
+ * case-insensitive handle SQLite gives us: `@@unique` treats nulls as distinct, so the
+ * migration adds a partial unique index on `key` for the anonymous rows. */
 model category {
-  id             String           @id
-  name           String           @unique
+  id             String           @id @default(cuid())
+  user_id        String?
+  name           String
+  key            String
   created_at     DateTime         @default(now())
   updated_at     DateTime         @updatedAt
+  user           user?            @relation(fields: [user_id], references: [id], onDelete: Cascade)
   manga_category manga_category[]
   user_manga_category user_manga_category[]
 
+  @@unique([user_id, key])
   @@map("categories")
 }
 
@@ -143,6 +148,7 @@ model download {
 
   @@index([chapter_id], map: "downloads_chapter_id_fkey")
   @@index([manga_id], map: "downloads_manga_id_fkey")
+  @@index([status])
   @@map("downloads")
 }
 
@@ -172,7 +178,7 @@ model history {
   @@index([manga_slug])
   @@index([chapter_id])
   @@index([manga_id], map: "histories_manga_id_fkey")
-    @@index([user_id])
+    @@index([user_id, last_read])
     @@index([user_id, sync_updated_at, id])
     @@map("histories")
 }
@@ -185,7 +191,6 @@ model cache {
   manga         manga  @relation(fields: [manga_id], references: [id], onDelete: Cascade)
 
   @@index([sha256_url])
-  @@index([thumbnail_url])
   @@map("caches")
 }
 
@@ -212,18 +217,19 @@ model manga_override {
   manga       manga    @relation(fields: [manga_id], references: [id], onDelete: Cascade)
   user        user?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
-  @@index([manga_id, user_id])
+  @@unique([manga_id, user_id])
   @@index([user_id])
   @@map("manga_overrides")
 }
 
 /** Per-manga library membership (bookmark / reading shelf / seen-notification state).
- * Single-user app — no user_id column, one row per manga. */
+ * The anonymous library — no user_id column, one row per manga. */
 /// A title read across sources: `primary_id` is the library entry, `linked_id` another
 /// source's copy of the same title, tried in `priority` order (0 first) when the primary
 /// lacks a chapter or fails to load. Per identity like manga_override: `user_id` null is
-/// the anonymous library. One primary per linked title and no chains are enforced in
-/// mangaLink.repository (SQLite treats NULLs as distinct, so not by a unique index).
+/// the anonymous library. One primary per linked title is a unique index, with a partial
+/// one in the migration for the anonymous rows, since SQLite treats NULLs as distinct.
+/// No chains is enforced in mangaLink.repository.
 model manga_link {
   id         String   @id @default(cuid())
   user_id    String?
@@ -235,8 +241,8 @@ model manga_link {
   linked     manga    @relation("manga_link_linked", fields: [linked_id], references: [id], onDelete: Cascade)
   user       user?    @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
+  @@unique([user_id, linked_id])
   @@index([user_id, primary_id])
-  @@index([user_id, linked_id])
   @@index([linked_id])
   @@map("manga_links")
 }
@@ -337,6 +343,7 @@ model user {
   manga_states       user_manga_state[]
   chapter_states     user_chapter_state[]
   manga_categories   user_manga_category[]
+  categories         category[]
   tracker_accounts   tracker_account[]
   tracker_links      tracker_link[]
   manga_overrides    manga_override[]
@@ -478,10 +485,8 @@ model user_chapter_state {
   @@map("user_chapter_state")
 }
 
-/** Per-user category tagging. category.name stays one shared global vocabulary (find-or-
- * create resolved in the sync/category services) — only which manga an account has
- * tagged with it is private, via this join table. Untagging is a real deletion, so it
- * carries a tombstone like user_library. */
+/** Per-user category tagging: which of its own categories an account has put a title in.
+ * Untagging is a real deletion, so it carries a tombstone like user_library. */
 model user_manga_category {
   id          String    @id @default(cuid())
   user_id     String

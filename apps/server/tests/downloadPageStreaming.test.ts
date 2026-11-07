@@ -52,7 +52,6 @@ describe('chapter page streaming', () => {
     vi.mocked(axios.get).mockResolvedValueOnce({ data: Readable.from([bytes]) });
 
     await downloadService.downloadPageWithRetry(
-      'download-1',
       'https://example.com/page.jpg',
       1,
       'Chapter_1',
@@ -108,7 +107,6 @@ describe('chapter page streaming', () => {
     const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
     vi.mocked(axios.get).mockResolvedValueOnce({ data: Readable.from([png]) });
     await downloadService.downloadPageWithRetry(
-      'download-1',
       'https://example.com/page',
       2,
       'Chapter_1',
@@ -122,7 +120,6 @@ describe('chapter page streaming', () => {
     });
     const failure = await downloadService
       .downloadPageWithRetry(
-        'download-1',
         'https://example.com/page?token=fixture-secret',
         3,
         'Chapter_1',
@@ -142,7 +139,6 @@ describe('chapter page streaming', () => {
 
     await expect(
       downloadService.downloadPageWithRetry(
-        'download-1',
         'https://example.com/page.jpg',
         1,
         'Chapter_1',

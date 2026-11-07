@@ -80,7 +80,7 @@ describe('reportSourceFailure', () => {
     reportSourceFailure(new TypeError('undefined is not a function'), 'mangatx');
 
     expect(toast.mock.calls[0][0].description).toContain('mangatx');
-    expect(toast.mock.calls[0][0].description).toContain('Something went wrong');
+    expect(toast.mock.calls[0][0].description).toContain("Couldn't reach this source");
   });
 
   it('collapses a burst of identical failures into one toast', () => {

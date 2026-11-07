@@ -66,7 +66,7 @@ describe('source search pagination recovery', () => {
     const { container } = render(<SourceSearchCarousel source={source} query="title" />);
     await screen.findByText('Title 0');
     scrollToEnd(container);
-    const retry = await screen.findByRole('button', { name: /Could not load more results/ });
+    const retry = await screen.findByRole('button', { name: /Couldn't load more results/ });
     expect(screen.getByText('Title 0')).toBeInTheDocument();
     fireEvent.click(retry);
     expect(await screen.findByText('Next title')).toBeInTheDocument();
@@ -86,7 +86,7 @@ describe('source search pagination recovery', () => {
     const { container } = render(<SourceSearchCarousel source={source} query="title" />);
     await screen.findByText('Title 0');
     scrollToEnd(container);
-    const retry = await screen.findByRole('button', { name: /Could not load more results/ });
+    const retry = await screen.findByRole('button', { name: /Couldn't load more results/ });
     // The repeated page was not committed: no duplicate cards, and its cursor was not kept.
     expect(screen.getAllByText('Title 0')).toHaveLength(1);
     fireEvent.click(retry);

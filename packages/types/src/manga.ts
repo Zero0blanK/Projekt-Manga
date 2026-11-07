@@ -32,4 +32,7 @@ export interface MangaDexTag {
 export interface GetMangaOptions {
   sortBy?: 'title' | 'dateAdded' | 'recentlyRead';
   sortOrder?: 'asc' | 'desc';
+  /** One page of the list; everything when left out. */
+  limit?: number;
+  offset?: number;
 }

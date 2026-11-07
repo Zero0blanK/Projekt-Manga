@@ -1,13 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
-import {
-  getAllDownloads,
-  subscribeToDownloadEvents,
-  type DownloadSummary,
-} from '@projekt-manga/api-client';
+import { subscribeToDownloadEvents, type DownloadSummary } from '@projekt-manga/api-client';
 import { useMangaLibrary } from '@/lib/library-store';
 import { getSetting } from '@/lib/app-store';
+import { fetchDownloads } from '@/lib/shared-queries';
 import { toast } from '@/hooks/use-toast';
 
 export type DownloadRowStatus = 'queued' | 'downloading' | 'paused' | 'done' | 'failed';
@@ -95,7 +92,7 @@ function setRows(next: DownloadRow[]) {
 
 function refresh() {
   const id = ++refreshId;
-  getAllDownloads()
+  fetchDownloads()
     .then((all) => {
       if (id !== refreshId) return;
       loading = false;

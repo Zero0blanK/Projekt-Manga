@@ -68,7 +68,7 @@ function Keys({ keys }: { keys: string[] }) {
     <span className="flex items-center gap-1">
       {keys.map((k, i) => (
         <span key={`${k}-${i}`} className="flex items-center gap-1">
-          {i > 0 && <span className="text-[10px] text-muted-foreground">then</span>}
+          {i > 0 && <span className="text-xs text-muted-foreground">then</span>}
           <kbd className="rounded-md border border-border/80 bg-background px-2 py-1 font-mono text-[11px] text-muted-foreground">
             {k}
           </kbd>

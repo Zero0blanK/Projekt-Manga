@@ -322,6 +322,7 @@ describe('DELETE /api/manga/:manga_id/delete scoping', () => {
 
 describe('POST /api/manga/:category_id/:manga_slug/add', () => {
   it('404s when the manga slug is not in the library', async () => {
+    prismaMock.category.findFirst.mockResolvedValueOnce({ id: 'action' });
     prismaMock.manga.findUnique.mockResolvedValueOnce(null);
 
     const res = await request(app).post('/api/manga/action/unknown-slug/add');
@@ -329,7 +330,17 @@ describe('POST /api/manga/:category_id/:manga_slug/add', () => {
     expect(res.status).toBe(404);
   });
 
+  it("404s for a category the caller doesn't own", async () => {
+    prismaMock.category.findFirst.mockResolvedValueOnce(null);
+
+    const res = await request(app).post('/api/manga/someone-elses/one-piece/add');
+
+    expect(res.status).toBe(404);
+    expect(prismaMock.manga_category.create).not.toHaveBeenCalled();
+  });
+
   it('links the manga to the category on success', async () => {
+    prismaMock.category.findFirst.mockResolvedValueOnce({ id: 'action' });
     prismaMock.manga.findFirst.mockResolvedValueOnce({ id: 'manga-1' });
     prismaMock.manga_category.create.mockResolvedValueOnce({
       manga_id: 'manga-1',
@@ -345,6 +356,7 @@ describe('POST /api/manga/:category_id/:manga_slug/add', () => {
 
 describe('GET /api/manga/category/:category_id', () => {
   it('returns manga in the category without manga_detail', async () => {
+    prismaMock.category.findFirst.mockResolvedValueOnce({ id: 'action' });
     prismaMock.manga_category.findMany.mockResolvedValueOnce([{ manga_id: 'manga-1' }]);
     prismaMock.manga.findMany.mockResolvedValueOnce([
       { ...sampleManga, _count: { chapter: 1 }, chapter: [] },

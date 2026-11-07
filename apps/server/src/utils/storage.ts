@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { THUMBNAIL_WIDTHS } from './thumbnailResize.js';
 
 const thumbnailsPath = path.resolve(process.cwd(), 'data', 'thumbnails');
 const legacyThumbnailsPath = path.resolve(process.cwd(), 'public', 'extension', 'thumbnails');
@@ -38,7 +39,12 @@ export const resolveCachedThumbnail = (url: string): string => {
 export const removeCachedThumbnail = async (url: string): Promise<void> => {
   // Existing legacy files may be tracked or shared; never delete them automatically.
   if (!url.startsWith(PRIVATE_PREFIX)) return;
-  await fs.rm(resolveCachedThumbnail(url), { force: true });
+  const file = resolveCachedThumbnail(url);
+  await Promise.all(
+    [file, ...THUMBNAIL_WIDTHS.map((width) => `${file}.w${width}.webp`)].map((target) =>
+      fs.rm(target, { force: true }),
+    ),
+  );
 };
 
 /** Only private generated assets are eligible; the legacy public folder is untouched. */
@@ -53,10 +59,11 @@ export const pruneOrphanedThumbnails = async (referencedUrls: Set<string>): Prom
   let removed = 0;
   const oldestSafeTime = Date.now() - 24 * 60 * 60 * 1000;
   for (const entry of entries) {
-    if (!entry.isFile() || !/^[a-zA-Z0-9_-]+\.(?:jpg|png|gif|webp|avif)$/.test(entry.name))
-      continue;
-    if (referencedUrls.has(`${PRIVATE_PREFIX}${entry.name}`)) continue;
-    const file = fileFor(entry.name, thumbnailsPath);
+    // A resized copy ("<cover>.w400.webp") lives and dies with the cover it came from.
+    const name = /^([a-zA-Z0-9_-]+\.(?:jpg|png|gif|webp|avif))(?:\.w\d+\.webp)?$/.exec(entry.name);
+    if (!entry.isFile() || !name) continue;
+    if (referencedUrls.has(`${PRIVATE_PREFIX}${name[1]}`)) continue;
+    const file = path.join(thumbnailsPath, entry.name);
     const stat = await fs.stat(file).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return null;
       throw error;

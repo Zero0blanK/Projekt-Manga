@@ -15,5 +15,12 @@ export const MAX_PAGE_LIMIT = 200;
 export const limitQuerySchema = z.coerce.number().int().positive().max(MAX_PAGE_LIMIT).optional();
 export const offsetQuerySchema = z.coerce.number().int().nonnegative().optional();
 
+/** Optional paging for a list that otherwise returns everything. */
+export const listPageQuerySchema = z.object({
+  limit: limitQuerySchema,
+  offset: offsetQuerySchema,
+});
+export type ListPageQuery = z.infer<typeof listPageQuerySchema>;
+
 export const sortBySchema = z.enum(['title', 'dateAdded', 'recentlyRead']).optional();
 export const sortOrderSchema = z.enum(['asc', 'desc']).optional();

@@ -8,6 +8,7 @@ vi.mock('@/lib/extensions-store', () => ({
   extensionActions: { addRepository: mocks.addRepository },
   useExtensionRepositories: () => ({ repositories: mocks.repositories }),
 }));
+vi.mock('@/lib/library-store', () => ({ useMangaLibrary: () => ({ manga: [] }) }));
 vi.mock('@/hooks/use-toast', () => ({ toast: vi.fn() }));
 import { FirstUseSetup } from '@/components/discover/first-use-setup';
 import { actions } from '@/lib/app-store';
@@ -57,7 +58,8 @@ describe('Anonymous source onboarding resume and recovery', () => {
     );
     expect(screen.getByText(/Step 2 of 4/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add repository' }));
-    expect(await screen.findByRole('button', { name: 'Continue with 0 installed' })).toBeDisabled();
+    expect(await screen.findByText(/Step 3 of 4/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Skip for now' })).toBeInTheDocument();
     expect(mocks.addRepository).toHaveBeenCalledTimes(2);
     rerender(<FirstUseSetup installedCount={1} onLanguages={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Continue with 1 installed' }));

@@ -124,6 +124,7 @@ export function SourceActionBar({
       )}
 
       <button
+        type="button"
         onClick={onAdd}
         disabled={adding || checking}
         className="flex items-center gap-2 rounded-full border border-border/60 bg-surface/60 px-4 py-2.5 text-sm text-foreground transition hover:bg-surface disabled:opacity-60"
@@ -133,6 +134,7 @@ export function SourceActionBar({
       </button>
 
       <button
+        type="button"
         onClick={toggleBookmark}
         disabled={busy}
         aria-pressed={isBookmarked}
@@ -165,6 +167,7 @@ export function SourceActionBar({
       </DropdownMenu>
 
       <button
+        type="button"
         onClick={share}
         aria-label="Share"
         className="grid h-10 w-10 place-items-center rounded-full border border-border/60 bg-surface/60 text-foreground hover:bg-surface"

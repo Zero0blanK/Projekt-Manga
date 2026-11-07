@@ -52,9 +52,14 @@ export function browseQueryKey(
 }
 
 export function saveBrowseSnapshot(page: string, snapshot: Omit<BrowseSnapshot, 'savedAt'>) {
-  if (typeof window === 'undefined' || snapshot.items.length > MAX_SNAPSHOT_ITEMS) return;
+  if (typeof window === 'undefined') return;
   try {
     const key = browseQueryKey(page, snapshot);
+    // Too long to keep: drop an older, shorter list for this query rather than restore it.
+    if (snapshot.items.length > MAX_SNAPSHOT_ITEMS) {
+      sessionStorage.removeItem(key);
+      return;
+    }
     const sourcePointer = latestKey(page, snapshot.sourceId ?? '');
     const previous = sessionStorage.getItem(sourcePointer);
     sessionStorage.setItem(

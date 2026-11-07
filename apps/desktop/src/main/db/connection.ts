@@ -36,6 +36,8 @@ export function getDb(): DatabaseSync {
   openPath = dbPath;
   try {
     db.exec('PRAGMA foreign_keys = ON;');
+    // library-rescue reads the anonymous file while this may hold it: wait, don't fail.
+    db.exec('PRAGMA busy_timeout = 5000;');
     runMigrations(db);
   } catch (error) {
     closeDb();

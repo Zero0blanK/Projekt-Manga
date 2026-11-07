@@ -20,8 +20,8 @@
     "package:fast": "npm run build && npm run stage && node scripts/prepare-installer-script.mjs && electron-builder --config electron-builder.yml --dir",
     "format": "prettier --write . --ignore-path ../../.prettierignore",
     "lint": "eslint .",
-    "pretypecheck": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client",
-    "prebuild": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client",
+    "pretypecheck": "npm run build:shared --prefix ../..",
+    "prebuild": "npm run build:shared --prefix ../..",
     "stage": "node scripts/stage-installer.mjs"
   },
   "dependencies": {

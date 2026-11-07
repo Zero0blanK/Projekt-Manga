@@ -5,9 +5,7 @@
 import path from 'node:path';
 import { app, BrowserWindow, net, session, shell } from 'electron';
 import { resolveApiUrl, resolveWebUrl } from '../shared/config';
-import { fileURLToPath } from 'node:url';
 import { savedMainWindowBounds, trackMainWindowState } from './window-state';
-import { queueComicOpen } from './local-archives';
 import { isAppLocked, whenUnlocked } from './app-lock';
 import { getDesktopPreferences, setDesktopPreferences } from './desktop-preferences';
 
@@ -174,21 +172,12 @@ function hardenNavigation(win: BrowserWindow, webUrl: string, retryLoad: () => v
       retryLoad();
       return;
     }
-    // A file or folder dropped on the window: Chromium would open it as a page. It is
-    // queued as a comic to import instead, by the main process from the path itself; the
-    // page only ever asks for "the next one" (local-archives.ts).
-    if (targetUrl.startsWith('file:')) {
-      event.preventDefault();
-      try {
-        queueComicOpen(fileURLToPath(targetUrl));
-      } catch {
-        /* not a local path */
-      }
-      return;
-    }
+    // Includes file: URLs, which go nowhere. A dropped comic arrives through the page's
+    // drop handler and importDropped, which only a real drag can reach: treating a
+    // navigation as a drop would let any script in the page pull in a local file.
     if (!isAllowed(targetUrl)) {
       event.preventDefault();
-      openExternalIfSafe(targetUrl);
+      openExternalThrottled(targetUrl);
     }
   });
 
@@ -214,9 +203,32 @@ function hardenNavigation(win: BrowserWindow, webUrl: string, retryLoad: () => v
   // either way, so Electron never creates a window with options the page chose.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowed(url)) openContentWindow(url);
-    else openExternalIfSafe(url);
+    else openExternalThrottled(url);
     return { action: 'deny' };
   });
+}
+
+/** A page can ask for the OS browser with no click behind it, and a loop of those would bury
+ * the desktop. Reading doesn't open links faster than this. */
+const EXTERNAL_OPENS_ALLOWED = 5;
+const EXTERNAL_OPEN_WINDOW_MS = 10_000;
+let externalOpens: number[] = [];
+
+function openExternalThrottled(url: string): void {
+  const now = Date.now();
+  externalOpens = externalOpens.filter((at) => now - at < EXTERNAL_OPEN_WINDOW_MS);
+  if (externalOpens.length >= EXTERNAL_OPENS_ALLOWED) {
+    console.warn('[window] Ignored an external link: too many in a row');
+    return;
+  }
+  externalOpens.push(now);
+  openExternalIfSafe(url);
+}
+
+/** Off in an installed app unless asked for, so a stray key can't open a console that can
+ * read the session. Set PROJEKT_MANGA_DEVTOOLS=1 to investigate a problem. */
+function devToolsAllowed(): boolean {
+  return !app.isPackaged || process.env.PROJEKT_MANGA_DEVTOOLS === '1';
 }
 
 /** Extra windows a page can have open at once, so a runaway loop of opens can't bury the
@@ -268,7 +280,7 @@ function attachWindowHandlers(win: BrowserWindow, reload: () => void): void {
     if (input.type !== 'keyDown') return;
     const isF12 = input.key === 'F12';
     const isInspectChord = input.control && input.shift && input.key.toLowerCase() === 'i';
-    if (isF12 || isInspectChord) {
+    if ((isF12 || isInspectChord) && devToolsAllowed()) {
       win.webContents.toggleDevTools();
     }
   });

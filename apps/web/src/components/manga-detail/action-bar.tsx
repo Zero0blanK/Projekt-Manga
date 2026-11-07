@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from '@/hooks/use-toast';
@@ -17,7 +17,6 @@ import {
   getMangaChapters,
   getMangaDetailsById,
   usesLocalFirstDataSync,
-  getAllDownloads,
   initiateDownload,
   cancelDownload,
   type MangaChapterRecord,
@@ -36,6 +35,7 @@ import { TrackerLinkButton } from '@/components/manga-detail/tracker-link-button
 import { shareSourceMangaLink } from '@/lib/source-url';
 import { reportError } from '@/lib/report-error';
 import { SourceSwitch } from './source-switch';
+import { invalidateDownloads, useDownloads } from '@/lib/shared-queries';
 
 function ContinueReadingLink({ manga }: { manga: Manga }) {
   const [localPosition, setLocalPosition] = useState<Manga | null>(null);
@@ -184,6 +184,7 @@ function BookmarkButton({ manga }: { manga: Manga }) {
 
   return (
     <button
+      type="button"
       onClick={toggleBookmark}
       aria-pressed={isBookmarked}
       aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark'}
@@ -209,7 +210,11 @@ function DownloadMenu({
   knownChapters?: MangaChapterRecord[];
 }) {
   const [chapters, setChapters] = useState<MangaChapterRecord[]>(knownChapters ?? []);
-  const [downloads, setDownloads] = useState<DownloadSummary[]>([]);
+  const { data: allDownloads, error: downloadsError } = useDownloads();
+  const downloads = useMemo(
+    () => (allDownloads ?? []).filter((d) => d.manga_id === manga.id),
+    [allDownloads, manga.id],
+  );
 
   useEffect(() => {
     if (knownChapters) {
@@ -227,12 +232,10 @@ function DownloadMenu({
     return () => controller.abort();
   }, [manga.id, manga.slug, manga.source, knownChapters]);
 
-  const refreshDownloads = () => {
-    getAllDownloads()
-      .then((all) => setDownloads(all.filter((d) => d.manga_id === manga.id)))
-      .catch((error) => reportError(error, "Couldn't refresh download status."));
-  };
-  useEffect(refreshDownloads, [manga.id]);
+  const refreshDownloads = () => void invalidateDownloads();
+  useEffect(() => {
+    if (downloadsError) reportError(downloadsError, "Couldn't refresh download status.");
+  }, [downloadsError]);
 
   const unreadChapters = chapters.filter((c) => !c.is_read);
   // A single downloaded chapter doesn't mean the manga is available offline — the button
@@ -345,6 +348,7 @@ function ShareButton({ manga }: { manga: Manga }) {
 
   return (
     <button
+      type="button"
       onClick={share}
       aria-label="Share"
       className="grid h-10 w-10 place-items-center rounded-full border border-border/60 bg-surface/60 text-foreground hover:bg-surface"
@@ -377,6 +381,7 @@ function AddToLibraryButton({ manga, onAdded }: { manga: Manga; onAdded?: () => 
 
   return (
     <button
+      type="button"
       onClick={add}
       disabled={adding}
       className="flex items-center gap-2 rounded-full border border-border/60 bg-surface/60 px-4 py-2.5 text-sm text-foreground transition hover:bg-surface disabled:opacity-60"

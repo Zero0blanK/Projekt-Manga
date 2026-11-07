@@ -7,6 +7,7 @@ export function ViewToggle() {
   return (
     <>
       <button
+        type="button"
         onClick={() => actions.setView('grid')}
         aria-label="Grid view"
         aria-pressed={view === 'grid'}
@@ -19,6 +20,7 @@ export function ViewToggle() {
         <LayoutGrid className="h-4 w-4" />
       </button>
       <button
+        type="button"
         onClick={() => actions.setView('compact')}
         aria-label="Compact grid view"
         aria-pressed={view === 'compact'}
@@ -31,6 +33,7 @@ export function ViewToggle() {
         <Grid3x3 className="h-4 w-4" />
       </button>
       <button
+        type="button"
         onClick={() => actions.setView('list')}
         aria-label="List view"
         aria-pressed={view === 'list'}

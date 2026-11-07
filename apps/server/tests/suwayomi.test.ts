@@ -526,7 +526,6 @@ describe('Suwayomi sources', () => {
     await fs.mkdir(directory);
     downloadService.setDownloadDir(directory);
     await downloadService.downloadPageWithRetry(
-      'download-1',
       `${base}/api/v1/manga/10/chapter/1/page/0`,
       1,
       'Chapter_1',
@@ -537,7 +536,6 @@ describe('Suwayomi sources', () => {
     // A page on any other local port still goes through the public guard and is refused.
     await expect(
       downloadService.downloadPageWithRetry(
-        'download-1',
         'http://127.0.0.1:1/api/v1/manga/10/chapter/1/page/0',
         2,
         'Chapter_1',

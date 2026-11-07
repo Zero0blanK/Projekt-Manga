@@ -5,6 +5,7 @@ import userLibraryRepository from '../src/repositories/userLibrary.repository.js
 import userMangaStateRepository from '../src/repositories/userMangaState.repository.js';
 import historyRepository from '../src/repositories/history.repository.js';
 import categoryRepository from '../src/repositories/category.repository.js';
+import { clampClientTime, MAX_CLOCK_SKEW_MS } from '../src/utils/syncMerge.js';
 
 /**
  * Direct tests of the two documented sync merge rules (see sync.service.ts):
@@ -209,26 +210,49 @@ describe('concurrent edit before either device has synced', () => {
   });
 });
 
-describe('category find-or-create (resolves a synced category by shared name)', () => {
+describe('category find-or-create (resolves a synced category by name, per account)', () => {
   it('reuses an existing category rather than creating a duplicate', async () => {
-    prismaMock.category.findUnique.mockResolvedValueOnce({ id: 'action', name: 'Action' });
+    prismaMock.category.findFirst.mockResolvedValueOnce({ id: 'action', name: 'Action' });
 
-    const result = await categoryRepository.findOrCreateByName('Action');
+    const result = await categoryRepository.findOrCreateByName('Action', 'user-1');
 
     expect(result).toEqual({ id: 'action', name: 'Action' });
+    expect(prismaMock.category.findFirst).toHaveBeenCalledWith({
+      where: { user_id: 'user-1', key: 'action' },
+    });
     expect(prismaMock.category.create).not.toHaveBeenCalled();
   });
 
   it('creates the category when no device has ever pushed that name before', async () => {
-    prismaMock.category.findUnique.mockResolvedValueOnce(null);
-    prismaMock.category.create.mockResolvedValueOnce({ id: 'sci-fi', name: 'Sci-Fi' });
+    prismaMock.category.findFirst.mockResolvedValueOnce(null);
+    prismaMock.category.create.mockResolvedValueOnce({ id: 'c1', name: 'Sci-Fi' });
 
-    const result = await categoryRepository.findOrCreateByName('Sci-Fi');
+    const result = await categoryRepository.findOrCreateByName('Sci-Fi', 'user-1');
 
-    expect(result).toEqual({ id: 'sci-fi', name: 'Sci-Fi' });
+    expect(result).toEqual({ id: 'c1', name: 'Sci-Fi' });
     expect(prismaMock.category.create).toHaveBeenCalledWith({
-      data: { id: 'sci-fi', name: 'Sci-Fi' },
+      data: { user_id: 'user-1', key: 'sci-fi', name: 'Sci-Fi' },
     });
+  });
+});
+
+describe('clampClientTime', () => {
+  const now = Date.parse('2026-11-05T12:00:00Z');
+
+  it('leaves a time at or behind the server alone', () => {
+    expect(clampClientTime('2026-11-05T11:00:00Z', now).toISOString()).toBe(
+      '2026-11-05T11:00:00.000Z',
+    );
+  });
+
+  it('allows ordinary clock drift', () => {
+    expect(clampClientTime('2026-11-05T12:03:00Z', now).toISOString()).toBe(
+      '2026-11-05T12:03:00.000Z',
+    );
+  });
+
+  it('pulls a far-future time back to the allowed skew', () => {
+    expect(clampClientTime('2099-01-01T00:00:00Z', now).getTime()).toBe(now + MAX_CLOCK_SKEW_MS);
   });
 });
 

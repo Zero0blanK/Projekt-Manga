@@ -6,32 +6,27 @@ import type { MangaDetails } from '@projekt-manga/types';
 import {
   getSourceChapterPages,
   buildImageProxyUrl,
-  buildApiUrl,
-  markChapterByLastPage,
   markChapterAsRead,
-  addHistory,
-  usesLocalFirstDataSync,
 } from '@projekt-manga/api-client';
 import { invalidateSavedReadingProgress } from '@/lib/query-client';
 import { fromSourceDetails } from '@/lib/manga-data';
 import { ReaderColorFilterContext, useReaderSettings } from '@/lib/reader-settings';
 import { useWakeLock } from '@/lib/use-wake-lock';
-import { useReadingClock } from '@/lib/use-reading-clock';
 import { PagedViewer } from '@/components/reader/paged-viewer';
 import { LongStripViewer } from '@/components/reader/long-strip-viewer';
 import { ReaderProgressBar } from '@/components/reader/reader-progress-bar';
 import { ReaderSettingsMenu } from '@/components/reader/reader-settings-menu';
 import { PageImageActions } from '@/components/reader/page-image-actions';
 import { usePagePrefetch } from '@/components/reader/use-page-prefetch';
+import { useChapterPages, useLoadedPage } from '@/components/reader/use-chapter-pages';
+import { useAutoMarkRead, useReaderProgress } from '@/components/reader/use-reader-progress';
 import { ExitReaderButton } from '@/components/reader/exit-reader-button';
-import { reportError } from '@/lib/report-error';
-import { queueReaderProgressBeacons } from '@/lib/reader-progress-beacon';
 import { X, ZoomIn, ZoomOut, List } from 'lucide-react';
 import { useProfilePreference } from '@/lib/profile-preferences';
 import { parseChapterParam, parsePreferredGroup } from '@/lib/reader-preferences';
 import { ReaderPersonalTools } from '@/components/reader/reader-personal-tools';
 import { ReaderTintOverlay } from '@/components/reader/reader-tint';
-import { isSourceIncognito, useSourceIncognito } from '@/lib/incognito';
+import { useSourceIncognito } from '@/lib/incognito';
 import { useAutoAdvanceCountdown } from '@/lib/auto-advance';
 import { useReaderZoom, ZOOM_MAX, ZOOM_MIN } from '@/lib/reader-zoom';
 import { useReaderInput } from '@/components/reader/use-reader-input';
@@ -65,7 +60,6 @@ export function SourceReaderClient({
     parsePreferredGroup,
     '',
   );
-  const [loadedImages, setLoadedImages] = useState<Set<string>>(new Set());
   const [chromeShown, setChromeShown] = useState(true);
 
   const {
@@ -115,30 +109,41 @@ export function SourceReaderClient({
   const [page, setPage] = useState(requestedPage ?? 1);
   const { zoom, setZoom, zoomIn, zoomOut, zoomReset } = useReaderZoom();
   const [chapterListOpen, setChapterListOpen] = useState(false);
-  const [pagesData, setPagesData] = useState<{
-    chapter: number;
-    chapterId: string;
-    urls: string[];
-  } | null>(null);
-  const [pagesError, setPagesError] = useState(false);
-  const [pagesRetry, setPagesRetry] = useState(0);
   const [observedTotal, setObservedTotal] = useState<{ chapter: number; total: number } | null>(
     null,
   );
 
   const currentRecord = chapterByNumber.get(chapter);
-  const pageUrls =
-    pagesData?.chapter === chapter && pagesData.chapterId === currentRecord?.id
-      ? pagesData.urls
-      : [];
   const invalidChapterId =
     requestedChapterId !== null && !chapters.some((record) => record.id === requestedChapterId);
-  const imageReady = Boolean(currentRecord && loadedImages.has(`${currentRecord.id}:${page}`));
+  const { imageReady, markPageLoaded } = useLoadedPage(currentRecord?.id, page);
   const onPageReady = (number: number, p: number) => {
     const record = chapterByNumber.get(number);
-    if (!record) return;
-    setLoadedImages((previous) => new Set(previous).add(`${record.id}:${p}`));
+    if (record) markPageLoaded(record.id, p);
   };
+
+  // Zoom is deliberately left alone here — see the same note in the library reader
+  // (app/reader/[id]/client.tsx) for why resetting it on every chapter change breaks
+  // Long Strip mode's auto-advance-while-scrolling.
+  const { pageUrls, pagesError, pagesFor, retryPages } = useChapterPages({
+    chapter,
+    record: currentRecord,
+    enabled: chapters.length > 0 && effectiveLayout !== 'Long strip' && !invalidChapterId,
+    load: async (record) => {
+      const result = await getSourceChapterPages(sourceId, record.id, { mangaSlug: details.slug });
+      return result.items
+        .sort((a, b) => a.index - b.index)
+        .map((p) => (p.image_url ? buildImageProxyUrl(p.image_url, sourceId) : ''))
+        .filter(Boolean);
+    },
+  });
+  const fetchPages = useCallback(
+    (chapterNumber: number): Promise<string[]> => {
+      const record = chapterByNumber.get(chapterNumber);
+      return record ? pagesFor(record) : Promise.resolve([]);
+    },
+    [chapterByNumber, pagesFor],
+  );
   const knownTotal =
     (observedTotal?.chapter === chapter ? observedTotal.total : 0) ||
     pageUrls.length ||
@@ -148,220 +153,58 @@ export function SourceReaderClient({
 
   usePagePrefetch(pageUrls, page, pagePrefetchAhead);
 
-  // Zoom is deliberately left alone here — see the same effect in the library reader
-  // (app/reader/[id]/client.tsx) for why resetting it on every chapter change breaks
-  // Long Strip mode's auto-advance-while-scrolling.
-  const fetchPages = useCallback(
-    async (chapterNumber: number): Promise<string[]> => {
-      const record = chapterByNumber.get(chapterNumber);
-      if (!record) return [];
-      const result = await getSourceChapterPages(sourceId, record.id, { mangaSlug: details.slug });
-      return result.items
-        .sort((a, b) => a.index - b.index)
-        .map((p) => (p.image_url ? buildImageProxyUrl(p.image_url, sourceId) : ''))
-        .filter(Boolean);
-    },
-    [chapterByNumber, sourceId, details.slug],
-  );
-
-  useEffect(() => {
-    if (chapters.length === 0 || effectiveLayout === 'Long strip' || invalidChapterId) return;
-    let cancelled = false;
-    const target = chapter;
-    setPagesError(false);
-    fetchPages(target)
-      .then((urls) => {
-        if (!cancelled) {
-          setPagesData({ chapter: target, chapterId: chapterByNumber.get(target)?.id ?? '', urls });
-          setPagesError(urls.length === 0);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setPagesError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    chapter,
-    chapters,
-    effectiveLayout,
-    fetchPages,
-    pagesRetry,
-    invalidChapterId,
-    chapterByNumber,
-  ]);
-
   /* ------------------------------------------------- progress + history (no manga row) */
 
-  const pending = useRef<{
-    chapterId: string;
-    chapterNumber: number;
-    name: string;
-    url: string;
-    page: number;
-    pageCount: number;
-  } | null>(null);
-  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveQueue = useRef<Promise<void>>(Promise.resolve());
-  const autoReadSent = useRef(new Set<string>());
-  const takeElapsed = useReadingClock();
   const incognito = useSourceIncognito(sourceId);
-  useEffect(() => {
-    takeElapsed();
-  }, [incognito, takeElapsed]);
-
-  const flush = useCallback(
-    (useBeacon = false) => {
-      if (isSourceIncognito(sourceId)) {
-        pending.current = null;
-        return;
-      }
-      const p = pending.current;
-      if (!p) return;
-      pending.current = null;
-      if (flushTimer.current) {
-        clearTimeout(flushTimer.current);
-        flushTimer.current = null;
-      }
-
-      // chapter.manga_id and history.manga_id are both nullable, so these persist against
-      // the slug alone. `title` is sent explicitly because there's no manga row to join to.
-      const path = `/chapter/${encodeURIComponent(details.slug)}/${encodeURIComponent(p.chapterId)}/${p.page}/mark-by-page`;
-      const body = {
-        source: sourceId,
-        chapter_number: p.chapterNumber,
-        name: p.name,
-        url: p.url,
-        page_count: p.pageCount,
-      };
-      const history = {
-        source: sourceId,
-        manga_slug: details.slug,
+  const canSave = !incognito && !!currentRecord && knownTotal > 0 && imageReady;
+  // chapter.manga_id and history.manga_id are both nullable, so these persist against the
+  // slug alone. The title and cover are sent because there's no manga row to join to.
+  const { flushProgress: flush } = useReaderProgress(
+    {
+      source: sourceId,
+      mangaSlug: details.slug,
+      history: {
         source_manga_id: details.id,
         title: details.title,
         thumbnail_url: details.thumbnail_url || undefined,
-        source_chapter_key: p.chapterId,
-        pages_read: p.page,
-        // Increment since the last flush — the server adds it to the stored total.
-        time_read: takeElapsed(),
-      };
-
-      // On tab close/hide a normal fetch is often killed mid-flight; sendBeacon is the
-      // one transport the browser promises to finish — see the same guard in the library
-      // reader (app/reader/[id]/client.tsx's flushProgress), which this mirrors so a
-      // preview read doesn't lose progress/history that a library read wouldn't.
-      if (useBeacon && !usesLocalFirstDataSync()) {
-        const queued = queueReaderProgressBeacons(
-          buildApiUrl(path),
-          body,
-          buildApiUrl('/history/add'),
-          history,
-        );
-        if (queued?.progressQueued || queued?.historyQueued) invalidateSavedReadingProgress();
-        if (queued?.progressQueued && queued.historyQueued) return;
-        if (queued?.progressQueued) {
-          addHistory(history)
-            .then(invalidateSavedReadingProgress)
-            .catch((error) => reportError(error, "Your reading progress isn't being saved."));
-          return;
-        }
-        if (queued?.historyQueued) {
-          markChapterByLastPage(details.slug, p.chapterId, p.page, body)
-            .then(invalidateSavedReadingProgress)
-            .catch((error) => reportError(error, "Your reading progress isn't being saved."));
-          return;
-        }
-      }
-
-      saveQueue.current = saveQueue.current.then(async () => {
-        if (isSourceIncognito(sourceId)) return;
-        await Promise.all([
-          markChapterByLastPage(details.slug, p.chapterId, p.page, body)
-            .then(invalidateSavedReadingProgress)
-            .catch((error) => reportError(error, "Your reading progress isn't being saved.")),
-          addHistory(history).catch((error) =>
-            reportError(error, "Your reading progress isn't being saved."),
-          ),
-        ]);
-      });
+      },
     },
-    [details.id, details.slug, details.title, details.thumbnail_url, sourceId, takeElapsed],
+    canSave && !invalidChapterId
+      ? {
+          sourceChapterKey: currentRecord.id,
+          page: Math.min(page, knownTotal),
+          pageCount: knownTotal,
+          body: {
+            source: sourceId,
+            chapter_number: currentRecord.chapter_number,
+            name: currentRecord.name,
+            url: currentRecord.url,
+            page_count: knownTotal,
+          },
+        }
+      : null,
   );
 
+  // Only the URL is authoritative here; streamed chapter updates have their own path.
+  const addressState = useRef({ chapter, flush });
+  addressState.current = { chapter, flush };
   useEffect(() => {
-    if (chapter !== requestedChapter) flush();
+    if (addressState.current.chapter !== requestedChapter) addressState.current.flush();
     setChapter(requestedChapter);
     setPage(requestedPage ?? 1);
-    // Only the URL is authoritative here; streamed chapter updates have their own path.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedChapter, requestedPage, flush]);
+  }, [requestedChapter, requestedPage]);
 
-  useEffect(() => {
-    const record = chapterByNumber.get(chapter);
-    if (incognito || !record || knownTotal === 0 || !imageReady || invalidChapterId) return;
-    pending.current = {
-      chapterId: record.id,
-      chapterNumber: record.chapter_number,
-      name: record.name,
-      url: record.url,
-      page: Math.min(page, knownTotal),
-      pageCount: knownTotal,
-    };
-    if (flushTimer.current) clearTimeout(flushTimer.current);
-    flushTimer.current = setTimeout(() => flush(), 800);
-    return () => {
-      if (flushTimer.current) clearTimeout(flushTimer.current);
-    };
-  }, [chapter, page, knownTotal, chapterByNumber, flush, imageReady, invalidChapterId, incognito]);
-
-  useEffect(() => {
-    const onHide = () => {
-      if (document.visibilityState === 'hidden') flush(true);
-    };
-    const onPageHide = () => flush(true);
-    document.addEventListener('visibilitychange', onHide);
-    window.addEventListener('pagehide', onPageHide);
-    return () => {
-      document.removeEventListener('visibilitychange', onHide);
-      window.removeEventListener('pagehide', onPageHide);
-      flush();
-    };
-  }, [flush]);
-
-  useEffect(() => {
-    const record = chapterByNumber.get(chapter);
-    if (
-      incognito ||
-      !record ||
-      knownTotal === 0 ||
-      page < knownTotal ||
-      !imageReady ||
-      invalidChapterId
-    )
-      return;
-    if (autoReadSent.current.has(record.id)) return;
-    autoReadSent.current.add(record.id);
-    markChapterAsRead(details.slug, record.id, {
+  const finishedRecord = canSave && !invalidChapterId && page >= knownTotal ? currentRecord : null;
+  useAutoMarkRead(finishedRecord?.id ?? null, () => {
+    const record = finishedRecord!;
+    return markChapterAsRead(details.slug, record.id, {
       source: sourceId,
       chapter_number: record.chapter_number,
       name: record.name,
       url: record.url,
       page_count: knownTotal,
-    })
-      .then(invalidateSavedReadingProgress)
-      .catch(() => autoReadSent.current.delete(record.id));
-  }, [
-    chapter,
-    page,
-    knownTotal,
-    chapterByNumber,
-    details.slug,
-    sourceId,
-    imageReady,
-    invalidChapterId,
-    incognito,
-  ]);
+    }).then(invalidateSavedReadingProgress);
+  });
 
   /* ------------------------------------------------------------------ navigation */
 
@@ -475,7 +318,7 @@ export function SourceReaderClient({
             Couldn&apos;t load this chapter&apos;s pages.
             <button
               type="button"
-              onClick={() => setPagesRetry((value) => value + 1)}
+              onClick={retryPages}
               className="ml-2 text-primary hover:underline"
             >
               Try again
@@ -501,13 +344,14 @@ export function SourceReaderClient({
             <h1 className="truncate text-sm font-semibold text-white">
               {incognito ? `Incognito · ${details.title}` : details.title}
             </h1>
-            <div className="truncate text-[11px] text-white/50">
+            <div className="truncate text-xs text-white/50">
               Chapter {chapter} · {title}
             </div>
           </div>
 
           <div className="relative ml-auto flex items-center gap-1">
             <button
+              type="button"
               onClick={() => setChapterListOpen((v) => !v)}
               aria-expanded={chapterListOpen}
               aria-label="Chapter list"
@@ -519,6 +363,7 @@ export function SourceReaderClient({
             </button>
             <div className="flex items-center gap-0.5 rounded-lg border border-white/10 px-0.5">
               <button
+                type="button"
                 onClick={zoomOut}
                 disabled={zoom <= ZOOM_MIN}
                 aria-label="Zoom out"
@@ -527,12 +372,14 @@ export function SourceReaderClient({
                 <ZoomOut className="h-4 w-4" />
               </button>
               <button
+                type="button"
                 onClick={() => setZoom(1)}
                 className="w-11 text-center text-xs tabular-nums text-white/60 hover:text-white"
               >
                 {Math.round(zoom * 100)}%
               </button>
               <button
+                type="button"
                 onClick={zoomIn}
                 disabled={zoom >= ZOOM_MAX}
                 aria-label="Zoom in"
@@ -576,6 +423,7 @@ export function SourceReaderClient({
                 >
                   {[...chapters].reverse().map((c) => (
                     <button
+                      type="button"
                       key={c.id}
                       onClick={() => {
                         setPreferredGroup(c.scanlator ?? '');

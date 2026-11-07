@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { SelectMenu } from '@/components/ui/select-menu';
 import { Download, Sparkles } from 'lucide-react';
-import { getHistory, type HistoryEntry } from '@projekt-manga/api-client';
+import { type HistoryEntry } from '@projekt-manga/api-client';
 import { EmptyState, PageHeader, PageShell } from '@/components/page-shell';
 import { useMangaLibrary } from '@/lib/library-store';
-import { isAborted } from '@/lib/report-error';
 import { historyYears, yearInManga, type YearInManga } from '@/lib/reading-stats';
+import { useHistory } from '@/lib/shared-queries';
 
 const MONTHS = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
 
@@ -68,19 +68,9 @@ function drawCard(stats: YearInManga): Promise<Blob | null> {
 /** "Your year in manga": a yearly summary of the reading history, made on this device. */
 export function YearInMangaClient() {
   const { manga: library } = useMangaLibrary();
-  const [history, setHistory] = useState<HistoryEntry[] | null>(null);
-  const [failed, setFailed] = useState(false);
+  const { data, isError: failed } = useHistory();
+  const history: HistoryEntry[] | null = data ?? null;
   const [year, setYear] = useState<number | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    getHistory(controller.signal)
-      .then(setHistory)
-      .catch((error) => {
-        if (!isAborted(error)) setFailed(true);
-      });
-    return () => controller.abort();
-  }, []);
 
   const years = useMemo(() => (history ? historyYears(history) : []), [history]);
   const shown = year ?? years[0] ?? new Date().getFullYear();
@@ -195,7 +185,7 @@ export function YearInMangaClient() {
                       className="w-full rounded-t bg-primary/80"
                       style={{ height: `${Math.max(count ? 4 : 0, (count / max) * 100)}%` }}
                     />
-                    <span className="text-[10px] text-muted-foreground">{MONTHS[index]}</span>
+                    <span className="text-xs text-muted-foreground">{MONTHS[index]}</span>
                   </div>
                 );
               })}

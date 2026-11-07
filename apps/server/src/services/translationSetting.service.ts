@@ -6,13 +6,10 @@
  * and alert destinations, and no response ever carries it, or any part of it: a client
  * learns only that a key is saved. Leaving the key out of a save keeps the saved one.
  */
-import prisma from '../configs/prisma.config.js';
+import translationSettingRepository from '../repositories/translationSetting.repository.js';
 import type { TranslateProvider, TranslateSettingsBody } from '@projekt-manga/schemas';
 import { decryptToken, encryptToken } from '../utils/tokenCrypto.js';
 import { ServiceUnavailableError, ValidationError } from '../utils/customErrors.js';
-
-/** One row per identity: the anonymous library, or an account. */
-const settingId = (user_id: string | null) => (user_id ? `user:${user_id}` : 'local');
 
 export interface TranslationSettingSummary {
   provider: TranslateProvider;
@@ -57,9 +54,6 @@ function summarize(row: Row): TranslationSettingSummary {
   };
 }
 
-const find = (user_id: string | null) =>
-  prisma.translation_setting.findUnique({ where: { id: settingId(user_id) } });
-
 /** Encrypts a key, or says plainly why it can't be saved. */
 function encryptKey(key: string): string {
   try {
@@ -74,7 +68,7 @@ function encryptKey(key: string): string {
 }
 
 const get = async (user_id: string | null): Promise<TranslationSettingSummary | null> => {
-  const row = await find(user_id);
+  const row = await translationSettingRepository.find(user_id);
   return row ? summarize(row) : null;
 };
 
@@ -82,7 +76,7 @@ const save = async (
   body: TranslateSettingsBody,
   user_id: string | null,
 ): Promise<TranslationSettingSummary> => {
-  const existing = await find(user_id);
+  const existing = await translationSettingRepository.find(user_id);
   const keepKey = !body.api_key && !body.clear_api_key;
   const key_encrypted = body.api_key
     ? encryptKey(body.api_key)
@@ -96,17 +90,17 @@ const save = async (
   if (body.provider === 'deepl' && !key_encrypted)
     throw new ValidationError('DeepL needs an API key');
 
-  const data = { provider: body.provider, url, key_encrypted };
-  const row = await prisma.translation_setting.upsert({
-    where: { id: settingId(user_id) },
-    create: { id: settingId(user_id), user_id, ...data },
-    update: data,
-  });
-  return summarize(row);
+  return summarize(
+    await translationSettingRepository.save(user_id, {
+      provider: body.provider,
+      url,
+      key_encrypted,
+    }),
+  );
 };
 
 const remove = async (user_id: string | null) => {
-  await prisma.translation_setting.deleteMany({ where: { id: settingId(user_id) } });
+  await translationSettingRepository.remove(user_id);
 };
 
 /**
@@ -114,7 +108,7 @@ const remove = async (user_id: string | null) => {
  * Null when nothing is saved, or when the saved key can no longer be read.
  */
 const resolve = async (user_id: string | null): Promise<SavedTranslationService | null> => {
-  const row = await find(user_id);
+  const row = await translationSettingRepository.find(user_id);
   if (!row) return null;
   const { key, readable } = readKey(row);
   if (!readable) return null;

@@ -6,7 +6,7 @@
  * through guardedFetch, so like source requests they only reach public addresses, unless
  * the server's owner sets ALERTS_ALLOW_PRIVATE_HOSTS=true for a self-hosted receiver.
  */
-import prisma from '../configs/prisma.config.js';
+import notificationChannelRepository from '../repositories/notificationChannel.repository.js';
 import type {
   ChapterAlertBody,
   CreateNotificationChannelBody,
@@ -74,15 +74,10 @@ function summarize(row: {
 }
 
 const list = async (user_id: string | null) =>
-  (
-    await prisma.notification_channel.findMany({
-      where: { user_id },
-      orderBy: { created_at: 'asc' },
-    })
-  ).map(summarize);
+  (await notificationChannelRepository.list(user_id)).map(summarize);
 
 const create = async (body: CreateNotificationChannelBody, user_id: string | null) => {
-  if ((await prisma.notification_channel.count({ where: { user_id } })) >= MAX_CHANNELS)
+  if ((await notificationChannelRepository.countFor(user_id)) >= MAX_CHANNELS)
     throw new ValidationError(`At most ${MAX_CHANNELS} alert channels`);
   const target: Target =
     body.kind === 'telegram'
@@ -90,31 +85,29 @@ const create = async (body: CreateNotificationChannelBody, user_id: string | nul
       : body.kind === 'ntfy'
         ? { url: body.url, ...(body.token && { token: body.token }) }
         : { url: body.url };
-  const row = await prisma.notification_channel.create({
-    data: {
-      user_id,
-      kind: body.kind,
-      name: body.name,
-      target_encrypted: encryptToken(JSON.stringify(target)),
-    },
+  const row = await notificationChannelRepository.create({
+    user_id,
+    kind: body.kind,
+    name: body.name,
+    target_encrypted: encryptToken(JSON.stringify(target)),
   });
   return summarize(row);
 };
 
 const ownRow = async (id: string, user_id: string | null) => {
-  const row = await prisma.notification_channel.findFirst({ where: { id, user_id } });
+  const row = await notificationChannelRepository.findOwned(id, user_id);
   if (!row) throw new NotFoundError('Alert channel not found');
   return row;
 };
 
 const update = async (id: string, body: UpdateNotificationChannelBody, user_id: string | null) => {
   await ownRow(id, user_id);
-  return summarize(await prisma.notification_channel.update({ where: { id }, data: body }));
+  return summarize(await notificationChannelRepository.update(id, body));
 };
 
 const remove = async (id: string, user_id: string | null) => {
   await ownRow(id, user_id);
-  await prisma.notification_channel.delete({ where: { id } });
+  await notificationChannelRepository.remove(id);
 };
 
 /** The message, from what an update found. Plain text: every service shows it as-is. */
@@ -228,10 +221,10 @@ async function sendTo(
   } catch (cause) {
     error = safeError(cause);
   }
-  await prisma.notification_channel.update({
-    where: { id: row.id },
-    data: error ? { last_error: error } : { last_sent_at: new Date(), last_error: null },
-  });
+  await notificationChannelRepository.update(
+    row.id,
+    error ? { last_error: error } : { last_sent_at: new Date(), last_error: null },
+  );
   return error === null;
 }
 
@@ -244,7 +237,7 @@ const alert = async (body: ChapterAlertBody, user_id: string | null) => {
   const now = Date.now();
   if (now - (lastAlert.get(owner) ?? 0) < ALERT_INTERVAL_MS) return { sent: 0, skipped: true };
   lastAlert.set(owner, now);
-  const rows = await prisma.notification_channel.findMany({ where: { user_id, enabled: true } });
+  const rows = await notificationChannelRepository.listEnabled(user_id);
   const results = await Promise.all(rows.map((row) => sendTo(row, body.titles)));
   return { sent: results.filter(Boolean).length, skipped: false };
 };

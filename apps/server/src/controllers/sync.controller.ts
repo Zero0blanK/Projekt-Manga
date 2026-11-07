@@ -2,18 +2,13 @@ import { Request, Response, NextFunction } from 'express';
 import { HTTPSuccessResponse } from '../utils/responseHandlers.js';
 import syncService from '../services/sync.service.js';
 import type { SyncPullQuery, SyncPushBody } from '@projekt-manga/schemas';
-import prisma from '../configs/prisma.config.js';
+import userRepository from '../repositories/user.repository.js';
 
 const generation = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const account = await prisma.user.findUniqueOrThrow({
-      where: { id: req.user!.id },
-      select: { sync_generation: true },
-    });
+    const generation = await userRepository.getSyncGeneration(req.user!.id);
     res.set('Cache-Control', 'no-store');
-    return HTTPSuccessResponse(res, 200, 'Sync generation', {
-      generation: account.sync_generation,
-    });
+    return HTTPSuccessResponse(res, 200, 'Sync generation', { generation });
   } catch (error) {
     return next(error);
   }

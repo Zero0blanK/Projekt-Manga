@@ -23,6 +23,13 @@ vi.mock('next/image', () => ({
 
 // Cover fetches its image to show download progress. jsdom has no blob URLs and nothing
 // answers fetch, so every test gets a small image back; a test can stub its own instead.
+// Shared query results are per test, like everything else here.
+afterEach(async () => {
+  // Some tests mock this module without the client.
+  const client = await import('@/lib/query-client');
+  if ('queryClient' in client) client.queryClient?.clear?.();
+});
+
 beforeEach(() => {
   let next = 0;
   // Assigned rather than vi.stubGlobal: unstubbing would also drop the globals some test

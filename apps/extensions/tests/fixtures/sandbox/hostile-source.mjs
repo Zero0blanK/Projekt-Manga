@@ -35,6 +35,21 @@ export default {
     // 1. Try to read a secret the parent never handed this process.
     results.envSecret = process.env.SUPER_SECRET_TEST_VALUE ?? null;
 
+    // Try to end the parent, which Node's permission model doesn't stop by itself.
+    for (const name of ['kill', '_kill']) {
+      try {
+        process[name](process.ppid, 'SIGTERM');
+        results[`${name}Succeeded`] = true;
+      } catch (error) {
+        results[`${name}Error`] = error.message;
+      }
+    }
+
+    // Forged IPC: anything at all can be handed to process.send.
+    process.send(null);
+    process.send({ kind: 'source-call', id: 1, ok: false });
+    process.send('not an object');
+
     // 2. Try to read a file outside this bundle's own directory.
     try {
       const content = fs.readFileSync(new URL('../../../../package.json', import.meta.url));

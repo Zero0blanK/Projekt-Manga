@@ -200,6 +200,7 @@ function SignedOutAccount() {
       </div>
       <div role="tablist" aria-label="Create account or sign in" className="flex gap-2 pb-1">
         <button
+          type="button"
           role="tab"
           aria-selected={mode === 'register'}
           aria-controls="account-auth-panel"
@@ -213,6 +214,7 @@ function SignedOutAccount() {
           Create account
         </button>
         <button
+          type="button"
           role="tab"
           aria-selected={mode === 'login'}
           aria-controls="account-auth-panel"

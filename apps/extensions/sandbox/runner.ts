@@ -96,6 +96,24 @@ export async function sourceCataloguePage(
 
 const bundlePath = process.argv[2];
 
+/**
+ * Takes away `process.kill`, before the bundle loads.
+ *
+ * Node's permission model doesn't cover signals: run on Node 25 under this sandbox's own
+ * flags, `process.kill(process.ppid)` ends the parent, which is the whole API server.
+ * Replaced in place and locked, since the bundle shares this realm and `node:process`
+ * hands back this same object. `process.binding` is already denied by `--permission`,
+ * so nothing else reaches the underlying call.
+ */
+function sealProcess(): void {
+  const denied = () => {
+    throw new Error('Sandboxed sources cannot signal processes');
+  };
+  for (const name of ['kill', '_kill']) {
+    Object.defineProperty(process, name, { value: denied, writable: false, configurable: false });
+  }
+}
+
 function send(message: ChildMessage): void {
   // Undefined only without an IPC channel, which the parent always requests.
   process.send?.(message);
@@ -374,6 +392,7 @@ async function handleSourceCall(request: SourceCallRequest): Promise<void> {
 }
 
 if (process.argv[1] && pathToFileUrl(process.argv[1]) === import.meta.url) {
+  sealProcess();
   installFetchShim();
 
   process.on('message', (message: ParentMessage) => {

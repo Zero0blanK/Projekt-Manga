@@ -1,91 +1,94 @@
 import prisma from '../configs/prisma.config.js';
 
-const getCategory = async () => {
-  return await prisma.category.findMany();
-};
-
-const getCategoryById = async (category_id: string) => {
-  return await prisma.category.findUnique({
-    where: {
-      id: category_id,
-    },
-  });
-};
+/** Whose list a category belongs to: an account's id, or null for anonymous use. */
+export type CategoryOwner = string | null;
 
 /**
- * The stored id for a category name: lowercased, spaces to hyphens.
+ * A category name in canonical form: lowercased, spaces to hyphens.
  *
- * This is the canonical form of a category, and `addCategory` derives the primary key
- * from it — so it is also the only case-insensitive handle the schema has.
+ * Stored as `key`, the only case-insensitive handle the schema has. SQLite's default
+ * collation is case-sensitive, so matching on `name` would miss an incoming "action"
+ * against a stored "Action", and the create that followed would collide on the unique
+ * key and break sync, which resolves categories by name so devices converge.
  */
-export const canonicalCategoryId = (category_name: string): string =>
+export const canonicalCategoryKey = (category_name: string): string =>
   category_name.trim().toLowerCase().replace(/\s+/g, '-');
 
-/**
- * Looks a category up by name, case-insensitively.
- *
- * Matches on the derived id rather than on `name`, and that is load-bearing rather than
- * incidental. SQLite's default collation is case-sensitive, so `where: { name }` would not
- * match an incoming "action" against a stored "Action". `addCategory` derives the id from
- * the same lowercased name, so the create that followed the missed lookup would collide on
- * the *primary key* and raise P2002, breaking the sync path (sync.service.ts resolves
- * categories by name so devices converge).
- *
- * `name` is left as the user first typed it, so display casing survives.
- */
-const getCategoryByName = async (category_name: string) => {
-  return await prisma.category.findUnique({
-    where: {
-      id: canonicalCategoryId(category_name),
-    },
+const getCategory = async (owner: CategoryOwner) => {
+  return await prisma.category.findMany({
+    where: { user_id: owner },
+    orderBy: { created_at: 'asc' },
   });
 };
 
-/** Category names are a single shared vocabulary across every account (see the schema's
- * doc comment on user_manga_category) — sync resolves an incoming category by name
- * rather than trusting a client-supplied id, creating it if no device has ever pushed
- * that name before. */
-const findOrCreateByName = async (category_name: string) => {
-  const existing = await getCategoryByName(category_name);
-  if (existing) {
-    return existing;
-  }
-  return await addCategory(category_name);
+/** Scoped to the owner, so another account's id reads as not found. */
+const getCategoryById = async (category_id: string, owner: CategoryOwner) => {
+  return await prisma.category.findFirst({ where: { id: category_id, user_id: owner } });
 };
 
-const addCategory = async (category_name: string) => {
+/** `name` keeps the casing the user first typed. */
+const getCategoryByName = async (category_name: string, owner: CategoryOwner) => {
+  return await prisma.category.findFirst({
+    where: { user_id: owner, key: canonicalCategoryKey(category_name) },
+  });
+};
+
+const addCategory = async (category_name: string, owner: CategoryOwner) => {
   return await prisma.category.create({
     data: {
-      id: canonicalCategoryId(category_name),
+      user_id: owner,
+      key: canonicalCategoryKey(category_name),
       name: category_name.trim(),
     },
   });
 };
 
-const updateCategory = async (category_id: string, category_name: string) => {
-  return await prisma.category.update({
-    where: {
-      id: category_id,
-    },
-    data: {
-      id: category_name.toLowerCase().replace(/\s+/g, '-'),
-      name: category_name,
-    },
-  });
+/** Sync resolves an incoming category by name rather than trusting a client-supplied id,
+ * creating it if this account's devices have never pushed that name before. */
+const findOrCreateByName = async (category_name: string, owner: CategoryOwner) => {
+  return (
+    (await getCategoryByName(category_name, owner)) ?? (await addCategory(category_name, owner))
+  );
 };
 
-/** Used only by auth.service's "first account claims existing anonymous data" — every
- * shared manga_category assignment. */
-const getAllAssignments = async () => {
-  return await prisma.manga_category.findMany({ select: { manga_id: true, category_id: true } });
+/** The id stays put, so assignments and other devices' references survive a rename. */
+const updateCategory = async (category_id: string, category_name: string) => {
+  return await prisma.category.update({
+    where: { id: category_id },
+    data: { key: canonicalCategoryKey(category_name), name: category_name.trim() },
+  });
 };
 
 const deleteCategory = async (category_id: string) => {
-  return await prisma.category.delete({
-    where: {
-      id: category_id,
-    },
+  return await prisma.category.delete({ where: { id: category_id } });
+};
+
+/** The anonymous list with its assignments, for "first account claims existing anonymous
+ * data", which copies them into the account's own list. */
+const getAnonymousCategoriesWithAssignments = async () => {
+  return await prisma.category.findMany({
+    where: { user_id: null },
+    select: { name: true, manga_category: { select: { manga_id: true } } },
   });
+};
+
+const getAnonymousAssignments = async () => {
+  return await prisma.manga_category.findMany({
+    where: { category: { user_id: null } },
+    select: { manga_id: true, category_id: true },
+  });
+};
+
+const assignAnonymous = async (manga_id: string, category_id: string) => {
+  return await prisma.manga_category.upsert({
+    where: { manga_id_category_id: { manga_id, category_id } },
+    create: { manga_id, category_id },
+    update: {},
+  });
+};
+
+const unassignAnonymous = async (manga_id: string, category_id: string) => {
+  await prisma.manga_category.deleteMany({ where: { manga_id, category_id } });
 };
 
 const categoryRepository = {
@@ -93,7 +96,10 @@ const categoryRepository = {
   getCategoryById,
   getCategoryByName,
   findOrCreateByName,
-  getAllAssignments,
+  getAnonymousCategoriesWithAssignments,
+  getAnonymousAssignments,
+  assignAnonymous,
+  unassignAnonymous,
   addCategory,
   updateCategory,
   deleteCategory,

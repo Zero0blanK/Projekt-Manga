@@ -199,7 +199,7 @@ export function AlertChannels() {
               </button>
             ))}
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             {KINDS.find((k) => k.kind === kind)?.help}
           </p>
           <input

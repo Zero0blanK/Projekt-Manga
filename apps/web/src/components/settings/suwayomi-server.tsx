@@ -191,7 +191,7 @@ export function SuwayomiServer() {
           onChange={(event) => setUrl(event.target.value)}
           className={INPUT}
         />
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           The address Suwayomi&apos;s web interface opens on. It can be this computer or one on your
           network.
         </p>
@@ -219,7 +219,7 @@ export function SuwayomiServer() {
               onChange={(event) => setPassword(event.target.value)}
               className={INPUT}
             />
-            <p id="suwayomi-password-note" className="text-[11px] text-muted-foreground">
+            <p id="suwayomi-password-note" className="text-xs text-muted-foreground">
               {passwordSaved
                 ? 'Your password is stored encrypted and is never shown again. Leave this empty to keep it.'
                 : 'The password is stored encrypted on the server and is never shown again after saving.'}

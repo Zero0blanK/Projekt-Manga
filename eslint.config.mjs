@@ -67,6 +67,20 @@ export default tseslint.config(
       '@next/next/no-html-link-for-pages': 'off',
     },
   },
+  {
+    files: ['apps/web/src/**/*.tsx'],
+    rules: {
+      // A <button> with no type submits any form around it.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "JSXOpeningElement[name.name='button']:not(:has(JSXAttribute[name.name='type'])):not(:has(JSXSpreadAttribute))",
+          message: 'Give <button> an explicit type.',
+        },
+      ],
+    },
+  },
   // react-refresh/only-export-components asks a file to export components and nothing
   // else. Two places in this app cannot satisfy that, and neither is a defect:
   //

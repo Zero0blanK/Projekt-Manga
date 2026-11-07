@@ -84,6 +84,14 @@ export interface LocalHistoryInput {
  * caller that is explicitly adding the title to the library. */
 type LibraryMembership = 'add' | 'ifMissing';
 
+/**
+ * `updated_at` for state copied down from the server. Pending changes are the rows edited
+ * since the last push, so stamping these "now" would send what the server just said straight
+ * back as new edits. Older than any cursor, they count as already pushed, and a real local
+ * edit stamps its own time.
+ */
+const FROM_SERVER = '1970-01-01T00:00:00.000Z';
+
 function upsertManga(input: LocalMangaInput, membership: LibraryMembership = 'ifMissing'): void {
   const db = getDb();
   db.prepare(
@@ -118,7 +126,7 @@ function upsertManga(input: LocalMangaInput, membership: LibraryMembership = 'if
   db.prepare(
     `INSERT INTO manga_state (manga_id, in_library, updated_at) VALUES (?, 1, ?)
      ON CONFLICT(manga_id) DO NOTHING`,
-  ).run(input.id, nowIso());
+  ).run(input.id, FROM_SERVER);
 }
 
 /**
@@ -179,7 +187,7 @@ function upsertChapter(input: LocalChapterInput): void {
     input.is_read ? 1 : 0,
     input.is_bookmark ? 1 : 0,
     input.last_page_read ?? 0,
-    nowIso(),
+    FROM_SERVER,
   );
 
   if (stub) mergeChapterInto(stub.id, input.id);
@@ -817,12 +825,12 @@ async function syncMangaFromServer(
   const { data: details } = (await detailsRes.json()) as { data: ServerMangaDetails };
   if (!details || typeof details.id !== 'string') return false;
 
-  upsertManga(details, membership);
   // A details payload without a chapters array is still a usable manga row, so store it
   // and skip the chapters rather than throwing.
   const db = getDb();
   db.exec('BEGIN IMMEDIATE');
   try {
+    upsertManga(details, membership);
     for (const chapter of details.chapters ?? []) {
       upsertChapter({
         ...chapter,
@@ -868,8 +876,15 @@ async function seedFromServer(
   // and abort the whole seed, rather than seeding nothing and moving on.
   for (const item of mangaListEnvelope.data ?? []) {
     if (typeof item?.id !== 'string' || item.id.length === 0) continue;
-    if (await syncMangaFromServer(apiBaseUrl, item.id, session)) {
-      mangaCount++;
+    try {
+      if (await syncMangaFromServer(apiBaseUrl, item.id, session)) {
+        mangaCount++;
+      }
+    } catch (error) {
+      // One title clashing with a local row (the same source and slug under another id)
+      // shouldn't cost every title after it. Anything else is a real failure.
+      if (!(error instanceof Error) || !error.message.includes('UNIQUE constraint')) throw error;
+      console.warn('[seed] Skipped a title that clashes with a local row');
     }
   }
 
@@ -887,46 +902,57 @@ async function seedFromServer(
         title: string | null;
         thumbnail_url: string | null;
         source_chapter_key?: string | null;
+        read_at?: string;
+        last_read?: string;
         pages_read: number;
         time_read: number;
       }>;
     };
     const db = getDb();
-    for (const row of historyRows ?? []) {
-      if (!row?.id || typeof row.source !== 'string' || typeof row.manga_slug !== 'string') {
-        continue;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const row of historyRows ?? []) {
+        if (!row?.id || typeof row.source !== 'string' || typeof row.manga_slug !== 'string') {
+          continue;
+        }
+        const chapterId = row.source_chapter_key
+          ? ensureChapterRow({
+              source: row.source,
+              manga_slug: row.manga_slug,
+              source_chapter_key: row.source_chapter_key,
+              manga_id: row.manga_id,
+            })
+          : null;
+        // The server's own times: "now" would reorder the whole list, and read as new edits.
+        const lastRead = row.last_read ?? FROM_SERVER;
+        db.prepare(
+          `INSERT OR IGNORE INTO history (id, source, manga_id, manga_slug, source_manga_id, title, thumbnail_url, chapter_id, read_at, last_read, pages_read, time_read)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          row.id,
+          row.source,
+          // node:sqlite's parameter binding only accepts null, not undefined — the server
+          // omits these keys entirely for a source-only read rather than sending an
+          // explicit null (see packages/api-client's HistoryEntry: manga_id?, title?,
+          // thumbnail_url? are all optional, not nullable), so every one of these needs
+          // the same `?? null` coercion.
+          row.manga_id ?? null,
+          row.manga_slug,
+          row.source_manga_id ?? null,
+          row.title ?? null,
+          row.thumbnail_url ?? null,
+          chapterId,
+          row.read_at ?? lastRead,
+          lastRead,
+          row.pages_read ?? 0,
+          row.time_read ?? 0,
+        );
+        historyCount++;
       }
-      const chapterId = row.source_chapter_key
-        ? ensureChapterRow({
-            source: row.source,
-            manga_slug: row.manga_slug,
-            source_chapter_key: row.source_chapter_key,
-            manga_id: row.manga_id,
-          })
-        : null;
-      db.prepare(
-        `INSERT OR IGNORE INTO history (id, source, manga_id, manga_slug, source_manga_id, title, thumbnail_url, chapter_id, read_at, last_read, pages_read, time_read)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        row.id,
-        row.source,
-        // node:sqlite's parameter binding only accepts null, not undefined — the server
-        // omits these keys entirely for a source-only read rather than sending an
-        // explicit null (see packages/api-client's HistoryEntry: manga_id?, title?,
-        // thumbnail_url? are all optional, not nullable), so every one of these needs
-        // the same `?? null` coercion.
-        row.manga_id ?? null,
-        row.manga_slug,
-        row.source_manga_id ?? null,
-        row.title ?? null,
-        row.thumbnail_url ?? null,
-        chapterId,
-        nowIso(),
-        nowIso(),
-        row.pages_read ?? 0,
-        row.time_read ?? 0,
-      );
-      historyCount++;
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
     }
   }
 
@@ -1413,10 +1439,28 @@ function applyPulledChanges(pulled: PulledSyncData): ApplyPulledChangesResult {
   db.exec('BEGIN IMMEDIATE');
   try {
     for (const cat of pulled.categories) {
+      // Names are unique here, and a server that moved to per-account categories sends a
+      // new id for a name this device already holds. Without this the insert below would
+      // fail the transaction, and with it every pull from then on.
+      const renumbered = db
+        .prepare(`SELECT id FROM category WHERE name = ? AND id <> ?`)
+        .get(cat.name, cat.id) as { id: string } | undefined;
+      if (renumbered) {
+        db.prepare(`UPDATE category SET name = name || char(0) || id WHERE id = ?`).run(
+          renumbered.id,
+        );
+      }
       db.prepare(
         `INSERT INTO category (id, name, updated_at) VALUES (?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET name = excluded.name`,
       ).run(cat.id, cat.name, nowIso());
+      if (renumbered) {
+        db.prepare(`UPDATE OR IGNORE manga_category SET category_id = ? WHERE category_id = ?`).run(
+          cat.id,
+          renumbered.id,
+        );
+        db.prepare(`DELETE FROM category WHERE id = ?`).run(renumbered.id);
+      }
     }
 
     // A pulled row never overwrites a local row edited after it: that local edit has not

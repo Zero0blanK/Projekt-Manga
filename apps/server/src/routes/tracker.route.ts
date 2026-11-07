@@ -1,5 +1,6 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
+import { rateLimitBody } from '../utils/responseHandlers.js';
 import trackerController from '../controllers/tracker.controller.js';
 import { validateQuery, validateBody } from '../middleware/validate.middleware.js';
 import { requireAuth } from '../middleware/auth.middleware.js';
@@ -20,7 +21,7 @@ const connectRateLimit = rateLimit({
   limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: 'Too many attempts — please wait and try again.' },
+  message: rateLimitBody('Too many attempts — please wait and try again.'),
 });
 
 router.get('/', requireAuth, trackerController.listConnected);

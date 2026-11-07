@@ -304,6 +304,7 @@ export function MihonImport({
             className="hidden"
           />
           <button
+            type="button"
             ref={trigger}
             onClick={() => input.current?.click()}
             disabled={disabled || !!busy}
@@ -491,6 +492,7 @@ export function MihonImport({
                   <AlertDialogCancel disabled={!!busy}>Cancel</AlertDialogCancel>
                 )}
                 <button
+                  type="button"
                   onClick={prepare}
                   disabled={!!busy}
                   className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
@@ -602,6 +604,7 @@ export function MihonImport({
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={!!busy}>Cancel</AlertDialogCancel>
                 <button
+                  type="button"
                   onClick={confirm}
                   disabled={!!busy || (!step.preview && !step.previewError)}
                   className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"

@@ -4,7 +4,8 @@
  * update-preferences.ts — a small JSON file beside the local database.
  */
 import { app } from 'electron';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { writeFileAtomic } from './atomic-file';
 import path from 'node:path';
 
 export interface DesktopPreferences {
@@ -40,6 +41,6 @@ export function getDesktopPreferences(): DesktopPreferences {
  * says so. */
 export function setDesktopPreferences(patch: Partial<DesktopPreferences>): DesktopPreferences {
   const next = { ...getDesktopPreferences(), ...patch };
-  writeFileSync(preferencesFilePath(), JSON.stringify(next), 'utf-8');
+  writeFileAtomic(preferencesFilePath(), JSON.stringify(next), 'utf-8');
   return next;
 }

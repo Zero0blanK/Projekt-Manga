@@ -253,7 +253,7 @@ export function LocalArchiveCollection() {
                       {item.title} · {item.pageCount} pages
                     </Link>
                     {item.linked && (
-                      <span className="shrink-0 text-[11px] text-muted-foreground">In place</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">In place</span>
                     )}
                     <button
                       type="button"
