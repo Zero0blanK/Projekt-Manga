@@ -186,7 +186,6 @@ export function LibraryPageClient() {
             </p>
           </div>
           <div className="-mx-4 flex max-w-[calc(100%+2rem)] items-center gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:max-w-full sm:flex-wrap sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
-            <ViewToggle />
             <SortMenu />
             {/* Icon buttons matching ViewToggle/SortMenu so the toolbar reads as one row. With
                 no visible text, each carries both an aria-label (screen readers) and a title
@@ -230,6 +229,7 @@ export function LibraryPageClient() {
                 onChange={setLibraryFilters}
               />
             )}
+            <ViewToggle />
             {/* With nothing in the library there is nothing to update; finding a first title
                 is the one useful next step. */}
             {mangaLibrary.length > 0 ? (

@@ -3,10 +3,22 @@
   "releases": [
     {
       "version": "1.0.3",
-      "date": "2026-11-04",
-      "summary": "Updates now ask before they download, plus Suwayomi library import, undo and a few Discover improvements.",
+      "date": "2026-11-07",
+      "summary": "Updates now ask before they download, categories follow your account, and the library gets status and tag filters.",
       "upgrade": "Versions 1.0.2 and earlier install updates in the background, so 1.0.3 may arrive that way. From here on, nothing downloads until you choose **Update now**.",
       "changes": [
+        {
+          "type": "added",
+          "text": "Filter your library by publication status and tags, including tags to exclude"
+        },
+        {
+          "type": "added",
+          "text": "Hide scanlation groups you never want to see on a title"
+        },
+        {
+          "type": "added",
+          "text": "Change your password in Settings; other devices are signed out"
+        },
         {
           "type": "added",
           "text": "Import your Suwayomi library, with read progress, from Settings · Extensions"
@@ -24,8 +36,16 @@
           "text": "Chapter downloads show their progress in the corner; swipe that card or the library update card to shrink it to a ring"
         },
         {
+          "type": "added",
+          "text": "Self-hosted servers can close sign-up with REGISTRATION=closed"
+        },
+        {
           "type": "changed",
           "text": "New releases no longer download in the background: a popup shows what changed and waits for you"
+        },
+        {
+          "type": "changed",
+          "text": "Categories are saved to your account instead of this browser, so each account has its own list on every device"
         },
         {
           "type": "changed",
@@ -34,6 +54,10 @@
         {
           "type": "fixed",
           "text": "The new version popup could stay hidden behind the splash screen, or never appear if the app stayed open in the tray"
+        },
+        {
+          "type": "fixed",
+          "text": "Queued downloads were lost when the server restarted"
         },
         {
           "type": "removed",
