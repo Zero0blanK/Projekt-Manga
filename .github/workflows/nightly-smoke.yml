@@ -21,9 +21,9 @@ jobs:
     steps:
       # The repository's default branch (main). A scheduled run already checks it out; this
       # used to name a `development` branch that doesn't exist, so every run failed here.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -36,7 +36,7 @@ jobs:
           DATABASE_URL: file:./data/ci-generate.db
 
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
