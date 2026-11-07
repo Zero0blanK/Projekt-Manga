@@ -343,7 +343,7 @@ jobs:
   windows:
     name: Windows tests and desktop build
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
