@@ -36,6 +36,6 @@
     "@types/yauzl": "^3.4.0",
     "electron": "43.8.0",
     "electron-builder": "^25.1.8",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   }
 }
