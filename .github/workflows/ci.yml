@@ -343,7 +343,7 @@ jobs:
   windows:
     name: Windows tests and desktop build
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
@@ -367,3 +367,16 @@ jobs:
 
       - name: Build — desktop
         run: npm run build --workspace=@projekt-manga/desktop
+
+      # Packaging has failures nothing above can see: staging, NSIS warnings, files dropped from
+      # the app. This job is already a required check, so they stop a merge, not a release.
+      # Skipped under the Release workflow, whose next job builds the same installer.
+      - name: Build — Windows installer
+        if: github.workflow != 'Release'
+        run: npm run package --workspace=@projekt-manga/desktop -- --publish never
+        env:
+          DATABASE_URL: file:./data/ci-generate.db
+
+      - name: Build — release notes
+        if: github.workflow != 'Release'
+        run: node scripts/release-notes.mjs apps/desktop/release
