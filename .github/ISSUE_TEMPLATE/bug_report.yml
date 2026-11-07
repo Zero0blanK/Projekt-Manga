@@ -1,0 +1,34 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown in Settings, under About.
+      placeholder: 1.0.3
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where it happens
+      options:
+        - Desktop app
+        - Browser, self-hosted server
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic report
+      description: Optional. Copy it from Settings if you can, and check it for anything private.
+      render: text
