@@ -74,7 +74,7 @@ export function setPreviousLocation(href: string) {
  */
 export function forgetPreviousLocationIfEnteredDirectly() {
   if (typeof window === 'undefined') return;
-  let fromApp = false;
+  let fromApp: boolean;
   try {
     fromApp = !!document.referrer && new URL(document.referrer).origin === window.location.origin;
   } catch {

@@ -240,7 +240,7 @@ function closeWhenPassed(
     timer = setTimeout(async () => {
       timer = null;
       if (win.isDestroyed() || contents.isDestroyed()) return;
-      let host = '';
+      let host: string;
       try {
         host = new URL(contents.getURL()).hostname;
       } catch {

@@ -452,7 +452,7 @@ function applyPermissionPolicy(webUrl: string): void {
 
   const isAllowed = (permission: string, requestingUrl: string | undefined): boolean => {
     if (!ALLOWED_PERMISSIONS.has(permission)) return false;
-    let origin: string | null = null;
+    let origin: string | null;
     try {
       origin = requestingUrl ? new URL(requestingUrl).origin : null;
     } catch {

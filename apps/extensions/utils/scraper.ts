@@ -265,7 +265,7 @@ export async function getHtmlCached(
       context = await orchestrator.getContext();
     }
 
-    let shouldWarmup = false;
+    let shouldWarmup: boolean;
 
     // 1) axios first; its instance already rate-limits.
     try {
