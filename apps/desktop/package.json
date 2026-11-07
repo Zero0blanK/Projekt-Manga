@@ -1,6 +1,6 @@
 {
   "name": "@projekt-manga/desktop",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "private": true,
   "description": "Electron shell for ProjektManga — loads the Next.js web app and provides OS-only capabilities (currently: revealing a download folder) through a preload bridge.",
   "license": "MIT",
