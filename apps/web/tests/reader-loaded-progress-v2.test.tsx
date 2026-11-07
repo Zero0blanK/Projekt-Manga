@@ -52,6 +52,8 @@ function viewer(
 
 describe('reader progress admission', () => {
   it('handles a center tap while excluding drags, dialogs and canceled gestures', () => {
+    // The first-run hint swallows the first tap.
+    localStorage.setItem('projekt-manga:tap-zones-hint-seen', '1');
     const toggle = vi.fn();
     const { container } = render(viewer(vi.fn(), undefined, toggle));
     const strip = container.querySelector('[data-unit]')!.parentElement!;
