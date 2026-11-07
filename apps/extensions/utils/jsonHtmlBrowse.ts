@@ -135,7 +135,7 @@ export async function fetchJsonHtmlBrowse<T>(
   const cacheTtlMs = config.cacheTtlMs ?? 2 * 60 * 1000;
 
   const startPage = Math.floor(offset / sitePageSize) + 1;
-  let skipInPage = offset % sitePageSize;
+  const skipInPage = offset % sitePageSize;
 
   const pageConfig: FetchJsonHtmlPageConfig<T> = {
     sourceId: config.sourceId,
@@ -156,7 +156,6 @@ export async function fetchJsonHtmlBrowse<T>(
 
   let nextPage = startPage + 1;
   let maxPages = firstPage.numPages;
-  skipInPage = 0;
 
   while (collected.length < limit && nextPage <= maxPages) {
     const remaining = limit - collected.length;

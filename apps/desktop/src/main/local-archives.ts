@@ -845,7 +845,9 @@ export function registerLocalArchiveHandlers(
         !error.message.includes('EACCES')
       )
         throw error;
-      throw new Error('The comic could not be imported. Check file permissions and try again.');
+      throw new Error('The comic could not be imported. Check file permissions and try again.', {
+        cause: error,
+      });
     }
   };
 

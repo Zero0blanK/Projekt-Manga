@@ -56,7 +56,7 @@ function summarize(row: {
   last_sent_at: Date | null;
   last_error: string | null;
 }): ChannelSummary {
-  let destination = row.kind;
+  let destination: string;
   try {
     destination = destinationOf(row.kind, JSON.parse(decryptToken(row.target_encrypted)));
   } catch {
