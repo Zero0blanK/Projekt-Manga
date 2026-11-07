@@ -17,7 +17,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@hookform/resolvers": "^5.2.2",
+    "@hookform/resolvers": "^7.0.2",
     "@projekt-manga/api-client": "*",
     "@projekt-manga/schemas": "*",
     "@projekt-manga/types": "*",
