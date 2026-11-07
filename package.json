@@ -36,16 +36,17 @@
     "docs:check": "node scripts/check-doc-links.mjs"
   },
   "devDependencies": {
-    "@eslint/js": "^9.32.0",
+    "@eslint/js": "^10.0.1",
     "concurrently": "^9.1.2",
-    "eslint": "^9.32.0",
+    "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.5.7",
-    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^15.15.0",
     "prettier": "^3.9.10",
     "typescript-eslint": "^8.72.1",
+    "vitest": "^5.1.0",
     "wait-on": "^8.0.2"
   }
 }
