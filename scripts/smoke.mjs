@@ -164,6 +164,7 @@ let apiOffline = false;
 let fixtureSyncRevoked = false;
 let fixtureRestoreComplete = false;
 let fixtureLargeLibrary = true;
+let fixtureCategories = [];
 /** Puts a title the fixture source also lists into the library. */
 let fixtureSourceTitleInLibrary = false;
 const syncPushPayloads = [];
@@ -304,14 +305,18 @@ const api = createServer((request, response) => {
   }
   if (url.pathname === '/api/downloads/directory') data = { path: '' };
   if (url.pathname === '/api/manga') {
+    // Paged like the real route: the app reads until a page comes back short.
+    const offset = Number(url.searchParams.get('offset') ?? 0);
+    const limit = Number(url.searchParams.get('limit') ?? 200);
     data = [
       ...(fixtureLargeLibrary ? libraryTitles : []),
       ...(fixtureSourceTitleInLibrary
         ? [{ ...libraryTitles[0], id: 'smoke-2-row', slug: 'smoke-2', title: 'Smoke Manga 2' }]
         : []),
-    ];
+    ].slice(offset, offset + limit);
   }
   if (url.pathname === '/api/library') data = [];
+  if (url.pathname === '/api/category/state') data = fixtureCategories;
   if (url.pathname === '/api/library/release-estimates') {
     const day = 24 * 60 * 60 * 1000;
     const estimate = (manga_id, inDays) => ({
@@ -740,9 +745,15 @@ try {
       );
     }
     // The compact grid puts each title on its cover; Grid view puts it back underneath.
-    await page.getByRole('button', { name: 'Compact grid view' }).click();
+    const chooseLibraryView = async (name) => {
+      await page.getByRole('button', { name: /^Library view:/ }).click();
+      await page.getByRole('menuitem', { name, exact: true }).click();
+      // Reopening during its closing animation would be dismissed by the focus returning.
+      await page.getByRole('menu').waitFor({ state: 'detached' });
+    };
+    await chooseLibraryView('Compact');
     await page.locator('main a[href^="/manga/perf-title-"] .relative h3').first().waitFor();
-    await page.getByRole('button', { name: 'Grid view', exact: true }).click();
+    await chooseLibraryView('Grid');
     await page
       .locator('main a[href^="/manga/perf-title-"] .relative h3')
       .first()
@@ -767,19 +778,13 @@ try {
         autoDownloadNew: 'category:Smoke downloads',
         updateIncludeCategories: JSON.stringify(['Smoke updates']),
       };
-      state.customCategories = [
-        ...(state.customCategories ?? []),
-        'Smoke updates',
-        'Smoke downloads',
-      ];
-      state.categoryMembers = {
-        ...state.categoryMembers,
-        'Smoke updates': ['perf-title-0', 'perf-title-1'],
-        'Smoke downloads': ['perf-title-0'],
-      };
       localStorage.setItem(key, JSON.stringify(state));
       return saved;
     });
+    fixtureCategories = [
+      { id: 'smoke-updates', name: 'Smoke updates', manga_ids: ['perf-title-0', 'perf-title-1'] },
+      { id: 'smoke-downloads', name: 'Smoke downloads', manga_ids: ['perf-title-0'] },
+    ];
     await page.reload();
     await page.getByText('Showing 1000', { exact: true }).waitFor();
     await page.getByRole('button', { name: 'Update library', exact: true }).click();
@@ -802,6 +807,7 @@ try {
       (saved) => localStorage.setItem('projekt-manga:state:v1', saved ?? '{}'),
       savedAppState,
     );
+    fixtureCategories = [];
     await page.reload();
     await page.getByText('Showing 1000', { exact: true }).waitFor();
     console.log('Browser auto-download smoke passed: category-limited update queued one download.');

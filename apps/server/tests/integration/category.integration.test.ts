@@ -59,7 +59,7 @@ describe('PUT /api/category/update/:category_id (real DB, real FK cascade)', () 
 
 describe('DELETE /api/category/delete/:category_id (real DB, real FK cascade)', () => {
   it('deleting a category removes its manga_category links too', async () => {
-    await prisma.category.create({ data: { id: 'romance', name: 'Romance' } });
+    await prisma.category.create({ data: { id: 'romance', key: 'romance', name: 'Romance' } });
     const manga = await prisma.manga.create({
       data: {
         slug: 'romance-manga',

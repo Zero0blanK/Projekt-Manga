@@ -265,10 +265,14 @@ export function useSetting(key: string, fallback: SettingValue) {
 /** Shows what the server holds for the current identity. */
 export function setServerCategories(categories: Array<{ name: string; manga_ids: string[] }>) {
   hydrate();
-  setState({
+  // Not persisted: categories aren't stored here, and writing the whole state on every load
+  // would overwrite a setting another tab has just changed.
+  state = {
+    ...state,
     customCategories: categories.map(({ name }) => name),
     categoryMembers: Object.fromEntries(categories.map(({ name, manga_ids }) => [name, manga_ids])),
-  });
+  };
+  emit();
 }
 
 export function getPendingCategoryImport(): LocalCategories | undefined {
