@@ -161,7 +161,10 @@ function bareImports(dir) {
     /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)['"]([^'"./][^'"]*)['"]/gm;
   for (const entry of fs.readdirSync(dir, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile() || !/\.(?:m|c)?js$/.test(entry.name)) continue;
-    const text = fs.readFileSync(path.join(entry.parentPath, entry.name), 'utf-8');
+    // Comments survive the build, and one saying from "didn't answer" looks like an import.
+    const text = fs
+      .readFileSync(path.join(entry.parentPath, entry.name), 'utf-8')
+      .replace(/^\s*(?:\/\/|\/\*|\*).*$/gm, '');
     for (const match of text.matchAll(pattern)) {
       const specifier = match[1];
       if (!BUILTINS.has(specifier) && !specifier.startsWith('node:')) found.add(specifier);
