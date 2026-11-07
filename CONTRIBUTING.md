@@ -93,6 +93,13 @@ set those screens only work from a browser on the server machine or the desktop 
 you put the server behind a reverse proxy, set `TRUST_PROXY` so the real client address is
 used.
 
+## Getting changes into main
+
+`main` only takes pull requests, so a direct `git push origin main` is rejected. Push a branch
+and open a PR. It merges by squash once the required CI checks pass, and the PR title becomes
+the commit message, so use a conventional commit title. Release tags still push directly, but a
+pushed `v*` tag can't be moved or deleted.
+
 ## Before opening a PR
 
 Run the checks for what you touched:
