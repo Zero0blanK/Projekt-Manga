@@ -31,16 +31,16 @@
   },
   "dependencies": {
     "@projekt-manga/types": "*",
-    "axios": "^1.20.0",
+    "axios": "^1.21.0",
     "cheerio": "^1.2.0",
     "domhandler": "^5.0.3",
     "https-proxy-agent": "^7.0.6",
-    "playwright": "^1.55.0",
+    "playwright": "^1.64.1",
     "puppeteer": "^25.9.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "socks-proxy-agent": "^8.0.5",
-    "tldts": "^7.4.11",
+    "tldts": "^7.4.19",
     "zod": "^4.6.7"
   },
   "devDependencies": {
