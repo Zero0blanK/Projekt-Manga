@@ -45,22 +45,23 @@ files:
 # sandboxed, which is also what lets a broken source be fixed without shipping a new
 # installer. apps/extensions has nothing to exclude here as a result: it carries the
 # anti-detection stack and the sandbox runner, not scraper code.
+afterPack: scripts/verify-packaged.cjs
 extraResources:
   # `!data/**` matters: running the staged server for testing creates a SQLite file there,
   # and without this filter that database ships inside the installer. The real one lives in
   # the user's app-data directory (see main/index.ts), so nothing here is ever wanted.
   # Lockfiles are build inputs, not runtime files.
-  - from: staging/server
-    to: server
+  #
+  # Copied from staging itself, not staging/server and staging/web: electron-builder drops a
+  # node_modules at the top of `from`, which would ship an app that can't start.
+  # scripts/verify-packaged.cjs fails the build if that ever happens again.
+  - from: staging
+    to: .
     filter:
-      - '**/*'
-      - '!data/**'
-      - '!package-lock.json'
-  - from: staging/web
-    to: web
-    filter:
-      - '**/*'
-      - '!package-lock.json'
+      - 'server/**/*'
+      - 'web/**/*'
+      - '!server/data/**'
+      - '!**/package-lock.json'
   - from: ../extensions/dist
     to: extensions/dist
     filter:
