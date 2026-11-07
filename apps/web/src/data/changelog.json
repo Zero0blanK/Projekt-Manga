@@ -2,10 +2,10 @@
   "$comment": "Release notes for Settings > Changelog. Newest first — the first entry's version and date are also what the About panel reports. IMPORTANT: the first entry's version must match `version` in apps/desktop/package.json, which is what app.getVersion() returns and what the updater compares against a GitHub release; if the two drift, the About panel reports one version while the update check reasons about another (tests/changelog.test.ts guards this). Each entry: version (semver), date (YYYY-MM-DD), and changes grouped by type. Types: added | changed | fixed | removed. Add the next entry above this one when a version is actually published — not while it is still being built.",
   "releases": [
     {
-      "version": "1.0.3",
+      "version": "1.1.0",
       "date": "2026-11-07",
       "summary": "Updates now ask before they download, categories follow your account, and the library gets status and tag filters.",
-      "upgrade": "Versions 1.0.2 and earlier install updates in the background, so 1.0.3 may arrive that way. From here on, nothing downloads until you choose **Update now**.",
+      "upgrade": "Versions 1.0.2 and earlier install updates in the background, so 1.1.0 may arrive that way. From here on, nothing downloads until you choose **Update now**.",
       "changes": [
         {
           "type": "added",
