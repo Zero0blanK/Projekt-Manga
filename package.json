@@ -36,7 +36,7 @@
     "docs:check": "node scripts/check-doc-links.mjs"
   },
   "devDependencies": {
-    "@eslint/js": "^9.32.0",
+    "@eslint/js": "^10.0.1",
     "concurrently": "^9.1.2",
     "eslint": "^9.32.0",
     "eslint-config-prettier": "^10.1.1",
