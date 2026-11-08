@@ -219,12 +219,95 @@ const pass = (name, detail = '') => {
 const primedDb = path.join(WORK, 'primed.db');
 {
   const api = await startApi(RESOURCES, primedDb, { label: 'API (empty database)' });
-  const health = await getJson(api.port, '/api/health');
-  await api.stop();
+  let health;
+  try {
+    health = await getJson(api.port, '/api/health');
+    // openapi.yaml is found by path, and swagger-ui's assets are served from its own folder.
+    const spec = await getJson(api.port, '/api/docs/openapi.json');
+    assert.ok(spec.openapi || spec.swagger, 'the API docs route did not serve the spec');
+    for (const asset of ['/api/docs/', '/api/docs/swagger-ui.css']) {
+      const response = await fetch(`http://127.0.0.1:${api.port}${asset}`);
+      assert.equal(response.status, 200, `${asset} answered ${response.status}`);
+      await response.arrayBuffer();
+    }
+    // Read-only routes across every area, so each middleware chain and the packages behind
+    // it run once. A 4xx is fine (no account, nothing to find); a 500 means something the
+    // packaged API loads is broken, as a bad bundle once made every request fail.
+    for (const route of [
+      '/api/auth/me',
+      '/api/category',
+      '/api/category/state',
+      '/api/chapter/recent',
+      '/api/downloads',
+      '/api/downloads/stats',
+      '/api/extensions/repositories',
+      '/api/extensions/installed',
+      '/api/health/ready',
+      '/api/health/runtime',
+      '/api/health/scraper',
+      '/api/history',
+      '/api/library/release-estimates',
+      '/api/manga/links/all',
+      '/api/notification-channels',
+      '/api/source/sources',
+      '/api/source/capabilities',
+      '/api/source/library/check-updates',
+      '/api/source-network',
+      '/api/sync/generation',
+      '/api/trackers/available',
+      '/api/update-log',
+    ]) {
+      const response = await fetch(`http://127.0.0.1:${api.port}${route}`);
+      const body = await response.text();
+      assert.ok(
+        response.status < 500,
+        `${route} answered ${response.status}: ${body.slice(0, 200)}`,
+      );
+    }
+  } catch (error) {
+    console.error(api.log.join(''));
+    throw error;
+  } finally {
+    await api.stop();
+  }
   assert.deepEqual(appliedMigrations(primedDb), shippedMigrations);
   pass(
     'API starts on an empty database',
     `${shippedMigrations.length} migrations applied, health ${JSON.stringify(health).slice(0, 60)}, ready ${api.readyLine}`,
+  );
+}
+
+// ------------------------------------------- 1b. stack traces name source files -----
+// A bundled API (scripts/bundle-server.mjs) logs positions in dist/app.mjs unless its source
+// map is shipped and turned on. Resolve a known line of the bundle through the shipped map.
+if (fs.existsSync(path.join(RESOURCES, 'server', 'dist', 'app.mjs'))) {
+  const dist = path.join(RESOURCES, 'server', 'dist');
+  const loader = fs.readFileSync(path.join(dist, 'server.js'), 'utf-8');
+  assert.match(
+    loader,
+    /process\.setSourceMapsEnabled\(true\)/,
+    'the API loader does not enable source maps',
+  );
+  const bundled = fs.readFileSync(path.join(dist, 'app.mjs'), 'utf-8');
+  assert.match(
+    bundled,
+    /\/\/# sourceMappingURL=app\.mjs\.map\s*$/,
+    'app.mjs does not link its source map',
+  );
+  const { SourceMap } = await import('node:module');
+  const map = new SourceMap(JSON.parse(fs.readFileSync(path.join(dist, 'app.mjs.map'), 'utf-8')));
+  const at = bundled.indexOf('after launch (');
+  assert.ok(at > 0, 'could not find the start-up timing line in app.mjs');
+  const before = bundled.slice(0, at).split('\n');
+  const entry = map.findEntry(before.length - 1, before.at(-1).length);
+  assert.match(
+    String(entry.originalSource),
+    /^projekt-manga:\/\/\/apps\/server\/src\/server\.ts$/,
+    `app.mjs maps to ${entry.originalSource}`,
+  );
+  pass(
+    'API stack traces map to source files',
+    `${path.basename(entry.originalSource)}:${entry.originalLine + 1}`,
   );
 }
 

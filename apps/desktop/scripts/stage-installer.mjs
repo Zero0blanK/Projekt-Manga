@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { stageNodeRuntime } from './stage-node-runtime.mjs';
+import { bundleServer } from './bundle-server.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DESKTOP = path.resolve(HERE, '..');
@@ -61,31 +62,6 @@ function installedVersion(appDir, name) {
     if (fs.existsSync(manifest)) return JSON.parse(fs.readFileSync(manifest, 'utf-8')).version;
   }
   return null;
-}
-
-/**
- * Rewrites workspace dependencies to nothing.
- *
- * `@projekt-manga/*` packages are `"*"` workspace links that npm cannot resolve from
- * outside the workspace. They are already compiled into each app's `dist`/`.next` output,
- * so the staged copy does not need them as runtime dependencies — leaving them in makes
- * `npm install` fail outright with E404.
- */
-function stagePackageJson(appDir, destDir) {
-  const pkg = JSON.parse(fs.readFileSync(path.join(appDir, 'package.json'), 'utf-8'));
-  for (const field of ['devDependencies', 'scripts']) delete pkg[field];
-  // Each dependency is pinned to the exact version the repo resolved. Ranges let the staged
-  // install pick newer releases than the app was built and tested with: `^16.3.1` resolved
-  // to Next 16.4.1, whose server could not start a 16.3.1 build (missing
-  // .next/server/preview-props.json), so the installed app never got past a blank window.
-  pkg.dependencies = Object.fromEntries(
-    Object.entries(pkg.dependencies ?? {})
-      .filter(([name]) => !name.startsWith('@projekt-manga/'))
-      .map(([name, range]) => [name, installedVersion(appDir, name) ?? range]),
-  );
-  fs.mkdirSync(destDir, { recursive: true });
-  fs.writeFileSync(path.join(destDir, 'package.json'), JSON.stringify(pkg, null, 2));
-  return pkg;
 }
 
 /**
@@ -134,16 +110,47 @@ if (outputName === undefined) {
 
 // -------------------------------------------------- workspace imports -------------
 /**
- * The workspace packages the server ships, and which of their built files it loads.
+ * The extension sandbox, the one workspace package the API bundle leaves external.
  *
- * `extensions` is limited to its `/sandbox` subpath: its root entry pulls in puppeteer and
- * playwright, which the installer deliberately leaves out (see WORKSPACE_PACKAGES below).
+ * Its `/sandbox` subpath only: the package's root entry pulls in puppeteer and playwright,
+ * which a sandboxed source could not drive anyway. (`types` and `schemas` are inside the
+ * bundle; see bundle-server.mjs.)
  */
-const WORKSPACE_SHIPPED = [
-  { name: 'types', dir: path.join(ROOT, 'packages', 'types'), roots: ['dist'] },
-  { name: 'schemas', dir: path.join(ROOT, 'packages', 'schemas'), roots: ['dist'] },
-  { name: 'extensions', dir: path.join(ROOT, 'apps', 'extensions'), roots: ['dist/sandbox'] },
-];
+const EXTENSIONS_DIR = path.join(ROOT, 'apps', 'extensions');
+
+/**
+ * Every built module the sandbox reaches: the files in dist/sandbox, then whatever they
+ * import relatively, followed to the end. The runner is forked by path, so each of them
+ * has to ship as a file.
+ */
+function sandboxModules() {
+  const sandboxDir = path.join(EXTENSIONS_DIR, 'dist', 'sandbox');
+  if (!fs.existsSync(sandboxDir)) {
+    throw new Error(`[stage] extensions: ${sandboxDir} is missing — build apps/extensions first`);
+  }
+  const pending = fs
+    .readdirSync(sandboxDir)
+    .filter((name) => name.endsWith('.js'))
+    .map((name) => path.join(sandboxDir, name));
+  const found = new Set();
+  while (pending.length > 0) {
+    const file = pending.pop();
+    if (found.has(file)) continue;
+    if (!fs.existsSync(file)) {
+      throw new Error(
+        `[stage] extensions: the sandbox imports ${path.relative(EXTENSIONS_DIR, file)}, which does not exist. Rebuild apps/extensions.`,
+      );
+    }
+    found.add(file);
+    const text = fs.readFileSync(file, 'utf-8');
+    for (const [, relative] of text.matchAll(
+      /(?:\bfrom\s*|\bimport\s*\(\s*)['"](\.{1,2}\/[^'"]+)['"]/g,
+    )) {
+      pending.push(path.resolve(path.dirname(file), relative));
+    }
+  }
+  return [...found].sort();
+}
 
 const BUILTINS = new Set(builtinModules.flatMap((name) => [name, `node:${name}`]));
 
@@ -153,18 +160,15 @@ function packageOf(specifier) {
   return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
 }
 
-/** Every bare specifier imported by the `.js` files under `dir`. Built output only, so a
- * plain scan of `from '…'`, `import('…')` and `require('…')` is enough. */
-function bareImports(dir) {
+/** Every bare specifier imported by `files`. Built output only, so a plain scan of
+ * `from '…'`, `import('…')` and `require('…')` is enough. */
+function bareImports(files) {
   const found = new Set();
   const pattern =
     /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|^\s*import\s+)['"]([^'"./][^'"]*)['"]/gm;
-  for (const entry of fs.readdirSync(dir, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile() || !/\.(?:m|c)?js$/.test(entry.name)) continue;
+  for (const file of files) {
     // Comments survive the build, and one saying from "didn't answer" looks like an import.
-    const text = fs
-      .readFileSync(path.join(entry.parentPath, entry.name), 'utf-8')
-      .replace(/^\s*(?:\/\/|\/\*|\*).*$/gm, '');
+    const text = fs.readFileSync(file, 'utf-8').replace(/^\s*(?:\/\/|\/\*|\*).*$/gm, '');
     for (const match of text.matchAll(pattern)) {
       const specifier = match[1];
       if (!BUILTINS.has(specifier) && !specifier.startsWith('node:')) found.add(specifier);
@@ -174,30 +178,27 @@ function bareImports(dir) {
 }
 
 /**
- * Third-party packages the shipped workspace code imports, pinned like the server's own.
+ * Third-party packages the sandbox imports, pinned like the server's own.
  *
- * The workspace packages are copied in by hand without their dependencies, so a package
- * only they use (the sandbox's `tldts`) was missing from the installed app and the API
- * exited with ERR_MODULE_NOT_FOUND on every start. A local or CI build never noticed:
- * under the monorepo, Node's node_modules walk-up found the hoisted copy.
+ * The sandbox is copied in by hand without its dependencies, so a package only it uses
+ * (`tldts`) was once missing from the installed app and the API exited with
+ * ERR_MODULE_NOT_FOUND on every start. A local or CI build never noticed: under the
+ * monorepo, Node's node_modules walk-up found the hoisted copy.
  */
-function workspaceRuntimeDependencies() {
+function sandboxRuntimeDependencies() {
+  const declared =
+    JSON.parse(fs.readFileSync(path.join(EXTENSIONS_DIR, 'package.json'), 'utf-8')).dependencies ??
+    {};
   const dependencies = {};
-  for (const { name, dir, roots } of WORKSPACE_SHIPPED) {
-    const declared =
-      JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf-8')).dependencies ?? {};
-    for (const root of roots) {
-      for (const specifier of bareImports(path.join(dir, root))) {
-        const pkg = packageOf(specifier);
-        if (pkg.startsWith('@projekt-manga/')) continue;
-        if (!(pkg in declared)) {
-          throw new Error(
-            `[stage] @projekt-manga/${name} imports "${pkg}" but does not declare it in its package.json`,
-          );
-        }
-        dependencies[pkg] = installedVersion(dir, pkg) ?? declared[pkg];
-      }
+  for (const specifier of bareImports(sandboxModules())) {
+    const pkg = packageOf(specifier);
+    if (pkg.startsWith('@projekt-manga/')) continue;
+    if (!(pkg in declared)) {
+      throw new Error(
+        `[stage] the extension sandbox imports "${pkg}", but apps/extensions/package.json does not declare it. Add it to its dependencies.`,
+      );
     }
+    dependencies[pkg] = installedVersion(EXTENSIONS_DIR, pkg) ?? declared[pkg];
   }
   return dependencies;
 }
@@ -205,21 +206,53 @@ function workspaceRuntimeDependencies() {
 // ----------------------------------------------------------------- server ----------
 const serverSrc = path.join(ROOT, 'apps', 'server');
 const serverOut = path.join(STAGING, 'server');
-console.log('[stage] server: package.json + dist + prisma');
-const serverPkg = stagePackageJson(serverSrc, serverOut);
+/**
+ * The API ships as a bundle (scripts/bundle-server.mjs): dist/server.js, dist/app.mjs and its
+ * source map, instead of tsc's output beside a full production install. The staged
+ * package.json depends only on what the bundle leaves external, so `npm install` below
+ * installs just those and their own dependencies.
+ */
+console.log('[stage] server: bundling the API');
+fs.mkdirSync(path.join(serverOut, 'dist'), { recursive: true });
+const bundle = await bundleServer({ serverDir: serverSrc, outDir: path.join(serverOut, 'dist') });
+console.log(
+  `[stage] server: ${bundle.inputs} modules bundled; loaded from node_modules: ${bundle.externals.join(', ')}`,
+);
+const serverPkg = JSON.parse(fs.readFileSync(path.join(serverSrc, 'package.json'), 'utf-8'));
 {
-  const added = Object.entries(workspaceRuntimeDependencies()).filter(
-    ([name]) => !(name in serverPkg.dependencies),
-  );
-  if (added.length > 0) {
-    for (const [name, version] of added) serverPkg.dependencies[name] = version;
-    fs.writeFileSync(path.join(serverOut, 'package.json'), JSON.stringify(serverPkg, null, 2));
-    console.log(
-      `[stage] server: adding workspace runtime dependencies ${added.map(([n, v]) => `${n}@${v}`).join(', ')}`,
-    );
+  const declared = { ...serverPkg.dependencies, ...serverPkg.optionalDependencies };
+  const pinned = (name) => installedVersion(serverSrc, name) ?? declared[name];
+  const dependencies = {};
+  const optionalDependencies = {};
+  for (const name of bundle.externals) {
+    if (name.startsWith('@projekt-manga/')) continue;
+    if (!(name in declared)) {
+      throw new Error(
+        `[stage] the API bundle loads "${name}" at run time, but apps/server/package.json does not declare it. Add it to the server's dependencies.`,
+      );
+    }
+    if (name in (serverPkg.optionalDependencies ?? {})) optionalDependencies[name] = pinned(name);
+    else dependencies[name] = pinned(name);
   }
+  for (const [name, version] of Object.entries(sandboxRuntimeDependencies())) {
+    dependencies[name] ??= version;
+  }
+  for (const field of ['devDependencies', 'scripts', 'optionalDependencies'])
+    delete serverPkg[field];
+  serverPkg.dependencies = dependencies;
+  if (Object.keys(optionalDependencies).length > 0) {
+    serverPkg.optionalDependencies = optionalDependencies;
+  }
+  fs.writeFileSync(path.join(serverOut, 'package.json'), JSON.stringify(serverPkg, null, 2));
+  console.log(
+    `[stage] server: runtime dependencies ${Object.entries({
+      ...dependencies,
+      ...optionalDependencies,
+    })
+      .map(([n, v]) => `${n}@${v}`)
+      .join(', ')}`,
+  );
 }
-copyDir(path.join(serverSrc, 'dist'), path.join(serverOut, 'dist'));
 copyDir(path.join(serverSrc, 'prisma'), path.join(serverOut, 'prisma'));
 // Served by routes/docs.route.ts, which logs an ENOENT at startup without it.
 const openapi = path.join(serverSrc, 'openapi.yaml');
@@ -386,36 +419,33 @@ for (const file of ['worker.min.js', 'lang/jpn_vert.traineddata.gz']) {
 
 // -------------------------------------------------- workspace packages -------------
 /**
- * The `@projekt-manga/*` packages the server imports at runtime.
+ * The extension sandbox, which the API bundle leaves external.
  *
- * `stagePackageJson` strips these from dependencies, because their `"*"` workspace versions
- * mean nothing to `npm install` outside the workspace. They must be copied back in: a build
- * under the monorepo (`release/win-unpacked`) would resolve the workspace copies by
- * accident through Node's node_modules walk-up, but any real installation would fail with
- * ERR_MODULE_NOT_FOUND on startup.
+ * It cannot be bundled: `spawnSandboxedSource` forks `runner.js` from beside its own module,
+ * so the runner has to exist as a file. Copied by hand because it is a workspace package
+ * with no registry version to install, and only the sandbox: the package's root entry pulls
+ * in puppeteer and playwright, which a sandboxed source could not drive anyway. The health
+ * route, the only importer of the root, loads it lazily and degrades when it is absent.
  *
- * Copied by hand rather than installed: they are workspace packages with no registry
- * version to install. Only `package.json` and `dist` are needed; their own sources are not.
- *
- * `extensions` is deliberately copied *without* installing its dependencies. Its root entry
- * pulls in puppeteer and playwright, but the server reaches the sandbox through the
- * `/sandbox` subpath, which needs neither — and a sandboxed source could not drive a browser
- * anyway. The health route's stats surface, the only thing that imports the root, loads it
- * lazily and degrades when it is absent.
+ * Only the modules the sandbox reaches are shipped, with their source maps so stack
+ * traces from it name its src/ files.
  */
-const WORKSPACE_PACKAGES = ['types', 'schemas', 'extensions'];
 const serverScopeDir = path.join(serverOut, 'node_modules', '@projekt-manga');
-for (const name of WORKSPACE_PACKAGES) {
-  const from = path.join(ROOT, name === 'extensions' ? 'apps' : 'packages', name);
-  const to = path.join(serverScopeDir, name);
-  const dist = path.join(from, 'dist');
-  if (!fs.existsSync(dist)) {
-    throw new Error(`[stage] ${name} has no dist/ — build it before staging (looked in ${dist})`);
+const stagedExtensions = path.join(serverScopeDir, 'extensions');
+{
+  fs.mkdirSync(stagedExtensions, { recursive: true });
+  fs.copyFileSync(
+    path.join(EXTENSIONS_DIR, 'package.json'),
+    path.join(stagedExtensions, 'package.json'),
+  );
+  const modules = sandboxModules();
+  for (const file of modules) {
+    const target = path.join(stagedExtensions, path.relative(EXTENSIONS_DIR, file));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(file, target);
+    if (fs.existsSync(`${file}.map`)) fs.copyFileSync(`${file}.map`, `${target}.map`);
   }
-  fs.mkdirSync(to, { recursive: true });
-  fs.copyFileSync(path.join(from, 'package.json'), path.join(to, 'package.json'));
-  copyDir(dist, path.join(to, 'dist'));
-  console.log(`[stage] server: workspace package @projekt-manga/${name}`);
+  console.log(`[stage] server: extension sandbox (${modules.length} modules)`);
 }
 
 /**
@@ -428,16 +458,22 @@ for (const name of WORKSPACE_PACKAGES) {
 function verifyStagedImports() {
   const missing = [];
   const roots = [
-    { dir: path.join(serverOut, 'dist') },
-    ...WORKSPACE_SHIPPED.flatMap(({ name, roots: subdirs }) =>
-      subdirs.map((sub) => ({
-        dir: path.join(serverScopeDir, name, ...sub.split('/')),
-      })),
-    ),
+    // The bundle carries plenty of require('…') text from the packages inside it; what it
+    // actually loads at run time is the external list esbuild reported.
+    { dir: path.join(serverOut, 'dist'), specifiers: bundle.externals },
+    // The staged copy of every module the sandbox reaches.
+    {
+      dir: path.join(stagedExtensions, 'dist', 'sandbox'),
+      specifiers: bareImports(
+        sandboxModules().map((file) =>
+          path.join(stagedExtensions, path.relative(EXTENSIONS_DIR, file)),
+        ),
+      ),
+    },
   ];
-  for (const { dir } of roots) {
+  for (const { dir, specifiers } of roots) {
     const from = createRequire(path.join(dir, 'index.js'));
-    for (const specifier of bareImports(dir)) {
+    for (const specifier of specifiers) {
       const pkg = packageOf(specifier);
       // The root entry of extensions is loaded lazily and is meant to be absent here.
       if (pkg === '@projekt-manga/extensions' && specifier === pkg) continue;
