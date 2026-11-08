@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import express from 'express';
-import yaml from 'js-yaml';
+import { load } from 'js-yaml';
 import swaggerUi from 'swagger-ui-express';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -13,7 +13,7 @@ const SPEC_PATH = path.resolve(__dirname, '../../openapi.yaml');
 function loadSpec(): Record<string, unknown> | null {
   try {
     const raw = fs.readFileSync(SPEC_PATH, 'utf8');
-    return yaml.load(raw) as Record<string, unknown>;
+    return load(raw) as Record<string, unknown>;
   } catch (error) {
     console.error(`[docs] Failed to load ${SPEC_PATH}:`, error);
     return null;
