@@ -90,7 +90,7 @@ describe('UpdatePrompt', () => {
     const { unmount } = render(<UpdatePrompt />);
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
     expect(bridge.updateNow).toHaveBeenCalledOnce();
-    expect(await screen.findByRole('status')).toHaveTextContent('Restarting to install');
+    expect(await screen.findByRole('status')).toHaveTextContent('will close and reopen by itself');
     unmount();
 
     render(<UpdatePrompt />);

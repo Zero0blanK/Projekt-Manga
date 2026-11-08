@@ -22,8 +22,10 @@ function loadUpdater() {
     },
     checkForUpdates: async () => {},
     downloadUpdate: async () => {},
-    quitAndInstall: () => {
+    installArgs: null,
+    quitAndInstall: (...args) => {
       autoUpdater.installed += 1;
+      autoUpdater.installArgs = args;
     },
   };
   const originalLoad = Module._load;
@@ -171,6 +173,19 @@ test('"Update now" installs as soon as the download finishes', async () => {
   assert.equal(autoUpdater.installed, 0);
   listeners['update-downloaded']({ version: '1.2.0' });
   assert.equal(autoUpdater.installed, 1);
+});
+
+test('an update installs silently into the folder of the running copy, then reopens the app', async () => {
+  const { updater, listeners, autoUpdater } = loadUpdater();
+  if (process.platform === 'win32') {
+    // No directory page: the installer gets /D= with the folder this copy runs from.
+    assert.equal(autoUpdater.installDirectory, path.dirname(process.execPath));
+  }
+  listeners['update-available']({ version: '1.2.0', releaseNotes: '' });
+  listeners['update-downloaded']({ version: '1.2.0' });
+  updater.installNow();
+  // quitAndInstall(isSilent, isForceRunAfter): no wizard, and the app starts again after.
+  assert.deepEqual(autoUpdater.installArgs, [true, true]);
 });
 
 test('an update error is described by its cause, not by the release feed it carries', () => {

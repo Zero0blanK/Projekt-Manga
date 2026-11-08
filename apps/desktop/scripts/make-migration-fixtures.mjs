@@ -158,6 +158,13 @@ for (const tag of TAGS) {
     // The junction first, so removing the folder can never follow it into node_modules.
     const link = path.join(work, 'node_modules');
     if (fs.lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) fs.rmdirSync(link);
-    fs.rmSync(work, { recursive: true, force: true });
+    // Windows can hold a handle from the Prisma CLI for a moment after it exits (seen as
+    // EPERM on the CI runner). The folder is only temporary, so cleanup must never fail
+    // the run that produced the fixtures.
+    try {
+      fs.rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    } catch (error) {
+      console.warn(`[fixtures] could not remove ${work}: ${error.message}`);
+    }
   }
 }
