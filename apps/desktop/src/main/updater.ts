@@ -19,6 +19,7 @@
  *   the existing "Copy diagnostic report" output (apps/web/src/lib/diagnostics.ts already includes
  *   the main log), so a user reporting "it won't update" ships the reason with the report.
  */
+import path from 'node:path';
 import { app } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { appendLog } from './log-buffer';
@@ -307,6 +308,14 @@ export function initUpdater(): void {
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
+  // An update goes into the folder this copy runs from, whatever the user picked when they
+  // first installed. The installer would otherwise fall back to the location it recorded in
+  // the registry, or to its default if that is missing. Windows only: NsisUpdater's option.
+  if (process.platform === 'win32') {
+    (autoUpdater as { installDirectory?: string }).installDirectory = path.dirname(
+      process.execPath,
+    );
+  }
 
   // Routed into the same buffer as everything else rather than left on its default console
   // logger, so internal detail (which URL, which version, why a check failed) lands in the
@@ -405,7 +414,11 @@ export async function downloadUpdate(): Promise<UpdateState> {
 export function installNow(): void {
   if (!state.supported || state.status !== 'downloaded') return;
   log('restarting to install');
-  autoUpdater.quitAndInstall();
+  // Silent, then reopen: the installer runs without its wizard, so an update never asks
+  // where to install or which users to install for. It installs into installDirectory (set
+  // in initUpdater) and starts the app again when it is done. A per-machine install still
+  // shows Windows' own administrator prompt, which no installer option can skip.
+  autoUpdater.quitAndInstall(true, true);
 }
 
 /**

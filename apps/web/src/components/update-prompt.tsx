@@ -104,7 +104,7 @@ export function UpdatePrompt() {
           <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             {state.status === 'downloaded'
-              ? 'Restarting to install…'
+              ? 'Installing the update. Projekt Manga will close and reopen by itself…'
               : `Downloading${state.downloadPercent !== null ? ` ${state.downloadPercent}%` : ''}…`}
           </div>
         ) : (
