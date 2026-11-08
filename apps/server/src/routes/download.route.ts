@@ -2,6 +2,7 @@ import express from 'express';
 import downloadController from '../controllers/download.controller.js';
 import { validateBody, validateQuery } from '../middleware/validate.middleware.js';
 import { requireAdmin } from '../middleware/admin.middleware.js';
+import { cbzRateLimit, pageRateLimit } from '../middleware/fileRateLimit.middleware.js';
 import {
   initiateDownloadBodySchema,
   listPageQuerySchema,
@@ -40,10 +41,14 @@ router.get('/chapter/:chapterId/check', downloadController.isChapterDownloaded);
 router.get('/chapter/:chapterId/pages', downloadController.getDownloadedChapterPages);
 
 // GET /api/downloads/chapter/:chapterId/page/:index - Stream one downloaded page image
-router.get('/chapter/:chapterId/page/:index', downloadController.getDownloadedPageFile);
+router.get(
+  '/chapter/:chapterId/page/:index',
+  pageRateLimit,
+  downloadController.getDownloadedPageFile,
+);
 
 // GET /api/downloads/chapter/:chapterId/cbz - The downloaded chapter as a CBZ file
-router.get('/chapter/:chapterId/cbz', downloadController.getDownloadedChapterCbz);
+router.get('/chapter/:chapterId/cbz', cbzRateLimit, downloadController.getDownloadedChapterCbz);
 
 // GET /api/downloads/directory - Get active download directory
 router.get('/directory', requireAdmin, downloadController.getDownloadDirectory);
