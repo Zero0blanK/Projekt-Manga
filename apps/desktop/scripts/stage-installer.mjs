@@ -124,7 +124,7 @@ execFileSync(npm, ['run', 'build', '--workspace=ProjektManga'], {
   cwd: ROOT,
   stdio: 'inherit',
   shell: npm.endsWith('.cmd'),
-  env: { ...process.env, NEXT_PUBLIC_API_URL: '/api' },
+  env: { ...process.env, NEXT_PUBLIC_API_URL: '/api', PROJEKT_MANGA_STANDALONE: '1' },
 });
 
 if (outputName === undefined) {
@@ -296,29 +296,93 @@ execFileSync(
 );
 
 // ----------------------------------------------------------------- web -------------
+/**
+ * The web app ships as Next's standalone output, not as `.next` plus a full
+ * `npm install`.
+ *
+ * `next build` (with PROJEKT_MANGA_STANDALONE=1, see next.config.ts) traces the files
+ * the server loads and copies just those into `.next/standalone`, with a `server.js` to
+ * start it. The repository root is the tracing root, so the output mirrors the monorepo:
+ * `apps/web/server.js` beside a `node_modules` holding only the traced packages. It is
+ * shipped as it is; moving `server.js` away from that `node_modules` would break module
+ * resolution.
+ *
+ * Next leaves two folders out for a CDN to serve, and the desktop app has none, so they
+ * are copied in by hand: `.next/static` (the browser's scripts and styles) and `public`
+ * (the brand images and the OCR engine under public/ocr, which the Translate page loads
+ * by URL). The server serves both once they sit beside it.
+ */
 const webSrc = path.join(ROOT, 'apps', 'web');
 const webOut = path.join(STAGING, 'web');
-console.log('[stage] web: package.json + .next + public');
-stagePackageJson(webSrc, webOut);
-// Only the production build ships. `.next/dev` (left by `next dev` or the smoke scripts) and
-// `.next/cache` are build-machine leftovers that would greatly inflate the installer.
-const NEXT_EXCLUDED = new Set(['cache', 'dev', 'trace', 'trace-build']);
-fs.cpSync(path.join(webSrc, '.next'), path.join(webOut, '.next'), {
-  recursive: true,
-  filter: (source) => {
-    const relative = path.relative(path.join(webSrc, '.next'), source);
-    return !NEXT_EXCLUDED.has(relative.split(path.sep)[0]);
-  },
-});
-if (fs.existsSync(path.join(webSrc, 'public'))) {
-  copyDir(path.join(webSrc, 'public'), path.join(webOut, 'public'));
+const standaloneSrc = path.join(webSrc, '.next', 'standalone');
+const webApp = path.join(webOut, 'apps', 'web');
+if (!fs.existsSync(path.join(standaloneSrc, 'apps', 'web', 'server.js'))) {
+  throw new Error(
+    `[stage] web: ${path.join(standaloneSrc, 'apps', 'web', 'server.js')} is missing. ` +
+      'The web build must run with PROJEKT_MANGA_STANDALONE=1 (next.config.ts sets ' +
+      "output: 'standalone' from it), and with the repository root as the tracing root.",
+  );
 }
-// next.config.ts is read by `next start`; without it the rewrite that makes the whole
-// single-origin design work simply does not exist in the packaged app.
-fs.copyFileSync(path.join(webSrc, 'next.config.ts'), path.join(webOut, 'next.config.ts'));
+console.log('[stage] web: standalone server + .next/static + public');
+copyDir(standaloneSrc, webOut);
+copyDir(path.join(webSrc, '.next', 'static'), path.join(webApp, '.next', 'static'));
+copyDir(path.join(webSrc, 'public'), path.join(webApp, 'public'));
 
-console.log('[stage] web: installing production dependencies');
-run(npm, ['install', '--omit=dev', '--no-audit', '--no-fund'], webOut);
+/**
+ * Proves every package the web server loads at run time was copied into the standalone
+ * output.
+ *
+ * Turbopack leaves a package it does not bundle as `.x("name", () => require("name"))` in
+ * the server chunks, and relies on tracing to have copied it. Tracing follows static
+ * `require`s and `import`s; a package that loads files by a computed path can be missed,
+ * and nothing would notice until a page using it failed on a user's machine. Resolution
+ * must land inside the staged tree: the staging folder sits inside the monorepo, so a
+ * missing package would otherwise resolve from the repository's own node_modules.
+ */
+function verifyWebExternals() {
+  const fromServer = createRequire(path.join(webApp, 'server.js'));
+  const external = /\.[a-zA-Z]\("([^"]+)",\s*\(\)\s*=>\s*(?:require|import)\("\1"\)\)/g;
+  const missing = new Set();
+  for (const entry of fs.readdirSync(path.join(webApp, '.next', 'server'), {
+    recursive: true,
+    withFileTypes: true,
+  })) {
+    if (!entry.isFile() || !/\.(?:m|c)?js$/.test(entry.name)) continue;
+    const text = fs.readFileSync(path.join(entry.parentPath, entry.name), 'utf-8');
+    for (const [, specifier] of text.matchAll(external)) {
+      if (BUILTINS.has(specifier) || specifier.startsWith('node:')) continue;
+      let resolved = null;
+      try {
+        resolved = fromServer.resolve(specifier);
+      } catch {
+        // Reported below.
+      }
+      if (!resolved || path.relative(webOut, resolved).startsWith('..')) missing.add(specifier);
+    }
+  }
+  if (missing.size > 0) {
+    const names = [...missing].map(packageOf);
+    throw new Error(
+      `[stage] web: the server loads ${[...missing].join(', ')} at run time, but the ` +
+        'standalone build did not copy it. Add it to outputFileTracingIncludes in ' +
+        "apps/web/next.config.ts, for example: outputFileTracingIncludes: { '/*': [" +
+        names.map((name) => `'../../node_modules/${name}/**/*'`).join(', ') +
+        '] }',
+    );
+  }
+  console.log('[stage] web: every package the server loads is in the standalone output');
+}
+verifyWebExternals();
+
+/** Files the Translate page fetches by URL from public/ocr (see scripts/copy-ocr-assets.mjs). */
+for (const file of ['worker.min.js', 'lang/jpn_vert.traineddata.gz']) {
+  if (!fs.existsSync(path.join(webApp, 'public', 'ocr', ...file.split('/')))) {
+    throw new Error(
+      `[stage] web: public/ocr/${file} is missing. apps/web's prebuild copies it ` +
+        '(scripts/copy-ocr-assets.mjs); run the web build through npm, not `next build`.',
+    );
+  }
+}
 
 // -------------------------------------------------- workspace packages -------------
 /**

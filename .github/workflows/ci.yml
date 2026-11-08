@@ -377,6 +377,18 @@ jobs:
         env:
           DATABASE_URL: file:./data/ci-generate.db
 
+      - name: Install Chromium for Playwright
+        if: github.workflow != 'Release'
+        run: npx --workspace=@projekt-manga/extensions playwright install chromium
+
+      # Offline: the packaged API on a throwaway database, a fake source in the packaged
+      # sandbox, the packaged web server's pages and static files, and text recognition on
+      # the OCR files it serves. Catches files the trimmed installer no longer carries.
+      - name: Check — packaged app
+        if: github.workflow != 'Release'
+        working-directory: apps/desktop
+        run: node scripts/check-packaged.mjs --measure
+
       - name: Build — release notes
         if: github.workflow != 'Release'
         run: node scripts/release-notes.mjs apps/desktop/release

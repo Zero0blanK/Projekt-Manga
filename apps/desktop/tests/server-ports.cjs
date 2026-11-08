@@ -30,3 +30,35 @@ test('a taken preferred port falls back to another free one instead of failing',
     await new Promise((resolve) => held.close(resolve));
   }
 });
+
+test('a packaged app starts the standalone web server, a monorepo run uses next start', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { resolveServerPaths } = require('../dist/main/servers.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-server-paths-'));
+  const touch = (...parts) => {
+    fs.mkdirSync(path.join(root, ...parts.slice(0, -1)), { recursive: true });
+    fs.writeFileSync(path.join(root, ...parts), '');
+  };
+  try {
+    touch('resources', 'server', 'dist', 'server.js');
+    touch('resources', 'web', 'apps', 'web', 'server.js');
+    touch('resources', 'node', process.platform === 'win32' ? 'node.exe' : 'node');
+    const packaged = resolveServerPaths(path.join(root, 'resources'), path.join(root, 'none'));
+    assert.equal(packaged.webStandalone, true);
+    assert.equal(
+      packaged.webEntry,
+      path.join(root, 'resources', 'web', 'apps', 'web', 'server.js'),
+    );
+    assert.equal(packaged.webDir, path.join(root, 'resources', 'web', 'apps', 'web'));
+
+    touch('repo', 'apps', 'server', 'dist', 'server.js');
+    touch('repo', 'node_modules', 'next', 'dist', 'bin', 'next');
+    const monorepo = resolveServerPaths(path.join(root, 'none'), path.join(root, 'repo'));
+    assert.equal(monorepo.webStandalone, false);
+    assert.equal(monorepo.webDir, path.join(root, 'repo', 'apps', 'web'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
