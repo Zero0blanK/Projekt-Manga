@@ -188,4 +188,16 @@ describe('security headers', () => {
     // Relaxed deliberately: apps/web is a different origin and loads proxied covers.
     expect(res.headers['cross-origin-resource-policy']).toBe('cross-origin');
   });
+
+  it('sends a content security policy that the API docs page fits', async () => {
+    const res = await request(app).get('/api/docs/');
+
+    expect(res.status).toBe(200);
+    const csp = res.headers['content-security-policy'];
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("object-src 'none'");
+    // A LAN server on plain http would have the page's own files sent to https.
+    expect(csp).not.toContain('upgrade-insecure-requests');
+  });
 });

@@ -42,16 +42,17 @@ initializeUserAgentRefresh();
 // This API serves JSON and one Swagger UI page, never app HTML, so the defaults are
 // almost all appropriate as-is. Two exceptions:
 //
-// - contentSecurityPolicy is disabled because the only HTML here is swagger-ui-express's
-//   bundled page, which loads its own inline styles and scripts and breaks under the
-//   default CSP. A CSP on a JSON endpoint buys nothing anyway — there's no document for
-//   a browser to apply it to.
+// - The content security policy keeps Helmet's defaults, which the Swagger page fits: its
+//   scripts and stylesheet come from this server, and its inline styles are allowed. Only
+//   upgrade-insecure-requests is dropped, because a self-hosted server is often reached
+//   over plain http on a LAN, where it would send the page's own files to an https port
+//   nothing listens on.
 // - crossOriginResourcePolicy is relaxed to cross-origin because apps/web is served from
 //   a different origin (:3000 vs :4000) and proxied cover images are loaded directly by
 //   the browser; the default 'same-origin' would have the browser block every one.
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: { directives: { upgradeInsecureRequests: null } },
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   }),
 );
