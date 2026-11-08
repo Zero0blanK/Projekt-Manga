@@ -203,7 +203,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
       {!restorePending && !isReaderPath && <ConnectionBanner />}
       <Toaster />
-      {apiStarting && splashDone && <ServerStartingScreen startedAt={apiStartedAt} />}
+      {/* Not tied to the splash: it is often skipped (turned off, or already shown within
+          the last 12 hours, which covers the restart after an update). When it does play,
+          it sits above this screen and this one is what remains if the API is still loading. */}
+      {apiStarting && <ServerStartingScreen startedAt={apiStartedAt} />}
     </div>
   );
 }
