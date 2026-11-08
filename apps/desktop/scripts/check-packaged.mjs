@@ -565,6 +565,105 @@ if (values.migrations) {
       `${before} -> ${shippedMigrations.length} migrations${backups.length ? `, backup ${backups.join(', ')}` : ''}`,
     );
   }
+
+  // ------------------------------------- 4b. a failed migration leaves the library ------
+  // The oldest fixture with migrations still to apply, broken two ways. Either way the API
+  // must not start, and the library must be exactly as it was before the attempt.
+  const oldest = fixtures.find(
+    (name) =>
+      appliedMigrations(path.join(values.migrations, name)).length < shippedMigrations.length,
+  );
+  /** Everything a restore has to bring back: the schema, every table's rows, the ledger. */
+  const fingerprint = (file) => {
+    const sqlite = new DatabaseSync(file, { readOnly: true });
+    try {
+      const objects = sqlite
+        .prepare(
+          "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name",
+        )
+        .all();
+      const rows = objects
+        .filter((object) => object.type === 'table')
+        .map((table) => [table.name, sqlite.prepare(`SELECT * FROM "${table.name}"`).all()]);
+      return JSON.stringify({ objects, rows });
+    } finally {
+      sqlite.close();
+    }
+  };
+  const expectRefusal = async (label, prepare) => {
+    const dir = path.join(WORK, `refuse-${label.replace(/\W+/g, '-')}`);
+    fs.mkdirSync(dir);
+    const db = path.join(dir, 'library.db');
+    copyDatabase(path.join(values.migrations, oldest), db);
+    prepare(db);
+    const before = fingerprint(db);
+    let refused = null;
+    try {
+      const api = await startApi(RESOURCES, db, { label: `API (${label})` });
+      await api.stop();
+    } catch (error) {
+      refused = error;
+    }
+    assert.ok(
+      refused && /exited \(code [1-9]/.test(refused.message),
+      `${label}: the API started anyway`,
+    );
+    assert.match(refused.message, /Schema migration failed/, `${label}: unexpected failure`);
+    assert.equal(fingerprint(db), before, `${label}: the library was changed`);
+    const files = fs.readdirSync(dir);
+    assert.ok(
+      files.some((file) => file.endsWith('.bak')),
+      `${label}: no pre-migration backup kept`,
+    );
+    return files;
+  };
+
+  // An earlier attempt that never finished, as Prisma would have recorded it.
+  const pending = shippedMigrations[appliedMigrations(path.join(values.migrations, oldest)).length];
+  await expectRefusal('an unresolved failed migration', (db) => {
+    const sqlite = new DatabaseSync(db);
+    sqlite
+      .prepare(
+        `INSERT INTO _prisma_migrations (id, checksum, migration_name, started_at, applied_steps_count)
+         VALUES ('check-failed', 'x', ?, 1, 0)`,
+      )
+      .run(pending);
+    sqlite.close();
+  });
+  pass('refuses to migrate past an unresolved failed migration', `${oldest}, library unchanged`);
+
+  // A migration that fails partway: an object named like the last thing the next migration
+  // creates already exists, so its earlier statements have run when it fails.
+  const sql = fs.readFileSync(
+    path.join(RESOURCES, 'server', 'prisma', 'migrations', pending, 'migration.sql'),
+    'utf-8',
+  );
+  const created = [...sql.matchAll(/CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+"([^"]+)"/gi)].map(
+    (match) => match[1],
+  );
+  assert.ok(created.length > 1, `${pending} creates too little to fail partway`);
+  const files = await expectRefusal('a migration failing partway', (db) => {
+    const sqlite = new DatabaseSync(db);
+    sqlite.exec(`CREATE TABLE "${created.at(-1)}" (clash INTEGER)`);
+    sqlite.close();
+  });
+  assert.ok(
+    files.some((file) => file.includes('.failed-')),
+    'the failed database was not kept for diagnosis',
+  );
+  pass('restores the library when a migration fails partway', `${pending} on ${oldest}`);
+
+  // A database the OS will not let the API write: the migration fails and so does the
+  // restore. The original must still be intact, with its backup beside it.
+  if (process.platform === 'win32') {
+    let denied;
+    await expectRefusal('a read-only database', (db) => {
+      denied = db;
+      fs.chmodSync(db, 0o444);
+    });
+    fs.chmodSync(denied, 0o666);
+    pass('leaves a read-only database untouched', oldest);
+  }
 }
 
 // ---------------------------------------------------------- measurements ------------

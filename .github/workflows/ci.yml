@@ -346,6 +346,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The release tags, so the packaged-app check can build databases at each released
+          # schema (scripts/make-migration-fixtures.mjs).
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
@@ -382,12 +386,17 @@ jobs:
         run: npx --workspace=@projekt-manga/extensions playwright install chromium
 
       # Offline: the packaged API on a throwaway database, a fake source in the packaged
-      # sandbox, the packaged web server's pages and static files, and text recognition on
-      # the OCR files it serves. Catches files the trimmed installer no longer carries.
+      # sandbox, the packaged web server's pages and static files, text recognition on the
+      # OCR files it serves, and databases from every release migrated (and a failed
+      # migration restored) by the packaged API. Catches files the trimmed installer no
+      # longer carries.
       - name: Check — packaged app
         if: github.workflow != 'Release'
         working-directory: apps/desktop
-        run: node scripts/check-packaged.mjs --measure
+        shell: bash
+        run: |
+          node scripts/make-migration-fixtures.mjs "$RUNNER_TEMP/migration-fixtures"
+          node scripts/check-packaged.mjs --measure --migrations "$RUNNER_TEMP/migration-fixtures"
 
       - name: Build — release notes
         if: github.workflow != 'Release'

@@ -47,7 +47,6 @@ export const EXTERNAL = {
   // swagger-ui-express itself is bundled, so it shares the bundle's express: external, its
   // peer dependency on express would install a second copy of express and all its packages.
   'swagger-ui-dist': 'Serves its assets from its own folder (absolute-path.js uses __dirname).',
-  prisma: 'The Prisma CLI, run as a child process for migrations.',
 };
 
 /**
