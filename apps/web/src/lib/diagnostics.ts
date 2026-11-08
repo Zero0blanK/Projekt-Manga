@@ -260,10 +260,12 @@ function duration(seconds: number | null | undefined): string {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 
-/** A table whose every cell is scrubbed, with pipes escaped so a value cannot break it. */
+/** A table whose every cell is scrubbed, with backslashes and pipes escaped so a value cannot
+ * break it. */
 function table(headers: string[], rows: Array<Array<string | number | boolean | null>>): string {
   const cell = (value: string | number | boolean | null) =>
     scrubText(value === null ? '—' : String(value))
+      .replace(/\\/g, '\\\\')
       .replace(/\|/g, '\\|')
       .replace(/\n/g, ' ');
   return [

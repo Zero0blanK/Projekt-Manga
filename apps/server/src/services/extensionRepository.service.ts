@@ -313,7 +313,7 @@ async function storeIcon(installedExtensionId: string, url: string): Promise<Sto
 async function storeIconQuietly(installedExtensionId: string, url: string | null | undefined) {
   if (!url) return;
   await storeIcon(installedExtensionId, url).catch((error) => {
-    console.warn(`[extensions] Could not store the icon for ${installedExtensionId}:`, error);
+    console.warn('[extensions] Could not store the icon for %s:', installedExtensionId, error);
   });
 }
 

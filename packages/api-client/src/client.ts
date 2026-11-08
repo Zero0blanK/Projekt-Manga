@@ -62,10 +62,17 @@ export interface ApiClientConfig {
 
 let configuredBaseUrl: string | null = null;
 
+/** Removes trailing slashes in linear time; a `/\/+$/` regex is quadratic on a long run. */
+export function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === '/') end -= 1;
+  return value.slice(0, end);
+}
+
 /** Call once at app startup if the default base URL resolution doesn't fit (e.g. Electron
  * pointing at a bundled server instance). */
 export function configureApiClient(config: ApiClientConfig): void {
-  configuredBaseUrl = config.baseUrl.replace(/\/+$/, '');
+  configuredBaseUrl = trimTrailingSlashes(config.baseUrl);
 }
 
 /** Fallback API port for server-side rendering in single-origin mode. Matches the

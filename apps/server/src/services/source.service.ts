@@ -463,7 +463,7 @@ const fetchMangaUpdates = async (
     updateErrorCode = healthFailure.code;
     updateRetryAfterMs = healthFailure.retryAfterMs;
     const message = isSourceErrorLike(error) ? error.message : error;
-    console.warn(`Failed to fetch chapter updates for ${source_id}/${manga_slug}:`, message);
+    console.warn('Failed to fetch chapter updates for %s/%s:', source_id, manga_slug, message);
     await updateLogService.logError(source_id, resolvedMangaId, mangaTitle, error);
   }
 
@@ -472,7 +472,7 @@ const fetchMangaUpdates = async (
     try {
       thumbnail_url = await refreshStoredDetails(source_id, manga_slug, libraryManga.id);
     } catch (error) {
-      console.warn(`Failed to refresh details for ${source_id}/${manga_slug}:`, error);
+      console.warn('Failed to refresh details for %s/%s:', source_id, manga_slug, error);
     }
   }
   if (!thumbnail_url && manga_id) {
@@ -480,7 +480,7 @@ const fetchMangaUpdates = async (
       // The source's own id for the title, not the library row id.
       thumbnail_url = await getMangaThumbnail(source_id, manga_slug);
     } catch (error) {
-      console.warn(`Failed to fetch thumbnail for ${source_id}/${manga_slug}:`, error);
+      console.warn('Failed to fetch thumbnail for %s/%s:', source_id, manga_slug, error);
     }
   }
 

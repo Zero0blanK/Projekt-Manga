@@ -67,9 +67,13 @@ async function authenticate(
   );
 }
 
+/** Keys the JWT cache, so the credential itself is never a lookup key in memory. Random per
+ * process, since the key never leaves it. */
+const JWT_CACHE_KEY_SECRET = crypto.randomBytes(32);
+
 async function getJwt(credential: ServerCredential): Promise<string> {
   const key = crypto
-    .createHash('sha256')
+    .createHmac('sha256', JWT_CACHE_KEY_SECRET)
     .update(encodeServerCredential(credential))
     .digest('base64url');
   const cached = jwtCache.get(key);
