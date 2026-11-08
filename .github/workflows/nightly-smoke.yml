@@ -28,7 +28,25 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
-      - run: npm ci
+      # Electron's postinstall downloads its binary from GitHub's release servers. A night
+      # failed on one 504 there ("Electron failed to install correctly"), so the download
+      # is cached between runs and the install is retried before the night is called failed.
+      - name: Cache Electron download
+        uses: actions/cache@v6
+        with:
+          path: ~\AppData\Local\electron\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            npm ci && exit 0
+            echo "::warning::npm ci failed (attempt $attempt of 3); retrying"
+            sleep $((attempt * 30))
+          done
+          exit 1
 
       - name: Generate Prisma client
         run: npm run db:generate --workspace=@projekt-manga/server
@@ -38,7 +56,9 @@ jobs:
       - name: Cache Playwright browsers
         uses: actions/cache@v6
         with:
-          path: ~/.cache/ms-playwright
+          # Where Playwright keeps browsers on Windows. The Linux path that was here never
+          # matched, so Chromium was downloaded again every night.
+          path: ~\AppData\Local\ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Chromium for Playwright
