@@ -1,6 +1,7 @@
 'use client';
 
 import { desktopBridge } from '@/lib/desktop-bridge';
+import type { Change } from '@/lib/changelog';
 
 /**
  * The desktop app's self-update bridge (apps/desktop/src/main/updater.ts, exposed by its
@@ -26,6 +27,17 @@ export interface UpdateState {
   error: string | null;
   /** Plain-text release notes for the version on offer (older desktop builds omit it). */
   releaseNotes?: string | null;
+  /** The version on offer's changelog.json entry, fetched from its release tag (older desktop
+   * builds omit it). */
+  changelog?: {
+    version: string;
+    date: string;
+    summary: string | null;
+    upgrade: string | null;
+    changes: Change[];
+  } | null;
+  /** True while the desktop app is still fetching `changelog`. */
+  changelogPending?: boolean;
   /** Whether the launch prompt should show for the version on offer. */
   prompt?: boolean;
 }
