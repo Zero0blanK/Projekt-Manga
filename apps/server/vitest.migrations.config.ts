@@ -7,6 +7,7 @@ import { defineConfig } from 'vitest/config';
 //
 // No DATABASE_URL is involved: every database here is a temp file the test creates.
 export const migrationTestFiles = [
+  'tests/applyMigrations.test.ts',
   'tests/migrateWithBackup.test.ts',
   'tests/migrationMatrix.test.ts',
   'tests/migrationPrismaCli.test.ts',

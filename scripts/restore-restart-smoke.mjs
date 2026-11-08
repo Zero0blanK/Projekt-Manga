@@ -314,12 +314,8 @@ try {
   await mkdir(prismaDir);
   await cp(migrations, path.join(prismaDir, 'migrations'), { recursive: true });
   await cp(path.join(serverRoot, 'prisma', 'schema.prisma'), path.join(prismaDir, 'schema.prisma'));
-  // The server's startup migration runner uses process.cwd(). Keep its Prisma project
-  // isolated while resolving the installed Prisma CLI through the server build.
-  await writeFile(
-    path.join(workDir, 'prisma.config.ts'),
-    "import 'dotenv/config';\nimport { defineConfig, env } from 'prisma/config';\nexport default defineConfig({ schema: './prisma/schema.prisma', datasource: { url: env('DATABASE_URL') } });\n",
-  );
+  // The server applies the migrations under its working directory's prisma/ folder itself
+  // (apps/server/src/configs/applyMigrations.ts), so this copy is all it needs.
 
   const port = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;

@@ -257,76 +257,55 @@ copyDir(path.join(serverSrc, 'prisma'), path.join(serverOut, 'prisma'));
 // Served by routes/docs.route.ts, which logs an ENOENT at startup without it.
 const openapi = path.join(serverSrc, 'openapi.yaml');
 if (fs.existsSync(openapi)) fs.copyFileSync(openapi, path.join(serverOut, 'openapi.yaml'));
-/**
- * A JavaScript Prisma config, written rather than copied.
- *
- * The repo's own prisma.config.ts cannot be used here: it is TypeScript, and the staged
- * tree has no tsx to load it. Prisma 7 has no `--url` flag either — `migrate deploy` reads
- * the datasource URL *only* from a config file, so without this the packaged app fails
- * with "The datasource.url property is required in your Prisma config file", which points
- * nowhere near the real cause.
- *
- * `.mjs` because the staged package.json declares `"type": "module"`.
- */
-fs.writeFileSync(
-  path.join(serverOut, 'prisma.config.mjs'),
-  [
-    "import { defineConfig, env } from 'prisma/config';",
-    '',
-    'export default defineConfig({',
-    "  schema: './prisma/schema.prisma',",
-    "  datasource: { url: env('DATABASE_URL') },",
-    '});',
-    '',
-  ].join('\n'),
-);
+// Migrations are applied by the server itself (apps/server/src/configs/applyMigrations.ts),
+// so the Prisma CLI, its config and its engines are not shipped. Only the SQL is needed.
 
 console.log('[stage] server: installing production dependencies');
 run(npm, ['install', '--omit=dev', '--no-audit', '--no-fund'], serverOut);
 
 /**
- * The Prisma CLI has to be in the staged tree, for two reasons.
+ * The generated Prisma client, copied from the server build.
  *
- * At build time, `prisma generate` resolves `@prisma/client` relative to *itself* — running
- * the repo-root CLI against the staged schema fails with "Could not resolve @prisma/client"
- * even though the staged tree has it. At run time, `migrateWithBackup` shells out to this
- * same CLI to apply pending migrations on the user's machine, so it is a runtime
- * dependency of the installer whether or not it is one of the repo.
- *
- * Installed explicitly because it is a devDependency, which `--omit=dev` skipped. Pinned to
- * the version the repo resolved, so the packaged CLI and the generated client cannot drift.
+ * `@prisma/client` loads the client generated for this schema from node_modules/.prisma,
+ * and a fresh install leaves only a stub there. The server build that ran above
+ * (`prisma generate` in apps/server) wrote it into the repository's node_modules, from the
+ * same schema and the same @prisma/client version the staged tree pins, so it is the same
+ * client a generate inside the staged tree would produce. Copying it is what lets the
+ * installer leave the Prisma CLI out.
  */
-const prismaVersion = JSON.parse(
-  fs.readFileSync(path.join(ROOT, 'node_modules', 'prisma', 'package.json'), 'utf-8'),
-).version;
-
-console.log(
-  `[stage] server: installing prisma CLI ${prismaVersion} (needed at runtime for migrations)`,
-);
-run(npm, ['install', '--no-audit', '--no-fund', `prisma@${prismaVersion}`], serverOut);
-
-// A fresh install replaces the generated client in node_modules/@prisma/client with the
-// stock package, so regenerating against the staged tree is what makes the packaged server
-// able to query at all.
-console.log('[stage] server: generating Prisma client');
-execFileSync(
-  process.execPath,
-  [
-    path.join(serverOut, 'node_modules', 'prisma', 'build', 'index.js'),
-    'generate',
-    '--schema',
-    path.join(serverOut, 'prisma', 'schema.prisma'),
-  ],
-  {
-    cwd: serverOut,
-    stdio: 'inherit',
-    // The config written just above is auto-discovered by `generate`, and it resolves
-    // DATABASE_URL eagerly — so without a value here the build fails with "Cannot resolve
-    // environment variable: DATABASE_URL". Generating a client does not touch a database,
-    // so any well-formed URL will do; the real one is supplied at run time.
-    env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL ?? 'file:./data/placeholder.db' },
-  },
-);
+{
+  const generated = path.join(ROOT, 'node_modules', '.prisma', 'client');
+  const staged = path.join(serverOut, 'node_modules', '.prisma', 'client');
+  const modelsOf = (schema) =>
+    [...fs.readFileSync(schema, 'utf-8').matchAll(/^model\s+(\w+)\s*\{/gm)].map((m) => m[1]).sort();
+  const expected = modelsOf(path.join(serverOut, 'prisma', 'schema.prisma'));
+  if (!fs.existsSync(path.join(generated, 'schema.prisma'))) {
+    throw new Error(
+      `[stage] server: no generated Prisma client at ${generated}. Run "npm run build --workspace=@projekt-manga/server" first.`,
+    );
+  }
+  if (
+    JSON.stringify(modelsOf(path.join(generated, 'schema.prisma'))) !== JSON.stringify(expected)
+  ) {
+    throw new Error(
+      `[stage] server: the Prisma client in ${generated} was generated from a different schema. Run "npm run db:generate --workspace=@projekt-manga/server" and stage again.`,
+    );
+  }
+  const clientVersion = (dir) =>
+    JSON.parse(fs.readFileSync(path.join(dir, '@prisma', 'client', 'package.json'), 'utf-8'))
+      .version;
+  if (
+    clientVersion(path.join(ROOT, 'node_modules')) !==
+    clientVersion(path.join(serverOut, 'node_modules'))
+  ) {
+    throw new Error(
+      '[stage] server: the staged @prisma/client is a different version from the one the client was generated with.',
+    );
+  }
+  removeWithRetry(staged);
+  copyDir(generated, staged);
+  console.log(`[stage] server: Prisma client for ${expected.length} models`);
+}
 
 // ----------------------------------------------------------------- web -------------
 /**

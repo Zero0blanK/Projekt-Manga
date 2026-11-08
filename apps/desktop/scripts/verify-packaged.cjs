@@ -16,7 +16,8 @@ const REQUIRED = [
   'server/dist/app.mjs',
   'server/dist/app.mjs.map',
   'server/openapi.yaml',
-  'server/prisma/migrations',
+  // Applied by the server itself (apps/server/src/configs/applyMigrations.ts).
+  'server/prisma/migrations/migration_lock.toml',
   // Left out of the bundle and loaded from node_modules at run time.
   'server/node_modules/@prisma/client/package.json',
   'server/node_modules/.prisma/client/default.js',
@@ -62,6 +63,12 @@ const FORBIDDEN = [
   'server/node_modules/swagger-ui-express',
   'server/node_modules/@projekt-manga/types',
   'server/node_modules/@projekt-manga/schemas',
+  // The Prisma CLI and its tooling: migrations no longer need it.
+  'server/prisma.config.mjs',
+  'server/node_modules/prisma',
+  'server/node_modules/@prisma/engines',
+  'server/node_modules/@prisma/studio-core',
+  'server/node_modules/effect',
   // The pre-standalone layout. Present alongside the new one, it would mean a stale copy.
   'web/.next',
   // Build-only packages that tracing must not pull into the standalone output.

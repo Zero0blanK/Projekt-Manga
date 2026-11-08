@@ -8,23 +8,17 @@ import { DatabaseSync } from 'node:sqlite';
  * The migration safety net, exercised on its failure path.
  *
  * A happy-path-only test here would be close to worthless: the whole point of this code is
- * what happens when `prisma migrate deploy` dies halfway on a machine nobody can inspect.
- * So `execFile` is stubbed to fail, and the assertions are about what is left on disk
- * afterwards — the user's database back as it was, and the broken one preserved.
+ * what happens when a migration dies halfway on a machine nobody can inspect. So the
+ * migration runner (applyMigrations.ts, tested on its own in applyMigrations.test.ts) is
+ * stubbed to fail, and the assertions are about what is left on disk afterwards — the
+ * user's database back as it was, and the broken one preserved.
  */
 
-const execFileImpl = vi.fn();
+const applyImpl = vi.fn();
 
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:child_process')>();
-  return {
-    ...actual,
-    // promisify() reads this symbol to find the promise-returning form, so the stub has
-    // to carry it or `promisify(execFile)` wraps the callback form and never resolves.
-    execFile: Object.assign((...args: unknown[]) => execFileImpl(...args), {
-      [Symbol.for('nodejs.util.promisify.custom')]: (...args: unknown[]) => execFileImpl(...args),
-    }),
-  };
+vi.mock('../src/configs/applyMigrations.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/configs/applyMigrations.js')>();
+  return { ...actual, applyMigrations: (...args: unknown[]) => applyImpl(...args) };
 });
 
 const { migrateWithBackup } = await import('../src/configs/migrate.js');
@@ -79,7 +73,7 @@ const ORIGINAL_CONTENT = 'ORIGINAL DATABASE BYTES';
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-backup-'));
   dbFile = path.join(tmpDir, 'projektmanga.db');
-  execFileImpl.mockReset();
+  applyImpl.mockReset();
 });
 
 afterEach(() => {
@@ -134,7 +128,7 @@ describe('migrateWithBackup', () => {
         const expectedSchema = migrationSchema(original);
         original.close();
 
-        execFileImpl.mockImplementation(async () => {
+        applyImpl.mockImplementation(async () => {
           const interrupted = new DatabaseSync(targetDb);
           for (const statement of migration.statements.slice(0, failAfter)) {
             interrupted.exec(statement);
@@ -173,7 +167,7 @@ describe('migrateWithBackup', () => {
       'CREATE TABLE probe (id INTEGER PRIMARY KEY);',
     );
 
-    execFileImpl.mockImplementation(async () => {
+    applyImpl.mockImplementation(async () => {
       const db = new DatabaseSync(dbFile);
       db.exec(`
         CREATE TABLE probe (id INTEGER PRIMARY KEY);
@@ -188,7 +182,7 @@ describe('migrateWithBackup', () => {
         '2026-10-10T00:00:00.000Z',
       );
       db.close();
-      return { stdout: '', stderr: '' };
+      return { applied: [] };
     });
 
     const firstStart = await migrateWithBackup(dbFile, tmpDir, '1.0.0');
@@ -197,38 +191,44 @@ describe('migrateWithBackup', () => {
     expect(firstStart).toMatchObject({ ok: true, applied: true });
     expect(firstStart.backupPath).toBeUndefined();
     expect(restart).toEqual({ ok: true, applied: false });
-    expect(execFileImpl).toHaveBeenCalledTimes(1);
+    expect(applyImpl).toHaveBeenCalledTimes(1);
   });
 
-  it('uses the staged Prisma config and exact database path in packaged mode', async () => {
+  it('migrates the exact database file from the migrations folder beside the server', async () => {
     const migrationDirectory = path.join(tmpDir, 'prisma', 'migrations', '20261010000000_fixture');
     fs.mkdirSync(migrationDirectory, { recursive: true });
     fs.writeFileSync(path.join(migrationDirectory, 'migration.sql'), 'SELECT 1;');
-    const stagedConfig = path.join(tmpDir, 'prisma.config.mjs');
-    fs.writeFileSync(stagedConfig, 'export default {};');
     await createRealDatabase(dbFile);
-    execFileImpl.mockResolvedValue({ stdout: '', stderr: '' });
+    applyImpl.mockReturnValue({ applied: ['20261010000000_fixture'] });
 
-    const result = await migrateWithBackup(dbFile, tmpDir, '1.0.0');
-    const [, args, options] = execFileImpl.mock.calls[0] as [
-      string,
-      string[],
-      { cwd: string; env: NodeJS.ProcessEnv },
-    ];
+    const result = await migrateWithBackup(path.basename(dbFile), tmpDir, '1.0.0');
 
     expect(result.ok).toBe(true);
-    expect(args).toContain('--config');
-    expect(args).toContain(stagedConfig);
-    expect(options.cwd).toBe(tmpDir);
-    expect(options.env.DATABASE_URL).toBe(`file:${dbFile}`);
-    expect(options.env.ELECTRON_RUN_AS_NODE).toBe('1');
+    expect(applyImpl).toHaveBeenCalledWith(dbFile, path.join(tmpDir, 'prisma', 'migrations'));
   });
 
-  it('does not run packaged migrations when the pre-migration backup cannot be written', async () => {
+  it('restores the backup when a migration fails partway, even on a lock error', async () => {
+    const { MigrationFailedError } = await import('../src/configs/applyMigrations.js');
+    fs.writeFileSync(dbFile, ORIGINAL_CONTENT);
+    let attempts = 0;
+    applyImpl.mockImplementation(() => {
+      attempts += 1;
+      fs.writeFileSync(dbFile, 'HALF-MIGRATED');
+      throw new MigrationFailedError('20261010000000_fixture', new Error('database is locked'));
+    });
+
+    const result = await migrateWithBackup(dbFile, tmpDir, '1.0.0');
+
+    // Some statements ran, so this is not "nothing happened yet": no retry, and restore.
+    expect(attempts).toBe(1);
+    expect(result).toMatchObject({ ok: false, recovery: { status: 'restored' } });
+    expect(fs.readFileSync(dbFile, 'utf8')).toBe(ORIGINAL_CONTENT);
+  });
+
+  it('does not run migrations when the pre-migration backup cannot be written', async () => {
     const migrationDirectory = path.join(tmpDir, 'prisma', 'migrations', '20261010000000_fixture');
     fs.mkdirSync(migrationDirectory, { recursive: true });
     fs.writeFileSync(path.join(migrationDirectory, 'migration.sql'), 'SELECT 1;');
-    fs.writeFileSync(path.join(tmpDir, 'prisma.config.mjs'), 'export default {};');
     await createRealDatabase(dbFile);
 
     const originalCopyFileSync = fs.copyFileSync;
@@ -256,7 +256,7 @@ describe('migrateWithBackup', () => {
       copyFile.mockRestore();
     }
 
-    expect(execFileImpl).not.toHaveBeenCalled();
+    expect(applyImpl).not.toHaveBeenCalled();
     const database = new DatabaseSync(dbFile, { readOnly: true });
     expect(database.prepare("SELECT name FROM sqlite_master WHERE name = 'probe'").get()).toEqual({
       name: 'probe',
@@ -267,7 +267,7 @@ describe('migrateWithBackup', () => {
 
   it('reports a failed restore and retains the valid backup after a permission error', async () => {
     await createRealDatabase(dbFile);
-    execFileImpl.mockImplementation(async () => {
+    applyImpl.mockImplementation(async () => {
       fs.writeFileSync(dbFile, 'PARTIALLY MIGRATED');
       throw new Error('P3009 migration failed');
     });
@@ -330,8 +330,8 @@ describe('migrateWithBackup', () => {
       .run(previousMigration, '2026-09-29T00:00:00.000Z');
     initial.close();
 
-    execFileImpl.mockImplementation(async () => {
-      if (execFileImpl.mock.calls.length === 1) {
+    applyImpl.mockImplementation(async () => {
+      if (applyImpl.mock.calls.length === 1) {
         const partiallyMigrated = new DatabaseSync(dbFile);
         partiallyMigrated.exec('CREATE TABLE fixture_migrated (id INTEGER PRIMARY KEY);');
         partiallyMigrated.close();
@@ -343,7 +343,7 @@ describe('migrateWithBackup', () => {
         .prepare('INSERT INTO _prisma_migrations VALUES (?, ?, NULL)')
         .run(nextMigration, '2026-10-10T00:00:00.000Z');
       recovered.close();
-      return { stdout: '', stderr: '' };
+      return { applied: [] };
     });
 
     const interrupted = await migrateWithBackup(dbFile, tmpDir, '1.0.0');
@@ -370,7 +370,7 @@ describe('migrateWithBackup', () => {
     const recovered = await migrateWithBackup(dbFile, tmpDir, '1.0.0');
 
     expect(recovered).toMatchObject({ ok: true, applied: true });
-    expect(execFileImpl).toHaveBeenCalledTimes(2);
+    expect(applyImpl).toHaveBeenCalledTimes(2);
     const upgraded = new DatabaseSync(dbFile, { readOnly: true });
     expect(
       upgraded
@@ -380,7 +380,7 @@ describe('migrateWithBackup', () => {
     upgraded.close();
   });
 
-  it('skips backup and CLI when every migration is already applied', async () => {
+  it('skips backup and migration when every migration is already applied', async () => {
     const directory = path.join(tmpDir, 'prisma', 'migrations', '20260929000000_example');
     fs.mkdirSync(directory, { recursive: true });
     fs.writeFileSync(path.join(directory, 'migration.sql'), 'CREATE TABLE example (id INTEGER);');
@@ -396,13 +396,13 @@ describe('migrateWithBackup', () => {
 
     const result = await migrateWithBackup(dbFile, tmpDir, '1.0.0');
     expect(result).toEqual({ ok: true, applied: false });
-    expect(execFileImpl).not.toHaveBeenCalled();
+    expect(applyImpl).not.toHaveBeenCalled();
     expect(countBackups()).toBe(0);
   });
   it('restores the previous database when the migration fails', async () => {
     fs.writeFileSync(dbFile, ORIGINAL_CONTENT);
 
-    execFileImpl.mockImplementation(async () => {
+    applyImpl.mockImplementation(async () => {
       // Simulate a migration that got far enough to damage the file before dying.
       fs.writeFileSync(dbFile, 'HALF-MIGRATED GARBAGE');
       throw new Error('P3009 migrate found failed migration');
@@ -420,7 +420,7 @@ describe('migrateWithBackup', () => {
   });
 
   it('reports failure without restoring on a first run, where there is nothing to restore', async () => {
-    execFileImpl.mockRejectedValue(new Error('cannot create database'));
+    applyImpl.mockRejectedValue(new Error('cannot create database'));
 
     const result = await migrateWithBackup(dbFile, tmpDir, '1.2.3');
 
@@ -433,7 +433,7 @@ describe('migrateWithBackup', () => {
     fs.writeFileSync(dbFile, ORIGINAL_CONTENT);
     fs.writeFileSync(`${dbFile}-wal`, 'PENDING TRANSACTIONS');
 
-    execFileImpl.mockImplementation(async () => {
+    applyImpl.mockImplementation(async () => {
       fs.writeFileSync(dbFile, 'BROKEN');
       fs.writeFileSync(`${dbFile}-wal`, 'BROKEN WAL');
       throw new Error('boom');
@@ -453,10 +453,10 @@ describe('migrateWithBackup', () => {
     // "database is locked" means the migration never started — something else holds the
     // write lock. Restoring and refusing to start over that would be wrong.
     let attempts = 0;
-    execFileImpl.mockImplementation(async () => {
+    applyImpl.mockImplementation(async () => {
       attempts += 1;
       if (attempts < 3) throw new Error('SQLite database error\ndatabase is locked');
-      return { stdout: '', stderr: '' };
+      return { applied: [] };
     });
 
     const result = await migrateWithBackup(dbFile, tmpDir, '1.0.0');
@@ -470,7 +470,7 @@ describe('migrateWithBackup', () => {
     fs.writeFileSync(dbFile, ORIGINAL_CONTENT);
 
     let attempts = 0;
-    execFileImpl.mockImplementation(async () => {
+    applyImpl.mockImplementation(async () => {
       attempts += 1;
       throw new Error('P3009 migrate found failed migration');
     });
@@ -488,7 +488,7 @@ describe('migrateWithBackup', () => {
       fs.writeFileSync(path.join(tmpDir, `projektmanga.db.pre-2020-01-0${i}-old.bak`), 'old');
     }
 
-    execFileImpl.mockRejectedValue(new Error('nope'));
+    applyImpl.mockRejectedValue(new Error('nope'));
     await migrateWithBackup(dbFile, tmpDir, '1.0.0');
 
     expect(countBackups()).toBeGreaterThanOrEqual(6);
@@ -504,7 +504,7 @@ describe('migrateWithBackup', () => {
     }
 
     // Migration itself is a no-op: what is under test is the bookkeeping around it.
-    execFileImpl.mockResolvedValue({ stdout: '', stderr: '' });
+    applyImpl.mockReturnValue({ applied: [] });
 
     const result = await migrateWithBackup(dbFile, tmpDir, '2.0.0');
 
