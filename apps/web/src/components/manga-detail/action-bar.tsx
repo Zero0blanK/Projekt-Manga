@@ -57,7 +57,12 @@ function ContinueReadingLink({ manga }: { manga: Manga }) {
   // Keyed off the resume target, not `progress`: progress counts finished chapters, so a
   // reader who stopped part-way through their first chapter had nothing marked read and
   // would be sent back to chapter 1 despite having somewhere to resume.
-  const position = localPosition?.id === manga.id ? localPosition : manga;
+  //
+  // The local copy wins only when it has a place to resume. A title added to the library a
+  // moment ago may not have its reading position in the local cache yet, and an empty
+  // answer from there must not hide the one the page was given.
+  const local = localPosition?.id === manga.id ? localPosition : null;
+  const position = local?.currentChapter !== undefined ? local : manga;
   const hasProgress = position.currentChapter !== undefined;
   const startChapter = position.currentChapter ?? 1;
   const pageParam = position.currentPage ? `&page=${position.currentPage}` : '';
