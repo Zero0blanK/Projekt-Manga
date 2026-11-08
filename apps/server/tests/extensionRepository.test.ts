@@ -1158,3 +1158,13 @@ describe('installed source icons', () => {
     expect(none.status).toBe(404);
   });
 });
+
+describe('bundleDirPath', () => {
+  it('keeps every installed extension inside the bundles folder', async () => {
+    const { bundleDirPath } = await import('../src/services/extensionRepository.service.js');
+    expect(path.basename(bundleDirPath('clx0abc123def456'))).toBe('clx0abc123def456');
+    for (const id of ['..', '../etc', 'a/b', 'a\b', '', '.', 'x'.repeat(65)]) {
+      expect(() => bundleDirPath(id), id).toThrow(/invalid installed extension id/i);
+    }
+  });
+});

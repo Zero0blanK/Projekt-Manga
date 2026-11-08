@@ -47,6 +47,22 @@ function resolveBundlesDir(): string {
   );
 }
 
+/** Installed extension ids are cuids the server generates. */
+const INSTALLED_EXTENSION_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * The folder for one installed extension's bundle and icon. Ids come from the database, but
+ * the check keeps a bad one from ever naming a path outside the bundles folder.
+ */
+export function bundleDirPath(installedExtensionId: string): string {
+  const root = path.resolve(resolveBundlesDir());
+  const dir = path.resolve(root, installedExtensionId);
+  if (!INSTALLED_EXTENSION_ID.test(installedExtensionId) || !dir.startsWith(root + path.sep)) {
+    throw new ValidationError('Invalid installed extension id');
+  }
+  return dir;
+}
+
 async function fetchWithSizeCap(url: string, maxBytes: number): Promise<Buffer> {
   await assertPublicHttpUrl(url);
   const response = await axios.get(url, {
@@ -247,7 +263,7 @@ const deleteRepository = async (id: string) => {
 };
 
 async function bundleDirFor(installedExtensionId: string): Promise<string> {
-  const dir = path.join(resolveBundlesDir(), installedExtensionId);
+  const dir = bundleDirPath(installedExtensionId);
   await fs.mkdir(dir, { recursive: true });
   return dir;
 }
@@ -288,7 +304,7 @@ export function sniffIconType(bytes: Buffer): string | null {
 
 async function readStoredIcon(installedExtensionId: string): Promise<StoredIcon | null> {
   try {
-    const raw = await fs.readFile(path.join(resolveBundlesDir(), installedExtensionId, ICON_FILE));
+    const raw = await fs.readFile(path.join(bundleDirPath(installedExtensionId), ICON_FILE));
     const parsed = JSON.parse(raw.toString('utf8')) as { url: string; type: string; data: string };
     return { url: parsed.url, type: parsed.type, data: Buffer.from(parsed.data, 'base64') };
   } catch {
@@ -339,7 +355,7 @@ const getInstalledIcon = async (id: string): Promise<StoredIcon> => {
 };
 
 async function removeBundleFile(installedExtensionId: string): Promise<void> {
-  const dir = path.join(resolveBundlesDir(), installedExtensionId);
+  const dir = bundleDirPath(installedExtensionId);
   await fs.rm(dir, { recursive: true, force: true });
 }
 
@@ -830,7 +846,7 @@ const deleteInstalledExtension = async (id: string) => {
 };
 
 const getBundlePath = (installedExtensionId: string): string => {
-  return path.join(resolveBundlesDir(), installedExtensionId, 'bundle.js');
+  return path.join(bundleDirPath(installedExtensionId), 'bundle.js');
 };
 
 const extensionRepositoryService = {
