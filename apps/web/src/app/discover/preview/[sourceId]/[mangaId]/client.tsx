@@ -362,11 +362,29 @@ function SourcePreviewContent({
     [chapters, readChapterIds, chapterProgress, libraryChapterFor, sourceId, details.slug],
   );
 
-  /** The library action bar renders from a `Manga`; before the list refreshes we already
-   * know enough to build one, so it doesn't have to wait on a fetch. */
+  /**
+   * The library action bar renders from a `Manga`; before the list refreshes we already
+   * know enough to build one, so it doesn't have to wait on a fetch.
+   *
+   * That includes where reading left off. A title read from its source before being added
+   * has its place only in history, which this page already turned into `resumeChapter`; the
+   * library list knows nothing of it until it refreshes, and sometimes not until a reload.
+   * Without this, adding the title turned "Resume Reading" into "Start Reading".
+   */
+  const resumePage = resumeChapter
+    ? chapterProgress.get(resumeChapter.id)?.last_page_read
+    : undefined;
   const libraryManga: Manga | null =
     rowId && inLibrary
-      ? { ...(known ?? sourceManga), id: rowId, inLibrary: true, chapters: chapters.length }
+      ? {
+          ...(known ?? sourceManga),
+          id: rowId,
+          inLibrary: true,
+          chapters: chapters.length,
+          currentChapter: known?.currentChapter ?? resumeChapter?.chapter_number,
+          currentPage:
+            known?.currentChapter !== undefined ? known.currentPage : resumePage || undefined,
+        }
       : null;
 
   return (

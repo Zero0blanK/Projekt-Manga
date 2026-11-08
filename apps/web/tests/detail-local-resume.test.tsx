@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import type { Manga } from '@/lib/manga-data';
 vi.mock('@/components/manga-detail/source-switch', () => ({ SourceSwitch: () => null }));
 
@@ -80,6 +80,39 @@ describe('manga detail desktop resume', () => {
     expect(await screen.findByRole('link', { name: 'Continue Ch. 3' })).toHaveAttribute(
       'href',
       '/reader/manga-1?ch=3&page=7',
+    );
+  });
+  it('keeps the position it was given when the local copy has none yet', async () => {
+    // A title added to the library a moment ago: its row is in the local cache, but the
+    // place reading left off (still only in history) is not.
+    getAllDownloads.mockResolvedValue([]);
+    getMangaDetailsById.mockResolvedValue({
+      id: 'manga-1',
+      slug: 'manga-1',
+      title: 'A title',
+      source: 'source-a',
+      author: 'Author',
+      artist: null,
+      description: '',
+      genres: '',
+      status: 'ONGOING',
+      rating: null,
+      thumbnail_url: '',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      in_library: true,
+      chapters: [],
+    });
+
+    render(
+      <MangaActionBar manga={{ ...manga, currentChapter: 1, currentPage: 3 }} knownChapters={[]} />,
+    );
+
+    await waitFor(() => expect(getMangaDetailsById).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(screen.getByRole('link', { name: 'Continue Ch. 1' })).toHaveAttribute(
+      'href',
+      '/reader/manga-1?ch=1&page=3',
     );
   });
 });
