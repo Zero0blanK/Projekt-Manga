@@ -17,6 +17,9 @@ import { captureConsole } from './log-buffer';
 import { recordStartupError } from './diagnostics';
 import { checkForUpdates, initUpdater, startPeriodicUpdateChecks } from './updater';
 import {
+  markApiFailed,
+  markApiReady,
+  markApiStarting,
   markLocalDataPresence,
   markSeedFailed,
   markSeedFinished,
@@ -131,7 +134,8 @@ if (!gotLock) {
         error instanceof Error ? error.message : String(error),
       );
     }
-    const { apiPort, webPort, ready } = await startServers(
+    markApiStarting();
+    const { apiPort, webPort, ready, apiReady } = await startServers(
       paths,
       databaseFile,
       extensionBundlesDir,
@@ -139,6 +143,8 @@ if (!gotLock) {
     );
     process.env.PROJEKT_MANGA_WEB_URL = buildLocalWebUrl(webPort);
     process.env.PROJEKT_MANGA_API_URL = `http://127.0.0.1:${apiPort}/api`;
+
+    apiReady.then(markApiReady, markApiFailed);
 
     // Not awaited: the window is created immediately and shows its own "Starting…"
     // screen while these boot. Failures still have to be visible, hence the catch.

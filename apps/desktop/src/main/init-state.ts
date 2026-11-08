@@ -16,6 +16,17 @@
 
 export type SeedStatus = 'idle' | 'running' | 'done' | 'failed';
 
+/**
+ * Whether the bundled API is up yet.
+ *
+ * The window opens as soon as the web server answers, and the API can take far longer: the
+ * first start after an update reads thousands of freshly installed files, each scanned by
+ * antivirus on first open. Until it is listening every request fails, so the renderer holds
+ * the app on a "starting" screen rather than opening onto errors. `unmanaged` is a run that
+ * did not start the servers itself (development, or a missing bundle): nothing to wait for.
+ */
+export type ApiStatus = 'unmanaged' | 'starting' | 'ready' | 'failed';
+
 export interface DesktopInitState {
   seedStatus: SeedStatus;
   /**
@@ -30,12 +41,17 @@ export interface DesktopInitState {
   hadLocalData: boolean;
   /** Titles written by this run's seed, once it has finished. */
   seededManga: number;
+  apiStatus: ApiStatus;
+  /** When this run started the API (epoch ms), so the renderer can say how long it has been. */
+  apiStartedAt: number | null;
 }
 
 let state: DesktopInitState = {
   seedStatus: 'idle',
   hadLocalData: false,
   seededManga: 0,
+  apiStatus: 'unmanaged',
+  apiStartedAt: null,
 };
 
 export function getInitState(): DesktopInitState {
@@ -64,4 +80,17 @@ export function markSeedFinished(seededManga: number): void {
  */
 export function markSeedFailed(): void {
   state = { ...state, seedStatus: 'failed' };
+}
+
+export function markApiStarting(): void {
+  state = { ...state, apiStatus: 'starting', apiStartedAt: Date.now() };
+}
+
+export function markApiReady(): void {
+  state = { ...state, apiStatus: 'ready' };
+}
+
+/** Lets the renderer go: it opens the app and shows its usual "server unreachable" state. */
+export function markApiFailed(): void {
+  state = { ...state, apiStatus: 'failed' };
 }

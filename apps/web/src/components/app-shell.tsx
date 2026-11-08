@@ -9,7 +9,7 @@ import { DownloadDial } from '@/components/downloads/download-dial';
 import { SplashIntro } from '@/components/splash-intro';
 import { LibraryUpdateDial } from '@/components/library/library-update-dial';
 import { useMangaLibrary } from '@/lib/library-store';
-import { useDesktopInitReady, useDocumentReady } from '@/lib/use-app-ready';
+import { useDesktopApiStarting, useDesktopInitReady, useDocumentReady } from '@/lib/use-app-ready';
 import { queryClient, queryKeys } from '@/lib/query-client';
 import { useWarmStartupStaticData } from '@/lib/startup-static-data';
 import { useSetting } from '@/lib/app-store';
@@ -27,6 +27,7 @@ import { RestoreBlockingScreen } from '@/components/restore-blocking-screen';
 import { UpdatePrompt } from '@/components/update-prompt';
 import { CommandPalette } from '@/components/command-palette';
 import { DesktopIntegration } from '@/components/desktop-integration';
+import { ServerStartingScreen } from '@/components/server-starting-screen';
 
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -37,6 +38,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   // then, so it covers the real load rather than a fixed guess.
   const documentReady = useDocumentReady();
   const { loading: libraryLoading } = useMangaLibrary();
+  // Desktop only: the window opens once the web server answers, which can be well before
+  // the API does (the first start after an update especially). Requests wait for it in the
+  // API client (desktop-api-gate.ts); this keeps the splash up, then a "starting" screen.
+  const { starting: apiStarting, startedAt: apiStartedAt } = useDesktopApiStarting();
   const staticDataReady = useWarmStartupStaticData();
 
   /**
@@ -68,7 +73,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     else if (restoreReaderPath && restoreReaderPath !== pathname) setRestoreReaderPath(null);
   }, [restorePending, isReaderPath, pathname, leavingRestoredReader, restoreReaderPath, router]);
 
-  const appReady = documentReady && desktopInitReady && !libraryLoading && staticDataReady;
+  const appReady =
+    documentReady && desktopInitReady && !libraryLoading && staticDataReady && !apiStarting;
   const [splashDone, setSplashDone] = useState(false);
   const finishSplash = useCallback(() => setSplashDone(true), []);
 
@@ -197,6 +203,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
       {!restorePending && !isReaderPath && <ConnectionBanner />}
       <Toaster />
+      {/* Not tied to the splash: it is often skipped (turned off, or already shown within
+          the last 12 hours, which covers the restart after an update). When it does play,
+          it sits above this screen and this one is what remains if the API is still loading. */}
+      {apiStarting && <ServerStartingScreen startedAt={apiStartedAt} />}
     </div>
   );
 }

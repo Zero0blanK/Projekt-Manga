@@ -24,6 +24,9 @@ export interface RunningServers {
    * the window can load its final URL right away and show a "Starting…" screen
    * (`loadWebApp` in window.ts retries) instead of no window during a first-run migration. */
   ready: Promise<void>;
+  /** Resolves when the API alone accepts connections; rejects on timeout. The renderer
+   * holds the app on its "starting" screen until then (main/init-state.ts). */
+  apiReady: Promise<void>;
 }
 
 /** How long to wait for each server to answer before giving up. Generous because a first
@@ -359,12 +362,15 @@ export async function startServers(
         throw error;
       },
     );
-  const ready = Promise.all([
-    track('api', waitForPort(apiPort, 'API server')),
-    track('web', waitForPort(webPort, 'Web server')),
-  ]).then(() => undefined);
+  const apiReady = track('api', waitForPort(apiPort, 'API server'));
+  const ready = Promise.all([apiReady, track('web', waitForPort(webPort, 'Web server'))]).then(
+    () => undefined,
+  );
+  // Observed here as well as by `ready`, so a rejection never counts as unhandled when a
+  // caller only watches one of them.
+  apiReady.catch(() => {});
 
-  return { apiPort, webPort, ready };
+  return { apiPort, webPort, ready, apiReady };
 }
 
 /**

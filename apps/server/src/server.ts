@@ -22,6 +22,14 @@ import { fileURLToPath } from 'node:url';
 
 const env = loadEnv();
 
+/**
+ * When this process started, for the start-up timing line. Most of a slow start happens
+ * before `main()` runs at all: loading the modules imported above, which on the first start
+ * after an update means antivirus scanning each freshly installed file. The timing line
+ * separates that from the steps `main()` awaits.
+ */
+const processStartedAt = Date.now() - Math.round(process.uptime() * 1000);
+
 /** How often installed sources are checked for updates. Sources change their markup on a
  * scale of days, so a 6-hour cadence is far more often than needed while staying cheap —
  * one small JSON fetch per repository. */
@@ -120,17 +128,24 @@ async function runStartupMigrations(): Promise<void> {
 }
 
 async function main() {
-  await runStartupMigrations();
+  const timings: string[] = [`modules ${Date.now() - processStartedAt}ms`];
+  const timed = async (label: string, step: () => Promise<unknown>) => {
+    const started = Date.now();
+    await step();
+    timings.push(`${label} ${Date.now() - started}ms`);
+  };
+
+  await timed('migrations', runStartupMigrations);
 
   // Before anything queries: WAL and busy_timeout are per-connection settings, and the
   // download worker below starts writing almost immediately.
-  await applySqlitePragmas();
+  await timed('pragmas', applySqlitePragmas);
 
   // Anything left IN_PROGRESS belongs to a previous run whose in-memory queue died with
   // it — see recoverInterruptedDownloads. Awaited so the queue is consistent before the
   // server starts accepting requests against it.
-  await downloadWorker.recoverInterruptedDownloads();
-  await recoverRestoreJobs();
+  await timed('download recovery', () => downloadWorker.recoverInterruptedDownloads());
+  await timed('restore recovery', recoverRestoreJobs);
   // Sweep only old, unreferenced private thumbnail files; never touch the legacy folder.
   void cacheService.pruneOrphanedThumbnails().catch((error) => {
     console.error('Failed to prune orphaned thumbnails', error);
@@ -145,6 +160,9 @@ async function main() {
   const onListening = () => {
     const shown = env.SERVER_HOST ?? 'localhost';
     console.log(`Server running in ${env.NODE_ENV} mode on http://${shown}:${env.SERVER_PORT}`);
+    console.log(
+      `[server] Ready ${Date.now() - processStartedAt}ms after launch (${timings.join(', ')})`,
+    );
   };
 
   // Kept so shutdown() can stop accepting connections and let in-flight requests finish.
