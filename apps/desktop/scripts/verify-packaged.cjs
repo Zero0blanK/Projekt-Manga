@@ -10,9 +10,26 @@ const path = require('node:path');
 
 const REQUIRED = [
   'server/package.json',
+  // The API is one esbuild bundle (scripts/bundle-server.mjs): a loader, the bundle, and
+  // the source map that keeps file names and lines in stack traces.
   'server/dist/server.js',
-  'server/node_modules/express/package.json',
+  'server/dist/app.mjs',
+  'server/dist/app.mjs.map',
+  'server/openapi.yaml',
+  'server/prisma/migrations',
+  // Left out of the bundle and loaded from node_modules at run time.
+  'server/node_modules/@prisma/client/package.json',
+  'server/node_modules/.prisma/client/default.js',
+  'server/node_modules/@prisma/adapter-libsql/package.json',
+  'server/node_modules/libsql/package.json',
+  'server/node_modules/bcrypt/package.json',
+  'server/node_modules/swagger-ui-dist/swagger-ui.css',
+  // The extension sandbox forks its runner from beside its own module.
   'server/node_modules/@projekt-manga/extensions/package.json',
+  'server/node_modules/@projekt-manga/extensions/dist/sandbox/index.js',
+  'server/node_modules/@projekt-manga/extensions/dist/sandbox/runner.js',
+  'server/node_modules/@projekt-manga/extensions/dist/sourceError.js',
+  'server/node_modules/tldts/package.json',
   // The web app is Next's standalone output (scripts/stage-installer.mjs), which keeps the
   // monorepo's shape: server.js under apps/web, beside the traced node_modules.
   'web/apps/web/server.js',
@@ -37,6 +54,14 @@ const REQUIRED = [
 
 const FORBIDDEN = [
   'server/data',
+  // tsc's per-file output. The bundle replaces it; finding it means a stale copy.
+  'server/dist/routes',
+  // Bundled into server/dist/app.mjs. Installed here, they would mean the staged
+  // package.json lists more than the bundle leaves external.
+  'server/node_modules/express',
+  'server/node_modules/swagger-ui-express',
+  'server/node_modules/@projekt-manga/types',
+  'server/node_modules/@projekt-manga/schemas',
   // The pre-standalone layout. Present alongside the new one, it would mean a stale copy.
   'web/.next',
   // Build-only packages that tracing must not pull into the standalone output.

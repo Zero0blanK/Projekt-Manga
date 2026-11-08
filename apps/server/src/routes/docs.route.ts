@@ -7,8 +7,13 @@ import swaggerUi from 'swagger-ui-express';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// openapi.yaml sits at the package root, two levels above routes/ in both src/ and dist/.
-const SPEC_PATH = path.resolve(__dirname, '../../openapi.yaml');
+// openapi.yaml sits at the package root: two levels above routes/ in src/ and dist/, and
+// one level above the desktop installer's bundled dist/app.mjs (apps/desktop/scripts/
+// bundle-server.mjs), where this module's URL is the bundle's.
+const SPEC_PATH =
+  [path.resolve(__dirname, '../../openapi.yaml'), path.resolve(__dirname, '../openapi.yaml')].find(
+    (candidate) => fs.existsSync(candidate),
+  ) ?? path.resolve(__dirname, '../../openapi.yaml');
 
 function loadSpec(): Record<string, unknown> | null {
   try {
