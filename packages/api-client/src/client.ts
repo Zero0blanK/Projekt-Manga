@@ -58,9 +58,16 @@ export function onRequestFailure(listener: RequestFailureListener): () => void {
 export interface ApiClientConfig {
   /** Origin + path prefix for the server API, e.g. "http://localhost:4000/api". */
   baseUrl: string;
+  /**
+   * Awaited before every request is sent, and before its deadline starts. The desktop app
+   * uses it to hold requests while its own API is still starting, so they wait for it
+   * instead of failing. Must resolve, not reject, once requests may go.
+   */
+  waitUntilReady?: () => Promise<void>;
 }
 
 let configuredBaseUrl: string | null = null;
+let readyGate: (() => Promise<void>) | null = null;
 
 /** Removes trailing slashes in linear time; a `/\/+$/` regex is quadratic on a long run. */
 export function trimTrailingSlashes(value: string): string {
@@ -73,6 +80,23 @@ export function trimTrailingSlashes(value: string): string {
  * pointing at a bundled server instance). */
 export function configureApiClient(config: ApiClientConfig): void {
   configuredBaseUrl = trimTrailingSlashes(config.baseUrl);
+  readyGate = config.waitUntilReady ?? null;
+}
+
+/** Waits for the configured gate, giving up early if the caller cancels. */
+async function waitForGate(signal: AbortSignal | undefined): Promise<void> {
+  if (!readyGate) return;
+  if (signal?.aborted) throw new ApiError('Request cancelled', 0, 'aborted');
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new ApiError('Request cancelled', 0, 'aborted'));
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    await Promise.race([readyGate().catch(() => undefined), aborted]);
+  } finally {
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
 }
 
 /** Fallback API port for server-side rendering in single-origin mode. Matches the
@@ -215,6 +239,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     cache,
     timeoutMs = DEFAULT_TIMEOUT_MS,
   } = options;
+  await waitForGate(signal);
   const url = buildUrl(path, query);
   const startedAt = Date.now();
   const fail = (error: ApiError, response?: Response, fromApi = false): ApiError => {

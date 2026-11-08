@@ -509,7 +509,13 @@ export function likelyProblems(input: {
   const missing = apiLog.match(/Cannot find (?:package|module) '([^']+)'/);
   if (missing)
     problems.push(`The API cannot load "${scrubText(missing[1] ?? '')}" (ERR_MODULE_NOT_FOUND).`);
-  if (!reachable) problems.push('The API did not answer its health check.');
+  if (!reachable) {
+    problems.push(
+      api?.running && !api.ready && !api.readyError
+        ? `The API is still starting: it has not opened its port after ${duration(api.uptimeSeconds)}. "Recent API log" shows how far it got.`
+        : 'The API did not answer its health check.',
+    );
+  }
 
   if (desktop && !desktop.localDbMigrationOk)
     problems.push(

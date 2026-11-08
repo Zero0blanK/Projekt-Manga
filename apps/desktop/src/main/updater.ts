@@ -225,23 +225,45 @@ function isMissingFeed(raw: string): boolean {
 }
 
 /**
+ * The part of an electron-updater error worth reading.
+ *
+ * When the lookup of the latest release fails, electron-updater reports it as "Cannot parse
+ * releases feed" and appends the whole releases feed as XML: every release description ever
+ * published. That text says nothing about the failure, buries the main log in the diagnostic
+ * report, and contains words ("network", "404" in a hash) that the checks below would match.
+ */
+export function updaterErrorText(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const xml = raw.indexOf('\nXML:\n');
+  return (xml === -1 ? raw : raw.slice(0, xml)).slice(0, 4000);
+}
+
+/**
  * Turns whatever electron-updater threw into one sentence.
  *
  * Its errors carry full URLs, absolute paths and occasionally response bodies. The status line in
  * Settings is not the place for any of those — an absolute path in particular carries the user's
- * name and the build machine's layout. The untruncated text still reaches the diagnostic report
+ * name and the build machine's layout. The fuller text still reaches the diagnostic report
  * through `log`, which is where it is actually useful.
  */
-function describeError(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|network/i.test(raw)) {
+export function describeError(error: unknown): string {
+  const raw = updaterErrorText(error);
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|net::ERR_|getaddrinfo/i.test(raw)) {
     return 'Could not reach GitHub to check for updates.';
   }
-  if (/404|No published versions|Cannot find latest\.yml/i.test(raw)) {
-    return 'No published releases to update to yet.';
+  // An HttpError's own status, or the one quoted in a wrapping error's stack ("HttpError: 504
+  // Gateway Time-out"). Never a bare number: the stack's line numbers would match.
+  const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
+  const status =
+    typeof statusCode === 'number' ? statusCode : Number(/HttpError: (\d{3})\b/.exec(raw)?.[1]);
+  if (status >= 500 && status <= 599) {
+    return `GitHub isn't responding right now (HTTP ${status}). Try again later.`;
   }
-  if (/rate limit/i.test(raw)) {
+  if (status === 429 || /rate limit/i.test(raw)) {
     return 'GitHub rate-limited the update check. Try again later.';
+  }
+  if (status === 404 || /No published versions|Cannot find latest\.yml/i.test(raw)) {
+    return 'No published releases to update to yet.';
   }
   return raw
     .split('\n')[0]
@@ -253,7 +275,7 @@ function describeError(error: unknown): string {
 /** Shared by the event handler and the direct-throw path, which do not both fire for every
  * failure — a malformed feed URL throws from the call and never reaches the 'error' event. */
 function recordFailure(error: unknown, context: string): void {
-  const raw = error instanceof Error ? error.message : String(error);
+  const raw = updaterErrorText(error);
   if (isMissingFeed(raw)) {
     patch({ supported: false, status: 'unsupported', downloadPercent: null, error: null });
     log('this build has no update feed (app-update.yml absent) — self-update is unavailable');
@@ -292,7 +314,7 @@ export function initUpdater(): void {
   autoUpdater.logger = {
     info: (m: unknown) => log(`info: ${String(m)}`),
     warn: (m: unknown) => log(`warn: ${String(m)}`),
-    error: (m: unknown) => log(`error: ${String(m)}`),
+    error: (m: unknown) => log(`error: ${updaterErrorText(m)}`),
     debug: () => {},
   };
 

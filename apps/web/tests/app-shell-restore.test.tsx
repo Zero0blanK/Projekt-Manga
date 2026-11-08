@@ -18,6 +18,7 @@ vi.mock('@/lib/library-store', () => ({ useMangaLibrary: () => ({ loading: false
 vi.mock('@/lib/use-app-ready', () => ({
   useDocumentReady: () => true,
   useDesktopInitReady: () => true,
+  useDesktopApiStarting: () => ({ starting: false, startedAt: null }),
 }));
 vi.mock('@/lib/startup-static-data', () => ({ useWarmStartupStaticData: () => true }));
 vi.mock('@/lib/app-store', () => ({ useSetting: (_key: string, fallback: unknown) => fallback }));

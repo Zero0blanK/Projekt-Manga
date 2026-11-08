@@ -1,6 +1,11 @@
 'use client';
 
 import { desktopBridge } from '@/lib/desktop-bridge';
+import {
+  getDesktopApiStarting,
+  subscribeDesktopApiStarting,
+  waitForDesktopApi,
+} from '@/lib/desktop-api-gate';
 import { useCallback, useEffect, useState } from 'react';
 
 /**
@@ -142,4 +147,26 @@ export function useDesktopInitReady(onSeedComplete?: () => void): boolean {
   }, [finish, onSeedComplete]);
 
   return ready;
+}
+
+/**
+ * Whether the desktop app's own API is still starting, and since when (see
+ * desktop-api-gate.ts). False on the first render everywhere, so server and client markup
+ * agree; requests made meanwhile wait for the API rather than fail.
+ */
+export function useDesktopApiStarting(): { starting: boolean; startedAt: number | null } {
+  const [state, setState] = useState<{ starting: boolean; startedAt: number | null }>({
+    starting: false,
+    startedAt: null,
+  });
+
+  useEffect(() => {
+    const update = () => setState(getDesktopApiStarting());
+    const unsubscribe = subscribeDesktopApiStarting(update);
+    update();
+    void waitForDesktopApi().then(update);
+    return unsubscribe;
+  }, []);
+
+  return state;
 }

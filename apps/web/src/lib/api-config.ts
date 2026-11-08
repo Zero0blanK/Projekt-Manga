@@ -2,6 +2,7 @@
 
 import { desktopBridge } from '@/lib/desktop-bridge';
 import { configureApiClient } from '@projekt-manga/api-client';
+import { waitForDesktopApi } from '@/lib/desktop-api-gate';
 
 /**
  * Runtime API base URL, applied before the first request.
@@ -31,5 +32,7 @@ export function applyRuntimeApiBaseUrl(): void {
   const baseUrl = bridge?.apiBaseUrl?.trim();
   if (!baseUrl) return;
 
-  configureApiClient({ baseUrl });
+  // Started now rather than on the first request, so the "starting" screen knows at once.
+  void waitForDesktopApi();
+  configureApiClient({ baseUrl, waitUntilReady: waitForDesktopApi });
 }

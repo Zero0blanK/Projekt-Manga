@@ -172,3 +172,44 @@ test('"Update now" installs as soon as the download finishes', async () => {
   listeners['update-downloaded']({ version: '1.2.0' });
   assert.equal(autoUpdater.installed, 1);
 });
+
+test('an update error is described by its cause, not by the release feed it carries', () => {
+  const { updater } = loadUpdater();
+  const feed =
+    '<feed><entry><content>Sources run with no direct network access. sha 404abc</content></entry></feed>';
+  const wrapped = new Error(
+    'Cannot parse releases feed: Error: Unable to find latest version on GitHub ' +
+      '(https://github.com/Zero0blanK/Projekt-Manga/releases/latest), please ensure a production release exists: ' +
+      'HttpError: 504 Gateway Time-out\n    at createHttpError (httpExecutor.js:404:12)' +
+      `,\nXML:\n${feed}`,
+  );
+  assert.equal(
+    updater.describeError(wrapped),
+    "GitHub isn't responding right now (HTTP 504). Try again later.",
+  );
+  assert.ok(!updater.updaterErrorText(wrapped).includes('<feed>'));
+
+  const http = Object.assign(new Error('502 Bad Gateway'), { statusCode: 502 });
+  assert.match(updater.describeError(http), /HTTP 502/);
+  assert.equal(
+    updater.describeError(new Error('getaddrinfo ENOTFOUND github.com')),
+    'Could not reach GitHub to check for updates.',
+  );
+  assert.equal(
+    updater.describeError(new Error('No published versions on GitHub')),
+    'No published releases to update to yet.',
+  );
+  // The feed's own words are no longer read as the cause.
+  assert.equal(
+    updater.describeError(new Error(`Cannot parse releases feed: TypeError: boom,\nXML:\n${feed}`)),
+    'Cannot parse releases feed: TypeError: boom,',
+  );
+});
+
+test('the updater log keeps the error, not the whole release feed', () => {
+  const { updater, listeners } = loadUpdater();
+  listeners.error(
+    new Error('Cannot parse releases feed: HttpError: 504 Gateway Time-out,\nXML:\n<feed/>'),
+  );
+  assert.match(updater.getUpdateState().error, /HTTP 504/);
+});
