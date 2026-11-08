@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { NextConfig } from 'next';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
@@ -62,7 +64,26 @@ function apiIsLocalAddress(): boolean {
   return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
 }
 
+/**
+ * The desktop installer's build (apps/desktop/scripts/stage-installer.mjs sets this).
+ *
+ * `standalone` copies only the files the server actually loads, plus a small `server.js`
+ * to start it, instead of the whole `node_modules` a `next start` needs. That cuts the
+ * installed web app from tens of thousands of files to a few thousand, which is most of
+ * what antivirus has to scan on the first start after an update.
+ *
+ * Off for every other build: `next start` does not support a standalone build.
+ */
+const STANDALONE = process.env.PROJEKT_MANGA_STANDALONE === '1';
+
 const nextConfig: NextConfig = {
+  ...(STANDALONE
+    ? {
+        output: 'standalone' as const,
+        // The repository root, so packages hoisted there by npm workspaces are traced.
+        outputFileTracingRoot: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..'),
+      }
+    : {}),
   transpilePackages: [
     '@projekt-manga/api-client',
     '@projekt-manga/schemas',

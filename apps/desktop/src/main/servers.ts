@@ -139,8 +139,14 @@ interface ServerPaths {
   apiEntry: string;
   /** Directory containing the built Next app (its `.next` and `package.json`). */
   webDir: string;
-  /** Next's CLI entry. */
-  nextEntry: string;
+  /**
+   * The script that starts the web server: the standalone build's `server.js` in a
+   * packaged app, Next's CLI in a monorepo run.
+   */
+  webEntry: string;
+  /** Whether `webEntry` is a standalone `server.js`, which takes its port from the
+   * environment rather than from `next start`'s arguments. */
+  webStandalone: boolean;
   /**
    * A real Node runtime shipped beside the app, or null to fall back to Electron's own.
    *
@@ -168,21 +174,24 @@ export function resolveServerPaths(resourcesPath: string, appRoot: string): Serv
     // Packaged layout.
     {
       apiEntry: path.join(resourcesPath, 'server', 'dist', 'server.js'),
-      webDir: path.join(resourcesPath, 'web'),
-      nextEntry: path.join(resourcesPath, 'web', 'node_modules', 'next', 'dist', 'bin', 'next'),
+      // Next's standalone output keeps the monorepo's shape (stage-installer.mjs).
+      webDir: path.join(resourcesPath, 'web', 'apps', 'web'),
+      webEntry: path.join(resourcesPath, 'web', 'apps', 'web', 'server.js'),
+      webStandalone: true,
       nodeBinary: fs.existsSync(packagedNode) ? packagedNode : null,
     },
     // Monorepo layout: apps/desktop -> repo root.
     {
       apiEntry: path.join(appRoot, 'apps', 'server', 'dist', 'server.js'),
       webDir: path.join(appRoot, 'apps', 'web'),
-      nextEntry: path.join(appRoot, 'node_modules', 'next', 'dist', 'bin', 'next'),
+      webEntry: path.join(appRoot, 'node_modules', 'next', 'dist', 'bin', 'next'),
+      webStandalone: false,
       nodeBinary: null,
     },
   ];
 
   const resolved =
-    candidates.find((c) => fs.existsSync(c.apiEntry) && fs.existsSync(c.nextEntry)) ?? null;
+    candidates.find((c) => fs.existsSync(c.apiEntry) && fs.existsSync(c.webEntry)) ?? null;
 
   // A packaged build missing the runtime would fall back to Electron's Node and silently
   // fail every installed source, with no hint where to look. Warn at startup instead.
@@ -334,17 +343,20 @@ export async function startServers(
   );
 
   webProcess = spawnNode(
-    paths.nextEntry,
-    ['start', '--hostname', BIND_HOST, '--port', String(webPort)],
+    paths.webEntry,
+    paths.webStandalone ? [] : ['start', '--hostname', BIND_HOST, '--port', String(webPort)],
     paths.webDir,
     {
       PROJEKT_MANGA_API_PORT: String(apiPort),
       // `next start` re-evaluates next.config.ts at boot, so this has to be set at run
       // time and not only at build time. Leaving it out lets the runtime config take the
       // non-single-origin branch — different image patterns and no rewrite — while the
-      // client bundle still emits relative URLs, which shows up as covers 400ing.
+      // client bundle still emits relative URLs, which shows up as covers 400ing. (A
+      // standalone server carries the config it was built with, so there it is inert.)
       NEXT_PUBLIC_API_URL: LOCAL_API_BASE_URL,
       NODE_ENV: 'production',
+      // The standalone server.js reads its address from these instead of arguments.
+      ...(paths.webStandalone ? { PORT: String(webPort), HOSTNAME: BIND_HOST } : {}),
     },
     'web',
     paths.nodeBinary,
