@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import yaml from 'js-yaml';
+import { load } from 'js-yaml';
 
 /**
  * Every route the server mounts has to appear in openapi.yaml, and the other way round.
@@ -40,7 +40,7 @@ function routesInCode(): string[] {
 }
 
 function routesInSpec(): string[] {
-  const spec = yaml.load(fs.readFileSync(path.join(ROOT, 'openapi.yaml'), 'utf8')) as {
+  const spec = load(fs.readFileSync(path.join(ROOT, 'openapi.yaml'), 'utf8')) as {
     paths: Record<string, Record<string, unknown>>;
   };
   return Object.entries(spec.paths)
