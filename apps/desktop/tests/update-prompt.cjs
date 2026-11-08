@@ -5,6 +5,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+// Every offer fetches its changelog; nothing in these tests may reach the network.
+globalThis.fetch = async () => new Response('', { status: 404 });
+
 /** Loads dist/main/updater.js against a stub Electron and electron-updater. */
 function loadUpdater() {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-update-prompt-'));
@@ -53,6 +56,73 @@ test('release notes from GitHub become plain text', () => {
   );
   assert.equal(updater.releaseNotesToText([{ note: '<p>One</p>' }, { note: 'Two' }]), 'One\n\nTwo');
   assert.equal(updater.releaseNotesToText(null), null);
+});
+
+test('a changelog.json entry is picked out and sanitised', () => {
+  const { updater } = loadUpdater();
+  const json = {
+    releases: [
+      {
+        version: '1.1.0',
+        date: '2026-11-07',
+        summary: 'Summary',
+        upgrade: 7,
+        changes: [
+          { type: 'added', text: ' One ' },
+          { type: 'bogus', text: 'Dropped' },
+          { type: 'fixed', text: '' },
+          { type: 'fixed' },
+        ],
+        extra: '<script>',
+      },
+      { version: '1.0.2', date: '2026-10-01', changes: [{ type: 'added', text: 'Old' }] },
+    ],
+  };
+  assert.deepEqual(updater.parseChangelogEntry(json, '1.1.0'), {
+    version: '1.1.0',
+    date: '2026-11-07',
+    summary: 'Summary',
+    upgrade: null,
+    changes: [{ type: 'added', text: 'One' }],
+  });
+  assert.equal(updater.parseChangelogEntry(json, '2.0.0'), null);
+  assert.equal(updater.parseChangelogEntry(null, '1.1.0'), null);
+  assert.equal(updater.parseChangelogEntry({ releases: 'x' }, '1.1.0'), null);
+});
+
+test('the changelog of the new version is fetched from its release tag', async () => {
+  const originalFetch = globalThis.fetch;
+  const requested = [];
+  globalThis.fetch = async (url) => {
+    requested.push(String(url));
+    return new Response(
+      JSON.stringify({
+        releases: [
+          { version: '1.1.0', date: '2026-11-07', changes: [{ type: 'added', text: 'New' }] },
+        ],
+      }),
+    );
+  };
+  try {
+    const { updater, listeners } = loadUpdater();
+    listeners['update-available']({ version: '1.1.0', releaseNotes: '' });
+    assert.equal(updater.getUpdateState().changelogPending, true);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(requested, [
+      'https://raw.githubusercontent.com/Zero0blanK/Projekt-Manga/v1.1.0/apps/web/src/data/changelog.json',
+    ]);
+    const state = updater.getUpdateState();
+    assert.equal(state.changelogPending, false);
+    assert.deepEqual(state.changelog.changes, [{ type: 'added', text: 'New' }]);
+
+    globalThis.fetch = async () => new Response('nope', { status: 404 });
+    listeners['update-available']({ version: '1.2.0', releaseNotes: '' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(updater.getUpdateState().changelog, null);
+    assert.equal(updater.getUpdateState().changelogPending, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('a new version prompts once per launch, and "Skip" silences that version', () => {

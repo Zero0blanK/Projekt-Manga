@@ -37,10 +37,52 @@ describe('UpdatePrompt', () => {
     installBridge();
     render(<UpdatePrompt />);
     expect(await screen.findByText('Version 1.1.0 is available')).toBeInTheDocument();
-    expect(screen.getByLabelText('Changelog')).toHaveTextContent('Faster reader');
     expect(screen.getByRole('button', { name: 'Update now' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Later' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Skip this version' })).toBeInTheDocument();
+  });
+
+  it('lists the changelog.json entry fetched for the new version instead of the release text', async () => {
+    installBridge({
+      availableVersion: '9.9.0',
+      changelog: {
+        version: '9.9.0',
+        date: '2099-01-01',
+        summary: 'A **big** release.',
+        upgrade: 'Choose **Update now**.',
+        changes: [
+          { type: 'added', text: 'Tag filters' },
+          { type: 'fixed', text: 'Lost downloads' },
+        ],
+      },
+    });
+    render(<UpdatePrompt />);
+    const notes = await screen.findByLabelText('Changelog');
+    expect(notes).toHaveTextContent('A big release.');
+    expect(screen.getByText('big').tagName).toBe('STRONG');
+    expect(notes).toHaveTextContent('NewTag filters');
+    expect(notes).toHaveTextContent('FixedLost downloads');
+    expect(notes).toHaveTextContent('Choose Update now.');
+    expect(notes).not.toHaveTextContent('Faster reader');
+  });
+
+  it('uses the bundled changelog when it already has the version on offer', async () => {
+    const { RELEASES } = await import('@/lib/changelog');
+    installBridge({ availableVersion: RELEASES[0].version });
+    render(<UpdatePrompt />);
+    const notes = await screen.findByLabelText('Changelog');
+    expect(notes).toHaveTextContent(RELEASES[0].changes[0].text);
+  });
+
+  it('waits for the changelog, then falls back to the release text', async () => {
+    installBridge({ availableVersion: '9.9.0', changelogPending: true });
+    const { unmount } = render(<UpdatePrompt />);
+    expect(await screen.findByLabelText('Changelog')).toHaveTextContent("Loading what's new");
+    unmount();
+
+    installBridge({ availableVersion: '9.9.0', changelogPending: false });
+    render(<UpdatePrompt />);
+    expect(await screen.findByLabelText('Changelog')).toHaveTextContent('Faster reader');
   });
 
   it('updates now, or remembers Later and Skip', async () => {

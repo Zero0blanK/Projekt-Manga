@@ -2,14 +2,8 @@
 
 import { useState } from 'react';
 import { Panel } from '@/components/settings/field-controls';
-import { RELEASES, CHANGE_LABELS, type ChangeType } from '@/lib/changelog';
-
-const TYPE_STYLES: Record<ChangeType, string> = {
-  added: 'border-primary/40 bg-primary/10 text-primary',
-  changed: 'border-border/70 bg-muted/60 text-foreground',
-  fixed: 'border-border/70 bg-muted/40 text-muted-foreground',
-  removed: 'border-destructive/40 bg-destructive/10 text-destructive',
-};
+import { ChangelogChanges } from '@/components/changelog-changes';
+import { RELEASES } from '@/lib/changelog';
 
 /** Releases shown before the "older releases" button. */
 const VISIBLE_RELEASES = 3;
@@ -42,18 +36,9 @@ export function ChangelogPanel() {
                 </span>
               )}
             </div>
-            <ul className="mt-3 space-y-2">
-              {release.changes.map((change) => (
-                <li key={change.text} className="flex items-start gap-2.5">
-                  <span
-                    className={`mt-0.5 shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${TYPE_STYLES[change.type]}`}
-                  >
-                    {CHANGE_LABELS[change.type]}
-                  </span>
-                  <span className="text-sm text-muted-foreground">{change.text}</span>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-3">
+              <ChangelogChanges changes={release.changes} />
+            </div>
           </div>
         ))}
       </div>

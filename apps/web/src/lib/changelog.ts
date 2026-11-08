@@ -16,6 +16,10 @@ export type Change = { type: ChangeType; text: string };
 export type Release = {
   version: string;
   date: string;
+  /** Opening paragraph; may use **bold**. */
+  summary?: string | null;
+  /** Upgrade note, for a release that needs one; may use **bold**. */
+  upgrade?: string | null;
   changes: Change[];
 };
 

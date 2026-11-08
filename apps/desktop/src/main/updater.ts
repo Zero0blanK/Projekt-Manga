@@ -46,8 +46,15 @@ export interface UpdateState {
   downloadPercent: number | null;
   /** Last failure, in the user's words rather than a stack trace. */
   error: string | null;
-  /** What changed in the version on offer, as plain text (from the GitHub release notes). */
+  /** What changed in the version on offer, as plain text (from the GitHub release notes). Only a
+   * fallback for when `changelog` could not be fetched. */
   releaseNotes: string | null;
+  /** The version on offer's entry from apps/web/src/data/changelog.json at its release tag. The
+   * running app's own bundled copy predates that version, so it has to come from the tag. */
+  changelog: ChangelogEntry | null;
+  /** True while `changelog` is being fetched, so the prompt can wait instead of flashing the
+   * fallback text. */
+  changelogPending: boolean;
   /** True when the launch prompt should be shown for the version on offer: not skipped, and
    * not put off with "Later" during this run. */
   prompt: boolean;
@@ -61,8 +68,96 @@ let state: UpdateState = {
   downloadPercent: null,
   error: null,
   releaseNotes: null,
+  changelog: null,
+  changelogPending: false,
   prompt: false,
 };
+
+export type ChangelogChangeType = 'added' | 'changed' | 'fixed' | 'removed';
+
+export interface ChangelogEntry {
+  version: string;
+  date: string;
+  summary: string | null;
+  upgrade: string | null;
+  changes: { type: ChangelogChangeType; text: string }[];
+}
+
+/** Where a release's changelog lives: the file the release notes were generated from, at its tag. */
+const CHANGELOG_URL =
+  'https://raw.githubusercontent.com/Zero0blanK/Projekt-Manga/v{version}/apps/web/src/data/changelog.json';
+const CHANGELOG_TIMEOUT_MS = 10_000;
+const CHANGELOG_MAX_BYTES = 512 * 1024;
+const CHANGE_TYPES: readonly string[] = ['added', 'changed', 'fixed', 'removed'];
+const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+
+function boundedText(value: unknown, max: number): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
+}
+
+/**
+ * Picks `version`'s entry out of a downloaded changelog.json. The file comes off the network, so
+ * only known fields of the expected types survive, and every string is length-capped.
+ */
+export function parseChangelogEntry(json: unknown, version: string): ChangelogEntry | null {
+  const releases = (json as { releases?: unknown } | null)?.releases;
+  if (!Array.isArray(releases)) return null;
+  const raw = releases.find(
+    (entry): entry is Record<string, unknown> =>
+      typeof entry === 'object' &&
+      entry !== null &&
+      (entry as { version?: unknown }).version === version,
+  );
+  if (!raw || !Array.isArray(raw.changes)) return null;
+  const changes = raw.changes
+    .filter(
+      (change): change is { type: ChangelogChangeType; text: string } =>
+        typeof change === 'object' &&
+        change !== null &&
+        CHANGE_TYPES.includes((change as { type?: unknown }).type as string) &&
+        typeof (change as { text?: unknown }).text === 'string',
+    )
+    .slice(0, 200)
+    .map((change) => ({ type: change.type, text: change.text.trim().slice(0, 500) }))
+    .filter((change) => change.text);
+  if (!changes.length) return null;
+  return {
+    version,
+    date: boundedText(raw.date, 32) ?? '',
+    summary: boundedText(raw.summary, 1000),
+    upgrade: boundedText(raw.upgrade, 2000),
+    changes,
+  };
+}
+
+/** Never rejects: a missing or unreadable changelog leaves the GitHub release text as fallback. */
+async function fetchChangelog(version: string): Promise<ChangelogEntry | null> {
+  if (!VERSION_PATTERN.test(version)) return null;
+  try {
+    const response = await fetch(CHANGELOG_URL.replace('{version}', version), {
+      signal: AbortSignal.timeout(CHANGELOG_TIMEOUT_MS),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const text = await response.text();
+    if (text.length > CHANGELOG_MAX_BYTES) throw new Error('changelog too large');
+    const entry = parseChangelogEntry(JSON.parse(text), version);
+    if (!entry) throw new Error(`no entry for ${version}`);
+    return entry;
+  } catch (error) {
+    log(
+      `changelog for ${version} unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
+}
+
+function loadChangelog(version: string): void {
+  if (state.changelog?.version === version) return;
+  patch({ changelog: null, changelogPending: true });
+  void fetchChangelog(version).then((changelog) => {
+    if (state.availableVersion === version) patch({ changelog, changelogPending: false });
+  });
+}
 
 /** How often a running app looks for a release, since it can stay up in the tray for days. */
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -214,6 +309,7 @@ export function initUpdater(): void {
       releaseNotes: releaseNotesToText(info.releaseNotes),
       prompt: shouldPrompt(info.version),
     });
+    loadChangelog(info.version);
     log(`update available: ${info.version}`);
   });
 

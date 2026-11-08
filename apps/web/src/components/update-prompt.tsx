@@ -9,6 +9,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ChangelogChanges, ChangelogText } from '@/components/changelog-changes';
+import { RELEASES, type Release } from '@/lib/changelog';
 import { updateBridge, type UpdateState } from '@/lib/desktop-update';
 
 const POLL_MS = 2000;
@@ -41,7 +43,12 @@ export function UpdatePrompt() {
       if (next && !next.supported) return;
       // A failed download comes back as the same offer, with the reason.
       if (next?.status === 'available' && next.error) setUpdating(false);
-      const busy = !next || next.status === 'idle' || next.status === 'checking' || updating;
+      const busy =
+        !next ||
+        next.status === 'idle' ||
+        next.status === 'checking' ||
+        !!next.changelogPending ||
+        updating;
       timer = setTimeout(poll, busy ? POLL_MS : IDLE_POLL_MS);
     };
     void poll();
@@ -75,16 +82,16 @@ export function UpdatePrompt() {
         <DialogHeader>
           <DialogTitle>Version {state.availableVersion} is available</DialogTitle>
           <DialogDescription>
-            You have version {state.currentVersion}. Here&apos;s what changed:
+            You have version {state.currentVersion}. Here&apos;s what&apos;s new:
           </DialogDescription>
         </DialogHeader>
 
         <div
-          className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg border border-border/60 bg-surface/40 p-3 text-sm leading-relaxed text-foreground/90"
+          className="max-h-80 space-y-3 overflow-y-auto rounded-lg border border-border/60 bg-surface/40 p-3 text-sm leading-relaxed"
           tabIndex={0}
           aria-label="Changelog"
         >
-          {state.releaseNotes ?? 'No release notes were published for this version.'}
+          <ReleaseNotes state={state} />
         </div>
 
         {state.error && !updating && (
@@ -128,5 +135,48 @@ export function UpdatePrompt() {
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The version on offer's changelog.json entry: fetched from its release tag by the desktop app,
+ * or the bundled copy when it already has that version. The GitHub release text is only the
+ * fallback, since it carries download tables and install steps meant for the release page.
+ */
+function ReleaseNotes({ state }: { state: UpdateState }) {
+  const entry: Release | undefined =
+    state.changelog ?? RELEASES.find((release) => release.version === state.availableVersion);
+
+  if (entry) {
+    return (
+      <>
+        {entry.summary && (
+          <p className="text-foreground/90">
+            <ChangelogText text={entry.summary} />
+          </p>
+        )}
+        <ChangelogChanges changes={entry.changes} />
+        {entry.upgrade && (
+          <p className="rounded-md border border-border/60 bg-muted/40 p-2 text-xs text-muted-foreground">
+            <ChangelogText text={entry.upgrade} />
+          </p>
+        )}
+      </>
+    );
+  }
+
+  if (state.changelogPending) {
+    return (
+      <p className="flex items-center gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading what&apos;s new…
+      </p>
+    );
+  }
+
+  return (
+    <p className="whitespace-pre-wrap text-foreground/90">
+      {state.releaseNotes ?? 'No release notes were published for this version.'}
+    </p>
   );
 }
