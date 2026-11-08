@@ -112,7 +112,7 @@ export default function errorHandler(
   // In development the bare code above says nothing about *which* query failed; the local
   // developer is the operator there, so the underlying error is printed too.
   if (process.env.NODE_ENV === 'development') {
-    console.error(`[api] ${req.method} ${req.originalUrl} failed:`, err);
+    console.error('[api] %s %s failed:', req.method, req.originalUrl, err);
   }
   return HTTPErrorResponse(res, 500, 'Internal server error');
 }

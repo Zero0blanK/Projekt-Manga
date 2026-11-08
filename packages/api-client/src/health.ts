@@ -1,4 +1,4 @@
-import { request, buildApiUrl } from './client.js';
+import { request, buildApiUrl, trimTrailingSlashes } from './client.js';
 import type {
   HealthStatus,
   ScraperHealth,
@@ -18,7 +18,7 @@ export const getHealth = (signal?: AbortSignal) => request<HealthStatus>('/healt
 
 /** The API base URL in effect, for display. Derived from the same resolution `request()`
  * uses, so it can't disagree with where calls actually go. */
-export const getApiBaseUrl = (): string => buildApiUrl('/').replace(/\/+$/, '');
+export const getApiBaseUrl = (): string => trimTrailingSlashes(buildApiUrl('/'));
 
 /** Anti-detection and scraper statistics — proxy health, ban counts, cache hit rate.
  * Surfaced by the diagnostic report, which is what distinguishes "this user is being
