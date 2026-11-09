@@ -264,7 +264,7 @@ export function SourceCatalog({
           A repository lists the sources you can install. Add one to see them here.
         </p>
         <div className="mt-5">
-          <AddRepositoryForm existingUrls={[]} compact />
+          <AddRepositoryForm compact />
         </div>
         <p className="mx-auto mt-4 max-w-md text-xs text-muted-foreground">
           Sources run in a restricted process.{' '}

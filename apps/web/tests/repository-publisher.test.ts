@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { PROJEKTMANGA_SOURCES_URL, repositoryPublisher } from '@/lib/repository-url';
+import { repositoryPublisher } from '@/lib/repository-url';
 
 describe('repositoryPublisher', () => {
   it('names the account that owns a GitHub-hosted repository', () => {
     expect(
-      repositoryPublisher({ url: PROJEKTMANGA_SOURCES_URL, name: 'ProjektManga sources' }),
-    ).toBe('Zero0blanK');
+      repositoryPublisher({
+        url: 'https://raw.githubusercontent.com/maintainer/sources/main/index.json',
+        name: 'Sources',
+      }),
+    ).toBe('maintainer');
     expect(
       repositoryPublisher({ url: 'https://github.com/someone/repo/raw/main/index.json' }),
     ).toBe('someone');

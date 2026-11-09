@@ -100,7 +100,7 @@ export function ExtensionsPanel() {
         </div>
 
         <Field label="Add a repository" hint="The URL of a repository's index.json">
-          <AddRepositoryForm existingUrls={repositories.map((repo) => repo.url)} />
+          <AddRepositoryForm />
         </Field>
 
         {loading ? (
