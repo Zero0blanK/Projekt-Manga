@@ -2,6 +2,46 @@
   "$comment": "Release notes for Settings > Changelog. Newest first — the first entry's version and date are also what the About panel reports. IMPORTANT: the first entry's version must match `version` in apps/desktop/package.json, which is what app.getVersion() returns and what the updater compares against a GitHub release; if the two drift, the About panel reports one version while the update check reasons about another (tests/changelog.test.ts guards this). Each entry: version (semver), date (YYYY-MM-DD), and changes grouped by type. Types: added | changed | fixed | removed. Add the next entry above this one when a version is actually published — not while it is still being built.",
   "releases": [
     {
+      "version": "1.1.1",
+      "date": "2026-11-09",
+      "summary": "A much smaller app that starts faster after an update, and updates that install themselves without asking where.",
+      "upgrade": "This update is installed by 1.1.0, which still opens the installer: keep the folder it shows and continue. From 1.1.1 on, updates install in place on their own and reopen the app.",
+      "changes": [
+        {
+          "type": "changed",
+          "text": "The app is about half the size it was, with a twelfth of the files, and the installer is close to half the download"
+        },
+        {
+          "type": "changed",
+          "text": "The first start after an update is several times faster"
+        },
+        {
+          "type": "changed",
+          "text": "Updates install into the folder the app is in, without the installer asking where, and the app reopens by itself"
+        },
+        {
+          "type": "changed",
+          "text": "The update popup shows the new version's changelog, neatly laid out"
+        },
+        {
+          "type": "fixed",
+          "text": "Adding a title to your library turned Continue reading back into Start reading until the page was reloaded"
+        },
+        {
+          "type": "fixed",
+          "text": "After an update, the library could fail to load while the app was still starting; it now shows a starting screen and waits"
+        },
+        {
+          "type": "fixed",
+          "text": "Update errors say what went wrong, such as GitHub not responding, instead of a long technical message"
+        },
+        {
+          "type": "fixed",
+          "text": "Security hardening: limits on cover, page and CBZ requests, a content security policy, and stricter checks on installed sources"
+        }
+      ]
+    },
+    {
       "version": "1.1.0",
       "date": "2026-11-07",
       "summary": "Updates now ask before they download, categories follow your account, and the library gets status and tag filters.",
