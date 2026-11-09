@@ -9,7 +9,12 @@ import {
   ApiError,
 } from '@projekt-manga/api-client';
 import { replaceBackupBodySchema, RESTORE_UPLOAD_LIMIT_BYTES } from '@projekt-manga/schemas';
-import { savePendingRestore, clearPendingRestore, getPendingRestore } from '@/lib/restore-job';
+import {
+  savePendingRestore,
+  clearPendingRestore,
+  markRestoreAccepted,
+  getPendingRestore,
+} from '@/lib/restore-job';
 import { parseBackup, previewBackupMerge, type BackupPayload } from '@/lib/backup-validation';
 import { useHistory } from '@/lib/shared-queries';
 import { ChangePasswordField } from '@/components/settings/change-password-field';
@@ -333,13 +338,14 @@ export function PrivacyPanel() {
           startedAt: Date.now(),
         });
         await startReplaceRestore(parsed.data);
+        markRestoreAccepted(jobId);
         return null;
       })
       .then((result) => {
         if (!result) {
           toast({
             description:
-              'Restore is running. Library actions stay blocked until it finishes and your data refreshes.',
+              'Restoring in the background. Keep reading if you like: anything you read meanwhile is kept, and the library refreshes when it finishes.',
           });
           setRestoreOpen(false);
           setBackup(null);
@@ -356,6 +362,8 @@ export function PrivacyPanel() {
       .catch((error) => {
         if (!(error instanceof ApiError && (error.kind === 'network' || error.kind === 'timeout')))
           clearPendingRestore(jobId);
+        // The upload may still have arrived; give the server its grace period from now.
+        else markRestoreAccepted(jobId);
         toast({
           description: error instanceof Error ? error.message : "Couldn't restore that export.",
         });

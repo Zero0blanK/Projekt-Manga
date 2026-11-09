@@ -23,7 +23,7 @@ import { AutomaticLibraryUpdates } from '@/components/automatic-library-updates'
 import { AutomaticDesktopSync } from '@/components/automatic-desktop-sync';
 import { RestoreJobMonitor } from '@/components/restore-job-monitor';
 import { useRestorePending } from '@/lib/restore-job';
-import { RestoreBlockingScreen } from '@/components/restore-blocking-screen';
+import { RestoreStatusCard } from '@/components/restore-status-card';
 import { UpdatePrompt } from '@/components/update-prompt';
 import { CommandPalette } from '@/components/command-palette';
 import { DesktopIntegration } from '@/components/desktop-integration';
@@ -63,15 +63,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     pathname.startsWith('/reader/') ||
     pathname.startsWith('/local-reader/') ||
     (pathname.startsWith('/discover/preview/') && pathname.endsWith('/read'));
-  const [restoreReaderPath, setRestoreReaderPath] = useState<string | null>(
-    restorePending && isReaderPath ? pathname : null,
-  );
-  const leavingRestoredReader = restoreReaderPath === pathname;
-  useEffect(() => {
-    if (restorePending && isReaderPath) setRestoreReaderPath(pathname);
-    else if (!restorePending && leavingRestoredReader) router.replace('/');
-    else if (restoreReaderPath && restoreReaderPath !== pathname) setRestoreReaderPath(null);
-  }, [restorePending, isReaderPath, pathname, leavingRestoredReader, restoreReaderPath, router]);
 
   const appReady =
     documentReady && desktopInitReady && !libraryLoading && staticDataReady && !apiStarting;
@@ -130,7 +121,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     let pendingG = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onKey = (e: KeyboardEvent) => {
-      if (restorePending) return;
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
       const el = e.target as HTMLElement | null;
       if (
@@ -167,7 +157,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       window.removeEventListener('keydown', onKey);
       clearTimeout(timer);
     };
-  }, [router, restorePending]);
+  }, [router]);
 
   return (
     <div className="min-h-screen w-full bg-background">
@@ -177,31 +167,27 @@ export function AppShell({ children }: { children: ReactNode }) {
       <SplashIntro ready={appReady} onFinish={finishSplash} />
       <AutomaticLibraryUpdates suspended={restorePending} />
       <AutomaticDesktopSync ready={appReady && !restorePending} />
-      {!restorePending && (
-        <>
-          <CommandPalette />
-          <DesktopIntegration />
-        </>
-      )}
+      <CommandPalette />
+      <DesktopIntegration />
       <RestoreJobMonitor />
-      <RestoreBlockingScreen />
-      <div inert={restorePending}>
+      {/* A restore runs in the background: the app stays usable, and reading done meanwhile
+          is kept (lib/restore-job.ts, the desktop's reconcile). Library updates and desktop
+          sync wait for it above, since the restore holds the database's write lock. */}
+      <RestoreStatusCard />
+      <div>
         <FloatingNav />
-        <main className="min-w-0 pt-36 sm:pt-24">
-          {/* Reader server props can still contain pre-restore progress. Return to the
-              library before mounting a reader that could write that old progress back. */}
-          {!restorePending && !leavingRestoredReader && children}
-        </main>
+        <main className="min-w-0 pt-36 sm:pt-24">{children}</main>
       </div>
       {/* Only once the splash has gone: it covers the prompt, and the click that skips it
-          would otherwise land outside the prompt. */}
+          would otherwise land outside the prompt. Not during a restore: installing restarts
+          the app's server, which would roll the restore back to run again. */}
       {splashDone && !restorePending && <UpdatePrompt />}
       <div className="pointer-events-none fixed bottom-4 right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
         <LibraryUpdateDial />
         {/* The reader stays clear, and the downloads page already shows the queue. */}
         {!isReaderPath && !pathname.startsWith('/downloads') && <DownloadDial />}
       </div>
-      {!restorePending && !isReaderPath && <ConnectionBanner />}
+      {!isReaderPath && <ConnectionBanner />}
       <Toaster />
       {/* Not tied to the splash: it is often skipped (turned off, or already shown within
           the last 12 hours, which covers the restart after an update). When it does play,

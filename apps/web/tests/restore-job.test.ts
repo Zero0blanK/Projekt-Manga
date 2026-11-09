@@ -6,6 +6,7 @@ const localInvoke = vi.fn();
 const toast = vi.fn();
 const setState = vi.fn();
 const invalidateQueries = vi.fn().mockResolvedValue(undefined);
+const setProgressWriteHold = vi.fn();
 
 class FakeApiError extends Error {
   constructor(public status: number) {
@@ -20,6 +21,7 @@ vi.mock('@projekt-manga/api-client', () => ({
   cancelReplaceRestore: (...args: unknown[]) => cancelReplaceRestore(...args),
   hasLocalDataBridge: () => true,
   localInvoke: (...args: unknown[]) => localInvoke(...args),
+  setProgressWriteHold: (...args: unknown[]) => setProgressWriteHold(...args),
 }));
 vi.mock('@/hooks/use-toast', () => ({ toast: (...args: unknown[]) => toast(...args) }));
 vi.mock('@/lib/app-store', () => ({ setState: (...args: unknown[]) => setState(...args) }));
@@ -39,7 +41,12 @@ const {
   getPendingRestore,
   checkPendingRestore,
   cancelPendingRestore,
+  discardTrackedRestore,
+  isRestoreRunning,
+  markRestoreAccepted,
 } = await import('@/lib/restore-job');
+// Installed once at import; captured before beforeEach clears the mock.
+const installedHold = setProgressWriteHold.mock.calls[0]?.[0] as () => Promise<void> | null;
 const pending = {
   id: 'restore-id',
   owner: 'account-1',
@@ -143,6 +150,7 @@ describe('restore job recovery', () => {
     expect(localInvoke).toHaveBeenCalledWith('sync', 'reconcileRestore', {
       userId: pending.owner,
       mode: 'replace',
+      startedAt: 1,
     });
     expect(setState).toHaveBeenCalled();
     expect(getPendingRestore()).toBeNull();
@@ -177,7 +185,7 @@ describe('restore job recovery', () => {
   });
 
   it('keeps the library blocked when a durable job is missing and only clears after acknowledgement', async () => {
-    const expired = { ...pending, startedAt: Date.now() - 121_000 };
+    const expired = { ...pending, acceptedAt: Date.now() - 121_000 };
     savePendingRestore(expired);
     getReplaceRestore.mockRejectedValue(new FakeApiError(404));
 
@@ -191,6 +199,7 @@ describe('restore job recovery', () => {
     expect(localInvoke).toHaveBeenCalledWith('sync', 'reconcileRestore', {
       userId: pending.owner,
       mode: 'replace',
+      startedAt: 1,
     });
     expect(invalidateQueries).toHaveBeenCalled();
     expect(getPendingRestore()).toBeNull();
@@ -207,5 +216,61 @@ describe('restore job recovery', () => {
     await expect(acknowledgeUnknownRestoreStatus()).rejects.toThrow('offline');
     expect(getPendingRestore()).toMatchObject({ ...pending, statusUnknown: true });
     expect(invalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it('waits longer for a job the server has not yet accepted, then counts from acceptance', async () => {
+    getReplaceRestore.mockRejectedValue(new FakeApiError(404));
+    // Still uploading five minutes in: a large backup on a slow connection, not a lost job.
+    savePendingRestore({ ...pending, startedAt: Date.now() - 5 * 60_000 });
+    expect(await checkPendingRestore(pending.owner)).toBe('waiting');
+
+    markRestoreAccepted(pending.id);
+    expect(getPendingRestore()?.acceptedAt).toBeGreaterThan(0);
+    expect(await checkPendingRestore(pending.owner)).toBe('waiting');
+
+    localStorage.setItem(
+      'projekt-manga-pending-restore',
+      JSON.stringify({ ...pending, acceptedAt: Date.now() - 121_000 }),
+    );
+    expect(await checkPendingRestore(pending.owner)).toBe('unknown');
+  });
+
+  it('only marks the tracked restore as accepted', () => {
+    savePendingRestore(pending);
+    markRestoreAccepted('another-restore');
+    expect(getPendingRestore()?.acceptedAt).toBeUndefined();
+  });
+
+  it('stops tracking a restore it cannot resolve without touching the server', () => {
+    savePendingRestore({ ...pending, statusUnknown: true });
+    discardTrackedRestore();
+    expect(getPendingRestore()).toBeNull();
+    expect(cancelReplaceRestore).not.toHaveBeenCalled();
+    expect(localInvoke).not.toHaveBeenCalled();
+  });
+
+  it('holds progress writes only while a restore is being applied', async () => {
+    const hold = installedHold;
+    expect(hold).toBeTypeOf('function');
+    expect(hold()).toBeNull();
+
+    savePendingRestore(pending);
+    expect(isRestoreRunning()).toBe(true);
+    const waiting = hold();
+    expect(waiting).toBeInstanceOf(Promise);
+    let released = false;
+    void waiting!.then(() => (released = true));
+    await Promise.resolve();
+    expect(released).toBe(false);
+
+    localStorage.setItem(
+      'projekt-manga-pending-restore',
+      JSON.stringify({ ...pending, failed: true }),
+    );
+    window.dispatchEvent(new Event('projekt-manga-restore-finished'));
+    await waiting;
+    expect(released).toBe(true);
+    expect(isRestoreRunning()).toBe(false);
+    expect(hold()).toBeNull();
   });
 });

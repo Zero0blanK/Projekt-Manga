@@ -276,6 +276,135 @@ describe('transactional replace backup (real SQLite)', () => {
     ).toBe(true);
   });
 
+  it('merges into an account that read a title outside its library, instead of failing', async () => {
+    const user = await prisma.user.create({
+      data: { email: 'merge-read@example.test', password_hash: 'fixture' },
+    });
+    // Read from a source, or removed from the library: the state outlives membership.
+    const title = await prisma.manga.create({
+      data: {
+        source: 'test-source',
+        slug: 'read-elsewhere',
+        title: 'Read elsewhere',
+        author: 'A',
+        thumbnail_url: '',
+        in_library: false,
+      },
+    });
+    await prisma.chapter.create({
+      data: {
+        id: 'read-elsewhere-1',
+        source: 'test-source',
+        manga_slug: 'read-elsewhere',
+        source_chapter_key: 'read-elsewhere-1',
+        manga_id: title.id,
+        url: '',
+        chapter_number: 1,
+      },
+    });
+    await prisma.user_chapter_state.create({
+      data: { user_id: user.id, chapter_id: 'read-elsewhere-1', is_read: true, last_page_read: 7 },
+    });
+    await prisma.user_manga_state.create({
+      data: { user_id: user.id, manga_id: title.id, is_bookmarked: true },
+    });
+    const backup = replaceBackupBodySchema.parse({
+      ...empty,
+      expectedUserId: user.id,
+      mode: 'merge',
+      manga: [manga('b-1', 'read-elsewhere', 'read-elsewhere-1')],
+      library: [
+        {
+          manga_id: 'b-1',
+          is_bookmarked: false,
+          shelf_status: 'READING',
+          notification_read: false,
+        },
+      ],
+    });
+
+    await expect(replaceBackup(backup, user.id)).resolves.toMatchObject({ restoredManga: 1 });
+
+    // Kept read, with the further page (7 here, 4 in the backup), and the bookmark.
+    expect(
+      await prisma.user_chapter_state.findUniqueOrThrow({
+        where: { user_id_chapter_id: { user_id: user.id, chapter_id: 'read-elsewhere-1' } },
+      }),
+    ).toMatchObject({ is_read: true, last_page_read: 7 });
+    expect(
+      await prisma.user_manga_state.findUniqueOrThrow({
+        where: { user_id_manga_id: { user_id: user.id, manga_id: title.id } },
+      }),
+    ).toMatchObject({ is_bookmarked: true, shelf_status: 'READING' });
+    expect(
+      await prisma.user_library.findUniqueOrThrow({
+        where: { user_id_manga_id: { user_id: user.id, manga_id: title.id } },
+      }),
+    ).toMatchObject({ deleted_at: null });
+  });
+
+  it('merges a title removed from the anonymous library without losing its reading', async () => {
+    const title = await prisma.manga.create({
+      data: {
+        source: 'test-source',
+        slug: 'removed',
+        title: 'Removed',
+        author: 'A',
+        thumbnail_url: '',
+        in_library: false,
+      },
+    });
+    await prisma.chapter.create({
+      data: {
+        id: 'removed-1',
+        source: 'test-source',
+        manga_slug: 'removed',
+        source_chapter_key: 'removed-1',
+        manga_id: title.id,
+        url: '',
+        chapter_number: 1,
+        is_read: true,
+        last_page_read: 9,
+      },
+    });
+    // Kept when a title some account tracked leaves the anonymous library.
+    await prisma.manga_library.create({ data: { manga_id: title.id, is_bookmarked: true } });
+    const backup = replaceBackupBodySchema.parse({
+      ...empty,
+      mode: 'merge',
+      manga: [manga('b-2', 'removed', 'removed-1')],
+      library: [
+        { manga_id: 'b-2', is_bookmarked: false, shelf_status: null, notification_read: true },
+      ],
+    });
+
+    await expect(replaceBackup(backup)).resolves.toMatchObject({ restoredManga: 1 });
+
+    expect(await prisma.chapter.findUniqueOrThrow({ where: { id: 'removed-1' } })).toMatchObject({
+      is_read: true,
+      last_page_read: 9,
+    });
+    expect(
+      await prisma.manga_library.findUniqueOrThrow({ where: { manga_id: title.id } }),
+    ).toMatchObject({ is_bookmarked: true, notification_read: true });
+    expect((await prisma.manga.findUniqueOrThrow({ where: { id: title.id } })).in_library).toBe(
+      true,
+    );
+  });
+
+  it('gives a large restore more time than a small one', async () => {
+    const { restoreTimeoutMs } = await import('../../src/repositories/restore.repository.js');
+    const chapters = Array.from({ length: 50_000 }, (_, index) => ({ id: `c-${index}` }));
+    expect(restoreTimeoutMs({ manga: [], library: [], history: [] })).toBe(120_000);
+    expect(
+      restoreTimeoutMs({
+        manga: [{ chapters } as never],
+        library: [],
+        history: Array.from({ length: 50_000 }) as never,
+      }),
+    ).toBe(1_000_010);
+  });
+
   it('increments account generation on replace and rejects an older device push', async () => {
     const user = await prisma.user.create({
       data: { email: 'sync-reset@example.com', password_hash: 'fixture' },

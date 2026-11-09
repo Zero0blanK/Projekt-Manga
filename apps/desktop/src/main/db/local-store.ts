@@ -971,9 +971,164 @@ async function seedFromServer(
 /** Rebuilds this identity's local view after an authoritative server-side replacement.
  * Fetch everything first, then swap local state atomically so an interrupted renderer
  * cannot leave a half-cleared offline library. Catalog rows may remain as harmless cache. */
+/**
+ * Reading done on this device that the server hasn't been sent yet: what a restore that
+ * replaces the library must not wipe.
+ *
+ * A restore runs in the background, so the reader can keep going while it does; their
+ * progress is saved here and waits, since the server refuses pushes until the restore is
+ * done. Replacing this database's copy with the restored one then deleted it. Collected by
+ * source key, which survives the replace, unlike a row's place in these tables.
+ */
+interface UnsentLocalChanges {
+  chapterStates: Array<{
+    source: string;
+    manga_slug: string;
+    source_chapter_key: string;
+    manga_id: string | null;
+    is_read: number;
+    is_bookmark: number;
+    last_page_read: number;
+  }>;
+  mangaStates: Array<{
+    manga_id: string;
+    in_library: number;
+    is_bookmarked: number;
+    shelf_status: string | null;
+    notification_read: number;
+  }>;
+  history: Array<{
+    id: string;
+    source: string;
+    manga_id: string | null;
+    manga_slug: string;
+    source_manga_id: string | null;
+    title: string | null;
+    thumbnail_url: string | null;
+    source_chapter_key: string | null;
+    read_at: string;
+    last_read: string;
+    pages_read: number;
+    time_read: number;
+  }>;
+}
+
+function collectUnsentLocalChanges(since: string): UnsentLocalChanges {
+  const db = getDb();
+  return {
+    chapterStates: db
+      .prepare(
+        `SELECT c.source, c.manga_slug, c.source_chapter_key, c.manga_id,
+                cs.is_read, cs.is_bookmark, cs.last_page_read
+         FROM chapter_state cs JOIN chapter c ON c.id = cs.chapter_id
+         WHERE cs.updated_at > ? AND c.source <> '' AND c.manga_slug <> ''`,
+      )
+      .all(since) as unknown as UnsentLocalChanges['chapterStates'],
+    mangaStates: db
+      .prepare(
+        `SELECT manga_id, in_library, is_bookmarked, shelf_status, notification_read
+         FROM manga_state WHERE updated_at > ?`,
+      )
+      .all(since) as unknown as UnsentLocalChanges['mangaStates'],
+    history: db
+      .prepare(
+        `SELECT h.id, h.source, h.manga_id, h.manga_slug, h.source_manga_id, h.title,
+                h.thumbnail_url, c.source_chapter_key, h.read_at, h.last_read, h.pages_read,
+                h.time_read
+         FROM history h LEFT JOIN chapter c ON c.id = h.chapter_id
+         WHERE h.last_read > ? AND h.deleted_at IS NULL`,
+      )
+      .all(since) as unknown as UnsentLocalChanges['history'],
+  };
+}
+
+/**
+ * Puts unsent reading back on top of the restored copy, stamped `at` (after the restore's
+ * own snapshot) so the next sync sends it.
+ *
+ * History is sent by its `last_read` time, so a re-applied entry's moves up to `at`: off
+ * by at most how long the restore took, rather than never reaching the server.
+ */
+function reapplyUnsentLocalChanges(changes: UnsentLocalChanges, at: string): void {
+  const db = getDb();
+  for (const state of changes.chapterStates) {
+    const chapterId = ensureChapterRow({
+      source: state.source,
+      manga_slug: state.manga_slug,
+      source_chapter_key: state.source_chapter_key,
+      manga_id: state.manga_id,
+      name: '',
+      chapter_number: 0,
+      page_count: null,
+    });
+    db.prepare(
+      `INSERT INTO chapter_state (chapter_id, is_read, is_bookmark, last_page_read, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(chapter_id) DO UPDATE SET
+         is_read = excluded.is_read, is_bookmark = excluded.is_bookmark,
+         last_page_read = excluded.last_page_read, updated_at = excluded.updated_at`,
+    ).run(chapterId, state.is_read, state.is_bookmark, state.last_page_read, at);
+  }
+  for (const state of changes.mangaStates) {
+    // A title the restore left without a row here has nothing to attach the state to.
+    if (!db.prepare(`SELECT 1 FROM manga WHERE id = ?`).get(state.manga_id)) continue;
+    db.prepare(
+      `INSERT INTO manga_state (manga_id, in_library, is_bookmarked, shelf_status, notification_read, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(manga_id) DO UPDATE SET
+         in_library = excluded.in_library, is_bookmarked = excluded.is_bookmarked,
+         shelf_status = excluded.shelf_status, notification_read = excluded.notification_read,
+         updated_at = excluded.updated_at`,
+    ).run(
+      state.manga_id,
+      state.in_library,
+      state.is_bookmarked,
+      state.shelf_status,
+      state.notification_read,
+      at,
+    );
+  }
+  for (const row of changes.history) {
+    const chapterId = row.source_chapter_key
+      ? ensureChapterRow({
+          source: row.source,
+          manga_slug: row.manga_slug,
+          source_chapter_key: row.source_chapter_key,
+          manga_id: row.manga_id,
+          name: '',
+          chapter_number: 0,
+          page_count: null,
+        })
+      : null;
+    const lastRead = row.last_read > at ? row.last_read : at;
+    db.prepare(
+      `INSERT INTO history (id, source, manga_id, manga_slug, source_manga_id, title, thumbnail_url, chapter_id, read_at, last_read, pages_read, time_read)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET last_read = excluded.last_read,
+         pages_read = MAX(history.pages_read, excluded.pages_read),
+         time_read = MAX(history.time_read, excluded.time_read), deleted_at = NULL`,
+    ).run(
+      row.id,
+      row.source,
+      row.manga_id,
+      row.manga_slug,
+      row.source_manga_id,
+      row.title,
+      row.thumbnail_url,
+      chapterId,
+      row.read_at,
+      lastRead,
+      row.pages_read,
+      row.time_read,
+    );
+  }
+}
+
 async function reconcileRestoreFromServer(
   apiBaseUrl: string,
   mode: 'merge' | 'replace' = 'replace',
+  /** When the restore started; reading after it is kept. Defaults to the last push. */
+  keepChangesSince?: string,
 ): Promise<void> {
   const session = getCachedSession();
   if (session) requireSecureAccountTransport(apiBaseUrl);
@@ -1054,6 +1209,19 @@ async function reconcileRestoreFromServer(
           ).map((row) => row.manga_id)
         : [],
     );
+    // Read before the replace wipes it: reading the server hasn't been sent, which a restore
+    // in the background (or on another device) must not take away.
+    // Kept: what is both unsent and, when this device started the restore, newer than its
+    // start. Reading from before it is what the restore replaces.
+    const sendSince = getSyncCursor().last_pushed_at;
+    const keepSince =
+      keepChangesSince && sendSince
+        ? keepChangesSince > sendSince
+          ? keepChangesSince
+          : sendSince
+        : (keepChangesSince ?? sendSince);
+    const unsent =
+      effectiveMode === 'replace' && keepSince ? collectUnsentLocalChanges(keepSince) : null;
     if (effectiveMode === 'replace')
       db.exec('DELETE FROM history; DELETE FROM chapter_state; DELETE FROM manga_state;');
     for (const manga of details) {
@@ -1145,6 +1313,8 @@ async function reconcileRestoreFromServer(
         `INSERT INTO sync_meta (domain, last_pulled_at, last_pushed_at) VALUES ('sync', NULL, ?)
        ON CONFLICT(domain) DO UPDATE SET last_pulled_at = NULL, last_pushed_at = excluded.last_pushed_at`,
       ).run(stamped);
+    // After the snapshot and the push cursor, so the next sync sends it.
+    if (unsent) reapplyUnsentLocalChanges(unsent, new Date(Date.parse(stamped) + 1).toISOString());
     if (syncState) setSyncGeneration(syncState.generation);
     db.exec('COMMIT');
   } catch (error) {

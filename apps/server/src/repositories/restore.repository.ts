@@ -18,6 +18,7 @@ type ExistingRestoreChapter = {
   manga_id: string | null;
   last_page_read: number;
   is_read: boolean;
+  is_bookmark: boolean;
 };
 
 function chunks<T>(items: T[], size: number): T[][] {
@@ -127,6 +128,7 @@ async function findChaptersByKey(
           manga_id: true,
           last_page_read: true,
           is_read: true,
+          is_bookmark: true,
           source_chapter_key: true,
         },
       });
@@ -586,13 +588,23 @@ export async function replaceBackup(
           };
           const key = chapterKey(entry.source, entry.slug, backupChapterKey(chapter));
           const existing = existingChapterByKey.get(key);
-          const restoredState = !userId
-            ? {
-                is_read: chapter.is_read,
-                is_bookmark: chapter.is_bookmark,
-                last_page_read: chapter.last_page_read,
-              }
-            : {};
+          // A replace starts from cleared state, so the backup's is the state. A merge keeps
+          // what this library already has and adds the backup's on top: the further page,
+          // read if either says read. Overwriting turned read chapters unread when a title
+          // outside the library had been read here.
+          const mergedState =
+            !replacing && existing
+              ? {
+                  is_read: existing.is_read || chapter.is_read,
+                  is_bookmark: existing.is_bookmark || chapter.is_bookmark,
+                  last_page_read: Math.max(existing.last_page_read, chapter.last_page_read),
+                }
+              : {
+                  is_read: chapter.is_read,
+                  is_bookmark: chapter.is_bookmark,
+                  last_page_read: chapter.last_page_read,
+                };
+          const restoredState = !userId ? mergedState : {};
           // Row ids are this server's own: a backup's ids belong to the server or device
           // that wrote it, so a new row always gets a fresh one.
           const id = existing?.id ?? createId();
@@ -615,8 +627,9 @@ export async function replaceBackup(
           existingChapterByKey.set(key, {
             id,
             manga_id: manga.id,
-            last_page_read: userId ? (existing?.last_page_read ?? 0) : chapter.last_page_read,
-            is_read: userId ? (existing?.is_read ?? false) : chapter.is_read,
+            last_page_read: userId ? (existing?.last_page_read ?? 0) : mergedState.last_page_read,
+            is_read: userId ? (existing?.is_read ?? false) : mergedState.is_read,
+            is_bookmark: userId ? (existing?.is_bookmark ?? false) : mergedState.is_bookmark,
           });
           if (userId && (chapter.is_read || chapter.is_bookmark || chapter.last_page_read > 0)) {
             userChapterStateRows.push({
@@ -633,7 +646,42 @@ export async function replaceBackup(
         reportProgress('Restoring titles');
       }
       await insertChapters(tx, chapterCreateRows);
-      for (const group of chunks(userChapterStateRows, INSERT_CHUNK_SIZE)) {
+      // A replace cleared this account's chapter state above. A merge may meet rows that
+      // are already there: a title read from a source, or removed from the library (which
+      // keeps its reading). Inserting those failed on the unique key and rolled the whole
+      // restore back, so they are combined instead: the further page, read if either is.
+      const existingUserChapterState = new Map<
+        string,
+        { is_read: boolean; is_bookmark: boolean; last_page_read: number }
+      >();
+      if (userId && !replacing) {
+        const chapterIds = userChapterStateRows.map((row) => row.chapter_id);
+        for (const group of chunks(chapterIds, LOOKUP_CHUNK_SIZE)) {
+          const rows = await tx.user_chapter_state.findMany({
+            where: { user_id: userId, chapter_id: { in: group } },
+            select: { chapter_id: true, is_read: true, is_bookmark: true, last_page_read: true },
+          });
+          for (const { chapter_id, ...state } of rows) {
+            existingUserChapterState.set(chapter_id, state);
+          }
+        }
+      }
+      for (const row of userChapterStateRows) {
+        const current = existingUserChapterState.get(row.chapter_id);
+        if (!current) continue;
+        await tx.user_chapter_state.update({
+          where: { user_id_chapter_id: { user_id: row.user_id, chapter_id: row.chapter_id } },
+          data: {
+            is_read: current.is_read || Boolean(row.is_read),
+            is_bookmark: current.is_bookmark || Boolean(row.is_bookmark),
+            last_page_read: Math.max(current.last_page_read, row.last_page_read ?? 0),
+          },
+        });
+      }
+      const newUserChapterState = userChapterStateRows.filter(
+        (row) => !existingUserChapterState.has(row.chapter_id),
+      );
+      for (const group of chunks(newUserChapterState, INSERT_CHUNK_SIZE)) {
         await tx.user_chapter_state.createMany({ data: group });
       }
       for (let index = 0; index < restoredChapterCount; index++) {
@@ -667,12 +715,67 @@ export async function replaceBackup(
           });
         }
       }
+      // As with chapter state: a merge may meet a title's state row that outlived its
+      // removal from the library (an account's, or the anonymous library's once an account
+      // had tracked the title). The backup's state is applied to it rather than inserted
+      // beside it, keeping a bookmark either side set.
       if (userId) {
-        for (const group of chunks(userMangaStateRows, INSERT_CHUNK_SIZE)) {
+        const existingIds = new Set<string>();
+        if (!replacing) {
+          for (const group of chunks(
+            userMangaStateRows.map((row) => row.manga_id),
+            LOOKUP_CHUNK_SIZE,
+          )) {
+            const rows = await tx.user_manga_state.findMany({
+              where: { user_id: userId, manga_id: { in: group } },
+              select: { manga_id: true, is_bookmarked: true },
+            });
+            for (const row of rows) {
+              existingIds.add(row.manga_id);
+              const incoming = userMangaStateRows.find((state) => state.manga_id === row.manga_id)!;
+              await tx.user_manga_state.update({
+                where: { user_id_manga_id: { user_id: userId, manga_id: row.manga_id } },
+                data: {
+                  is_bookmarked: row.is_bookmarked || Boolean(incoming.is_bookmarked),
+                  shelf_status: incoming.shelf_status,
+                  notification_read: incoming.notification_read,
+                  score: incoming.score,
+                },
+              });
+            }
+          }
+        }
+        const fresh = userMangaStateRows.filter((row) => !existingIds.has(row.manga_id));
+        for (const group of chunks(fresh, INSERT_CHUNK_SIZE)) {
           await tx.user_manga_state.createMany({ data: group });
         }
       } else {
-        for (const group of chunks(mangaLibraryRows, INSERT_CHUNK_SIZE)) {
+        const existingIds = new Set<string>();
+        if (!replacing) {
+          for (const group of chunks(
+            mangaLibraryRows.map((row) => row.manga_id),
+            LOOKUP_CHUNK_SIZE,
+          )) {
+            const rows = await tx.manga_library.findMany({
+              where: { manga_id: { in: group } },
+              select: { manga_id: true, is_bookmarked: true },
+            });
+            for (const row of rows) {
+              existingIds.add(row.manga_id);
+              const incoming = mangaLibraryRows.find((state) => state.manga_id === row.manga_id)!;
+              await tx.manga_library.update({
+                where: { manga_id: row.manga_id },
+                data: {
+                  is_bookmarked: row.is_bookmarked || Boolean(incoming.is_bookmarked),
+                  shelf_status: incoming.shelf_status,
+                  notification_read: incoming.notification_read,
+                },
+              });
+            }
+          }
+        }
+        const fresh = mangaLibraryRows.filter((row) => !existingIds.has(row.manga_id));
+        for (const group of chunks(fresh, INSERT_CHUNK_SIZE)) {
           await tx.manga_library.createMany({ data: group });
         }
       }
@@ -784,7 +887,13 @@ export async function replaceBackup(
                 page_count: row.page_count ?? null,
               },
             });
-            chapter = { id: chapterId, manga_id: mangaId, last_page_read: 0, is_read: false };
+            chapter = {
+              id: chapterId,
+              manga_id: mangaId,
+              last_page_read: 0,
+              is_read: false,
+              is_bookmark: false,
+            };
             existingChapterByKey.set(key, chapter);
           }
           if (row.last_page_read > 0 || row.is_read) {
@@ -862,6 +971,23 @@ export async function replaceBackup(
       }
       return result;
     },
-    { maxWait: 15_000, timeout: 120_000 },
+    { maxWait: 15_000, timeout: restoreTimeoutMs(input) },
   );
+}
+
+/**
+ * How long one restore's transaction may run before it is rolled back.
+ *
+ * A fixed two minutes failed large restores every time they were retried: restoring a
+ * backup onto the server it came from updates every row it already has, a few database
+ * round trips each. The allowance grows with the backup instead, from two minutes, at
+ * a generous 10 ms per row, and is capped so a stuck restore still ends.
+ */
+export function restoreTimeoutMs(backup: Pick<ReplaceBackupBody, 'manga' | 'library' | 'history'>) {
+  const rows =
+    backup.manga.length +
+    backup.library.length +
+    backup.history.length +
+    backup.manga.reduce((sum, entry) => sum + entry.chapters.length, 0);
+  return Math.min(30 * 60_000, Math.max(120_000, rows * 10));
 }

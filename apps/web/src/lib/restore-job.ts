@@ -9,6 +9,7 @@ import {
   getCurrentUser,
   hasLocalDataBridge,
   localInvoke,
+  setProgressWriteHold,
 } from '@projekt-manga/api-client';
 import { toast } from '@/hooks/use-toast';
 import { setState } from './app-store';
@@ -22,6 +23,33 @@ const pendingEvents = [
   'projekt-manga-restore-finished',
   'projekt-manga-restore-progress',
 ] as const;
+
+/** A restore still being applied, as opposed to one that failed, was cancelled or lost. */
+export function isRestoreRunning(): boolean {
+  const pending = getPendingRestore();
+  return !!pending && !pending.failed && !pending.cancelled && !pending.statusUnknown;
+}
+
+/** Settles once no restore is being applied (finished, failed, cancelled or discarded). */
+function untilRestoreEnds(): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => {
+      if (isRestoreRunning()) return;
+      for (const event of pendingEvents) window.removeEventListener(event, check);
+      window.removeEventListener('storage', check);
+      resolve();
+    };
+    for (const event of pendingEvents) window.addEventListener(event, check);
+    window.addEventListener('storage', check);
+    check();
+  });
+}
+
+// Reading carries on during a restore; progress saves to the server wait for it to end
+// rather than failing against the restore's lock (packages/api-client/src/progressHold.ts).
+if (typeof window !== 'undefined') {
+  setProgressWriteHold(() => (isRestoreRunning() ? untilRestoreEnds() : null));
+}
 
 export function useRestorePending(): boolean {
   return useSyncExternalStore(
@@ -49,6 +77,8 @@ export type PendingRestore = {
   settings: Record<string, string | number | boolean>;
   skippedDownloads: number;
   startedAt: number;
+  /** When the server accepted the upload; unset while a large backup is still uploading. */
+  acceptedAt?: number;
   failed?: boolean;
   cancelled?: boolean;
   statusUnknown?: boolean;
@@ -98,6 +128,10 @@ export function getPendingRestore(): PendingRestore | null {
         typeof record.startedAt === 'number' && Number.isFinite(record.startedAt)
           ? record.startedAt
           : Date.now(),
+      acceptedAt:
+        typeof record.acceptedAt === 'number' && Number.isFinite(record.acceptedAt)
+          ? record.acceptedAt
+          : undefined,
       failed: record.failed === true,
       cancelled: record.cancelled === true,
       statusUnknown: record.statusUnknown === true,
@@ -140,6 +174,7 @@ export async function acknowledgeUnknownRestoreStatus(): Promise<void> {
     await localInvoke('sync', 'reconcileRestore', {
       userId: pending.owner === 'anonymous' ? null : pending.owner,
       mode: pending.mode,
+      startedAt: pending.startedAt,
     });
   assertCurrentOwner();
   await refreshRestoredLibrary();
@@ -172,6 +207,25 @@ async function refreshRestoredLibrary(): Promise<void> {
       throw new Error('The restored library could not be refreshed yet.');
     }
   }
+}
+
+/** The server has the restore: its "no such job" grace period starts now. */
+export function markRestoreAccepted(id: string): void {
+  const pending = getPendingRestore();
+  if (pending?.id !== id) return;
+  localStorage.setItem(storageKey, JSON.stringify({ ...pending, acceptedAt: Date.now() }));
+}
+
+/**
+ * Stops tracking a restore this browser can't resolve: one started by an account that no
+ * longer exists, or whose result the server lost. Nothing on the server changes; the
+ * library is simply used as it is.
+ */
+export function discardTrackedRestore(): void {
+  const pending = getPendingRestore();
+  if (!pending) return;
+  clearMihonImportExtras(pending.id);
+  clearPendingRestore(pending.id);
 }
 
 export function clearPendingRestore(id: string): void {
@@ -216,7 +270,14 @@ export async function checkPendingRestore(
   } catch (error) {
     signal?.throwIfAborted();
     if (error instanceof ApiError && error.status === 404) {
-      if (Date.now() - pending.startedAt < 120_000) return 'waiting';
+      // Counted from when the server took the upload, not from when it began: a large
+      // backup on a slow connection could take longer than this to arrive, and its restore
+      // then ran unwatched while the app called the result unknown.
+      if (pending.acceptedAt === undefined) {
+        if (Date.now() - pending.startedAt < 10 * 60_000) return 'waiting';
+      } else if (Date.now() - pending.acceptedAt < 120_000) {
+        return 'waiting';
+      }
       // The server cannot prove whether a database reset or endpoint change lost a completed job.
       localStorage.setItem(storageKey, JSON.stringify({ ...pending, statusUnknown: true }));
       window.dispatchEvent(new Event('projekt-manga-restore-started'));
@@ -248,6 +309,7 @@ export async function checkPendingRestore(
     await localInvoke('sync', 'reconcileRestore', {
       userId: owner === 'anonymous' ? null : owner,
       mode: pending.mode,
+      startedAt: pending.startedAt,
     });
   signal?.throwIfAborted();
   if (Object.keys(pending.settings).length > 0) {
