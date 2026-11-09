@@ -206,11 +206,11 @@ describe('POST /api/extensions/repositories', () => {
 
   it("stores the repository's own name so the UI need not show a raw URL", async () => {
     prismaMock.extension_repository.findUnique.mockResolvedValueOnce(null);
-    mockIndexFetch({ ...VALID_INDEX, repository: { name: 'ProjektManga sources' } });
+    mockIndexFetch({ ...VALID_INDEX, repository: { name: 'Example sources' } });
     prismaMock.extension_repository.create.mockResolvedValueOnce({
       id: 'repo-1',
       url: 'https://example.com/repo.json',
-      name: 'ProjektManga sources',
+      name: 'Example sources',
       added_at: new Date(),
       last_fetched_at: new Date(),
       enabled: true,
@@ -223,7 +223,7 @@ describe('POST /api/extensions/repositories', () => {
     expect(res.status).toBe(201);
     expect(prismaMock.extension_repository.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ name: 'ProjektManga sources' }),
+        data: expect.objectContaining({ name: 'Example sources' }),
       }),
     );
   });

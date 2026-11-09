@@ -13,7 +13,7 @@ vi.mock('@/hooks/use-toast', () => ({ toast: vi.fn() }));
 
 const { ExitReaderButton } = await import('@/components/reader/exit-reader-button');
 const { AddRepositoryForm } = await import('@/components/extensions/add-repository-form');
-const { PROJEKTMANGA_SOURCES_URL, repositoryUrlProblem } = await import('@/lib/repository-url');
+const { repositoryUrlProblem } = await import('@/lib/repository-url');
 const { ApiError } = await import('@projekt-manga/api-client');
 
 beforeEach(() => vi.clearAllMocks());
@@ -64,7 +64,7 @@ describe('repository URLs', () => {
 
   it('shows a rejected repository under the field instead of "Validation failed"', async () => {
     addRepository.mockRejectedValueOnce(new ApiError('Validation failed', 400, 'http'));
-    render(<AddRepositoryForm existingUrls={[]} />);
+    render(<AddRepositoryForm />);
     fireEvent.change(screen.getByLabelText('Repository address'), {
       target: { value: 'https://example.com/nope.json' },
     });
@@ -72,12 +72,9 @@ describe('repository URLs', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/point at the repository/);
   });
 
-  it('offers the project repository in one click until it is added', async () => {
-    addRepository.mockResolvedValueOnce(undefined);
-    const { rerender } = render(<AddRepositoryForm existingUrls={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Add ProjektManga sources' }));
-    await waitFor(() => expect(addRepository).toHaveBeenCalledWith(PROJEKTMANGA_SOURCES_URL));
-    rerender(<AddRepositoryForm existingUrls={[PROJEKTMANGA_SOURCES_URL]} />);
-    expect(screen.queryByRole('button', { name: 'Add ProjektManga sources' })).toBeNull();
+  it('suggests no repository: the app never points at a source of its own', () => {
+    render(<AddRepositoryForm />);
+    expect(screen.queryByRole('button', { name: /sources/i })).toBeNull();
+    expect(screen.queryByText(/New here/)).toBeNull();
   });
 });

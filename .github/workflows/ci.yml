@@ -65,14 +65,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Source adapters live in a separate repository, and this one does not name it. The
+      # repository and the commit to test against come from the Actions variables
+      # SOURCES_REPOSITORY (owner/name) and SOURCES_REF. Pin SOURCES_REF to a commit, so a
+      # change over there can't fail this repository's pull requests; move it forward
+      # deliberately. With SOURCES_REPOSITORY unset, the contract tests are skipped.
       - name: Checkout installable source adapters
+        if: vars.SOURCES_REPOSITORY != ''
         uses: actions/checkout@v7
         with:
-          repository: Zero0blanK/projektmanga-sources
-          # Pinned, so a change over there can't fail this repository's pull requests. Move
-          # it forward deliberately, in a change of its own.
-          ref: a58309b13f48a7b31a6eb1b793dce2787484f9a0
-          path: projektmanga-sources
+          repository: ${{ vars.SOURCES_REPOSITORY }}
+          ref: ${{ vars.SOURCES_REF }}
+          path: sources
 
       - uses: actions/setup-node@v7
         with:
@@ -82,7 +86,8 @@ jobs:
       - run: npm ci
 
       - name: Install source adapter test dependencies
-        run: npm ci --prefix projektmanga-sources
+        if: vars.SOURCES_REPOSITORY != ''
+        run: npm ci --prefix sources
 
       # `npm ci` does NOT produce a usable Prisma client: @prisma/client 7.9.1 ships no
       # postinstall hook, so the generated types every server import depends on are simply
@@ -111,9 +116,10 @@ jobs:
         run: npm run test --workspace=@projekt-manga/desktop
 
       - name: Test source adapters against shared output schemas
+        if: vars.SOURCES_REPOSITORY != ''
         run: npm run test:source-contracts
         env:
-          PROJEKT_MANGA_SOURCES_DIR: projektmanga-sources
+          PROJEKT_MANGA_SOURCES_DIR: sources
 
   lint:
     name: Lint and format

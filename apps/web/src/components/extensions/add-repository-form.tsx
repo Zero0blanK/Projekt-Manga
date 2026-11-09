@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/hooks/use-toast';
 import { extensionActions } from '@/lib/extensions-store';
-import { PROJEKTMANGA_SOURCES_URL, repositoryUrlProblem } from '@/lib/repository-url';
+import { repositoryUrlProblem } from '@/lib/repository-url';
 
 function addFailure(error: unknown): string {
   if (error instanceof ApiError) {
@@ -25,11 +25,9 @@ function addFailure(error: unknown): string {
  * toast.
  */
 export function AddRepositoryForm({
-  existingUrls,
   onAdded,
   compact = false,
 }: {
-  existingUrls: string[];
   onAdded?: () => void;
   compact?: boolean;
 }) {
@@ -38,7 +36,6 @@ export function AddRepositoryForm({
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const suggestionAdded = existingUrls.includes(PROJEKTMANGA_SOURCES_URL);
 
   const add = async (value: string) => {
     const trimmed = value.trim();
@@ -90,20 +87,6 @@ export function AddRepositoryForm({
       {problem && (
         <p id={errorId} role="alert" className="mt-1.5 text-xs text-destructive">
           {problem}
-        </p>
-      )}
-      {!suggestionAdded && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          New here?{' '}
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void add(PROJEKTMANGA_SOURCES_URL)}
-            className="font-medium text-primary underline underline-offset-4 disabled:opacity-50"
-          >
-            Add ProjektManga sources
-          </button>
-          , the project&apos;s own repository.
         </p>
       )}
     </div>

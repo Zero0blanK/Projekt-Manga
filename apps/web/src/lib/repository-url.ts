@@ -1,7 +1,3 @@
-/** The project's own source repository, offered as a one-click start. */
-export const PROJEKTMANGA_SOURCES_URL =
-  'https://raw.githubusercontent.com/Zero0blanK/projektmanga-sources/main/index.json';
-
 /** Returns a reason the text can't be a repository URL, or null when it can. */
 export function repositoryUrlProblem(text: string): string | null {
   let url: URL;
