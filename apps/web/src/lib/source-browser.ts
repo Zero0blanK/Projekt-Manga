@@ -4,7 +4,13 @@ import { desktopBridge } from '@/lib/desktop-bridge';
 import { ApiError } from '@projekt-manga/api-client';
 
 /** What the desktop app's source window reports once it is closed (main/source-browser.ts). */
-export type SourceBrowserResult = { saved: boolean; cookieCount: number; message: string };
+export type SourceBrowserResult = {
+  saved: boolean;
+  /** Seen past its check. Older desktop builds leave it out. */
+  passed?: boolean;
+  cookieCount: number;
+  message: string;
+};
 
 type SourceBrowserBridge = {
   openBrowser: (

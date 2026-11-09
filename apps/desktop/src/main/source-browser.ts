@@ -33,6 +33,12 @@ import {
 export interface SourceBrowserResult {
   /** True when cookies were captured and the server stored them. */
   saved: boolean;
+  /**
+   * True when the site was seen past its check: it closed by itself showing the source's
+   * own page, or it left a clearance cookie. A window closed with the check still up may
+   * have saved other cookies, but nothing that gets the app past the check.
+   */
+  passed: boolean;
   /** How many cookies were sent (never their values). */
   cookieCount: number;
   message: string;
@@ -223,18 +229,34 @@ function rewriteIdentityHeaders(ses: Electron.Session, identity: BrowserIdentity
 const PASSED_SETTLE_MS = 1200;
 
 /**
+ * How long the source's own page has to stay up, with no check in sight, before a site
+ * that set no clearance cookie counts as passed. Not every protected site uses
+ * `cf_clearance` (DDoS-Guard, a Cloudflare rule that only sets `__cf_bm`); without this
+ * the window waited out the hidden attempt and was shown, asking the reader to do
+ * something that was already done.
+ */
+const PASSED_WITHOUT_CLEARANCE_MS = 6000;
+
+const hasClearance = (cookies: readonly { name: string }[]) =>
+  cookies.some((cookie) => cookie.name.toLowerCase() === 'cf_clearance');
+
+/**
  * Closes the hidden window the app opened by itself once it shows the source's own site
- * rather than a browser check, and the site has set its clearance cookie. A check that
- * needs a click or a CAPTCHA never gets there; the hidden-attempt timeout shows the same
- * window so the reader can finish it.
+ * rather than a browser check: at once when the site has set its clearance cookie, or once
+ * the page has stayed past the check for a while when it sets none. A check that needs a
+ * click or a CAPTCHA never gets there; the hidden-attempt timeout shows the same window so
+ * the reader can finish it. Resolves `passed` for the caller when it closes the window.
  */
 function closeWhenPassed(
   win: BrowserWindow,
   ses: Electron.Session,
   allowedHosts: readonly string[],
+  onPassed: () => void,
 ): void {
   const contents = win.webContents;
   let timer: NodeJS.Timeout | null = null;
+  /** When the page last showed something that is not the source's site past its check. */
+  let challengeSeenAt = Date.now();
   const check = () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(async () => {
@@ -246,10 +268,19 @@ function closeWhenPassed(
       } catch {
         return;
       }
-      if (!isHostAllowed(host, allowedHosts) || isChallengeTitle(contents.getTitle())) return;
+      if (!isHostAllowed(host, allowedHosts) || isChallengeTitle(contents.getTitle())) {
+        challengeSeenAt = Date.now();
+        return;
+      }
       const cookies = cookiesForAllowedHosts(await ses.cookies.get({}), allowedHosts);
-      if (!cookies.some((cookie) => cookie.name.toLowerCase() === 'cf_clearance')) return;
-      if (!win.isDestroyed() && !contents.isDestroyed()) win.close();
+      const settled = Date.now() - challengeSeenAt >= PASSED_WITHOUT_CLEARANCE_MS;
+      if (!hasClearance(cookies) && !settled) {
+        check();
+        return;
+      }
+      if (win.isDestroyed() || contents.isDestroyed()) return;
+      onPassed();
+      win.close();
     }, PASSED_SETTLE_MS);
   };
   contents.on('did-finish-load', check);
@@ -309,6 +340,7 @@ async function runWindow(
     stopDisguise();
   });
 
+  let passedOnItsOwn = false;
   if (hidden) {
     const timer = setTimeout(() => {
       if (win.isDestroyed()) return;
@@ -319,7 +351,9 @@ async function runWindow(
       win.focus();
     }, HIDDEN_ATTEMPT_MS);
     win.once('closed', () => clearTimeout(timer));
-    closeWhenPassed(win, ses, source.allowed_hosts);
+    closeWhenPassed(win, ses, source.allowed_hosts, () => {
+      passedOnItsOwn = true;
+    });
   }
 
   const closed = new Promise<void>((resolve) => win.once('closed', () => resolve()));
@@ -332,9 +366,11 @@ async function runWindow(
 
   await ses.cookies.flushStore().catch(() => {});
   const cookies = cookiesForAllowedHosts(await ses.cookies.get({}), source.allowed_hosts);
+  const passed = passedOnItsOwn || hasClearance(cookies);
   if (cookies.length === 0) {
     return {
       saved: false,
+      passed,
       cookieCount: 0,
       message: `No cookies for ${source.name} were set, so nothing was saved.`,
     };
@@ -345,8 +381,11 @@ async function runWindow(
   });
   return {
     saved: true,
+    passed,
     cookieCount: cookies.length,
-    message: `Saved the browser session for ${source.name}.`,
+    message: passed
+      ? `Passed ${source.name}'s browser check.`
+      : `Saved the browser session for ${source.name}.`,
   };
 }
 

@@ -1,61 +1,81 @@
 'use client';
 
 import { useEffect } from 'react';
-import { onRequestFailure } from '@projekt-manga/api-client';
+import { getSourceHealth, onRequestFailure, type SourceHealth } from '@projekt-manga/api-client';
 import { toast } from '@/hooks/use-toast';
 import { getSetting } from '@/lib/app-store';
-import { queryClient } from '@/lib/query-client';
 import {
   AUTO_OPEN_CHALLENGE_SETTING,
   CHALLENGE_REQUIRED,
-  openSourceBrowser,
-  sourceBrowserBridge,
   sourceIdFromPath,
-  sourceSessionKey,
-  type SourceBrowserResult,
 } from '@/lib/source-browser';
+import { canCheckSources, getSourceCheck, startSourceCheck } from '@/lib/source-check';
 
-/** Sources whose check window this app run already opened by itself. */
-const opened = new Set<string>();
+/** How often source health is read for checks met in the background. */
+const HEALTH_POLL_MS = 60_000;
 
 /**
- * On the desktop app, opens a source's own site in a hidden browser window as soon as one
- * of its requests is stopped by a browser check (Cloudflare), instead of waiting for the
- * reader to press "Open in browser". When the check lets the browser through on its own
- * the window closes; when it needs a click, the same window is shown automatically. Once
- * a session is saved, everything from that source loads again.
+ * On the desktop app, passes a source's browser check (Cloudflare) in the background as
+ * soon as the source asks for one, instead of waiting for the reader to press "Open in
+ * browser" or paste a cookie. The check runs in a hidden window of the source's own site
+ * (lib/source-check.ts); the window only shows if the check needs a click.
  *
- * Once per source per app run, so a reader who closes the window isn't asked again on
- * every request; the notice's button still opens it any time.
+ * Two ways in: a request from this window failing on the check, and source health, which
+ * also records checks met where no window was looking: a library update or a download.
+ * Clearances expire, so a source is checked again whenever it asks again, but a check that
+ * failed is left alone for a while rather than retried in a loop.
  */
 export function SourceChallengeAutoOpen() {
   useEffect(() => {
-    if (!sourceBrowserBridge()) return;
+    if (!canCheckSources()) return;
+    const enabled = () => getSetting(AUTO_OPEN_CHALLENGE_SETTING, true) !== false;
 
-    function finish(sourceId: string, result: SourceBrowserResult) {
-      toast({ description: result.message });
-      if (!result.saved) return;
-      void queryClient.invalidateQueries({ queryKey: sourceSessionKey(sourceId) });
-      // Everything that failed on this source can load now.
-      void queryClient.invalidateQueries({
-        predicate: (query) => JSON.stringify(query.queryKey).includes(JSON.stringify(sourceId)),
+    const check = (sourceId: string) => {
+      if (!enabled()) return;
+      const run = startSourceCheck(sourceId, { auto: true });
+      void run?.then((state) => {
+        if (state.status === 'passed' || state.status === 'failed') {
+          toast({ description: state.message });
+        }
       });
-    }
+    };
 
-    return onRequestFailure((failure) => {
+    const stopFailures = onRequestFailure((failure) => {
       if (failure.code !== CHALLENGE_REQUIRED) return;
-      if (getSetting(AUTO_OPEN_CHALLENGE_SETTING, true) === false) return;
       const sourceId = sourceIdFromPath(failure.path);
-      if (!sourceId || opened.has(sourceId)) return;
-      opened.add(sourceId);
-      void openSourceBrowser(sourceId, { closeWhenPassed: true }).then(
-        (result) => finish(sourceId, result),
-        (error: unknown) =>
-          toast({
-            description: error instanceof Error ? error.message : 'Couldn’t open the source.',
-          }),
-      );
+      if (sourceId) check(sourceId);
     });
+
+    /** A check met since this source's last check ended, by browsing or updating. */
+    const challengedSince = (health: SourceHealth): boolean => {
+      const previous = getSourceCheck(health.sourceId);
+      const since = previous.status === 'passed' || previous.status === 'failed' ? previous.at : 0;
+      return [health.browse, health.update].some(
+        (operation) =>
+          operation?.lastErrorCode === CHALLENGE_REQUIRED &&
+          Date.parse(operation.lastAttemptAt) > since,
+      );
+    };
+
+    let stopped = false;
+    const readHealth = () => {
+      if (!enabled()) return;
+      getSourceHealth()
+        .then((sources) => {
+          if (stopped) return;
+          for (const health of sources) if (challengedSince(health)) check(health.sourceId);
+        })
+        // Quiet: this is a background look, and the next one may answer.
+        .catch(() => undefined);
+    };
+    readHealth();
+    const timer = setInterval(readHealth, HEALTH_POLL_MS);
+
+    return () => {
+      stopped = true;
+      stopFailures();
+      clearInterval(timer);
+    };
   }, []);
   return null;
 }
