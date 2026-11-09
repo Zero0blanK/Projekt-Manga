@@ -182,6 +182,61 @@ export interface OrphanedDownloadFolder {
   modifiedAt: string;
 }
 
+/**
+ * A title folder of downloads the app has no record of — left by an earlier install whose
+ * app data is gone, or kept in a folder this install never used.
+ *
+ * - `ready`: its chapters can be restored now.
+ * - `needs-source`: made before downloads recorded their identity, and its source isn't
+ *   installed, so its chapters can't be matched yet. Installing the source fixes it.
+ * - `not-found`: the source is installed but no title on it matches the folder.
+ * - `lookup-failed`: the source didn't answer; trying again later may work.
+ * - `nothing-to-restore`: every chapter is already in the app or incomplete.
+ */
+export type RestorableTitleStatus =
+  'ready' | 'needs-source' | 'not-found' | 'lookup-failed' | 'nothing-to-restore';
+
+export interface RestorableTitle {
+  /** Stable across scans of the same folder; what a restore request names. */
+  id: string;
+  source: string;
+  /** The source's display name, when it is installed. */
+  sourceName: string | null;
+  title: string;
+  thumbnailUrl: string | null;
+  /** The title's folder on disk. */
+  folder: string;
+  status: RestorableTitleStatus;
+  chapters: {
+    /** Complete and identified: these come back. */
+    ready: number;
+    /** Missing pages; left alone. */
+    incomplete: number;
+    /** That chapter is already downloaded elsewhere in the app. */
+    alreadyInApp: number;
+    /** Made before downloads recorded their identity and not found on the source. */
+    unmatched: number;
+  };
+  sizeBytes: number;
+}
+
+export interface DownloadRestoreScan {
+  /** The folders that were looked through. */
+  roots: string[];
+  titles: RestorableTitle[];
+  /** Chapters across all titles that a restore would bring back. */
+  restorableChapters: number;
+}
+
+export interface DownloadRestoreResult {
+  /** Chapters added back. */
+  restored: number;
+  /** Chapters the app knew about but had lost track of, now pointed at the files found. */
+  relinked: number;
+  /** The titles restored, with the app's id for each, so they can be added to the library. */
+  titles: { id: string; mangaId: string; title: string }[];
+}
+
 export interface DownloadedPage {
   index: number;
   retryable: boolean;

@@ -9,9 +9,21 @@ import {
   updateDownloadDirectoryBodySchema,
   updateDownloadStorageLimitBodySchema,
   cleanupOrphanedDownloadsBodySchema,
+  restoreDownloadsBodySchema,
+  scanDownloadsQuerySchema,
 } from '@projekt-manga/schemas';
+import type { NextFunction, Request, Response } from 'express';
 
 const router = express.Router();
+
+/**
+ * Looking through a folder the caller names reads the host's disk, so it takes the same
+ * rights as choosing the download folder. The folders the app already downloads to don't.
+ */
+function requireAdminForNamedFolder(req: Request, res: Response, next: NextFunction) {
+  const named = (req.query as { root?: unknown }).root ?? (req.body as { root?: unknown })?.root;
+  return named ? requireAdmin(req, res, next) : next();
+}
 
 // POST /api/downloads/chapter - Initiate chapter download
 router.post(
@@ -32,6 +44,20 @@ router.post(
   '/orphans/cleanup',
   validateBody(cleanupOrphanedDownloadsBodySchema),
   downloadController.cleanupOrphanedDownloadFolders,
+);
+
+// Downloads left by an earlier install, found on disk and added back.
+router.get(
+  '/restore/scan',
+  requireAdminForNamedFolder,
+  validateQuery(scanDownloadsQuerySchema),
+  downloadController.scanForDownloads,
+);
+router.post(
+  '/restore',
+  requireAdminForNamedFolder,
+  validateBody(restoreDownloadsBodySchema),
+  downloadController.restoreDownloads,
 );
 
 // GET /api/downloads/chapter/:chapterId/check - Check if chapter is downloaded

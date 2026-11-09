@@ -7,6 +7,7 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   nativeImage,
   shell,
@@ -473,6 +474,22 @@ export function registerIpcHandlers(
       throw new Error(error);
     }
     return { ok: true };
+  });
+
+  // Picks a folder for the app to read, such as one holding downloads from an earlier
+  // install. The path comes from the OS dialog, never from the renderer; the title is the
+  // only thing the page chooses, and it is shortened and stripped of control characters.
+  handleFromApp(DESKTOP_CHANNELS.pickFolder, async (event, rawTitle: unknown) => {
+    const title =
+      typeof rawTitle === 'string'
+        ? rawTitle.replace(/\p{Cc}/gu, ' ').slice(0, 120)
+        : 'Choose a folder';
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const options = { title, properties: ['openDirectory' as const] };
+    const selection = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    return ok(selection.canceled ? null : (selection.filePaths[0] ?? null));
   });
 
   ipcMain.handle(
