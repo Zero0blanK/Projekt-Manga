@@ -4,9 +4,12 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sourceRoot = path.resolve(
-  process.env.PROJEKT_MANGA_SOURCES_DIR ?? path.join(appRoot, '..', 'projektmanga-sources'),
-);
+if (!process.env.PROJEKT_MANGA_SOURCES_DIR) {
+  throw new Error(
+    'Set PROJEKT_MANGA_SOURCES_DIR to a checkout of the source repository to test against.',
+  );
+}
+const sourceRoot = path.resolve(process.env.PROJEKT_MANGA_SOURCES_DIR);
 const { resolveSource } = await import(
   pathToFileURL(path.join(sourceRoot, 'scripts/source-layout.mjs')).href
 );

@@ -4,9 +4,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const sourceRoot = path.resolve(
-  process.env.PROJEKT_MANGA_SOURCES_DIR ?? path.join(repoRoot, '..', 'projektmanga-sources'),
-);
+if (!process.env.PROJEKT_MANGA_SOURCES_DIR) {
+  throw new Error(
+    'Set PROJEKT_MANGA_SOURCES_DIR to a checkout of the source repository to test against.',
+  );
+}
+const sourceRoot = path.resolve(process.env.PROJEKT_MANGA_SOURCES_DIR);
 const schemasEntry = path.join(repoRoot, 'packages', 'schemas', 'dist', 'index.js');
 const adapterTests = path.join(sourceRoot, 'tests', 'source-adapters.test.mjs');
 const portTests = ['english-source-ports', 'japanese-source-ports', 'flamecomics'].map((name) =>

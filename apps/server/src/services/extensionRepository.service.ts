@@ -173,7 +173,7 @@ const addRepository = async (url: string) => {
   // URL doesn't actually serve a valid index, instead of silently storing a dead repo.
   const { repository } = await fetchRepositoryIndex(url);
 
-  // Stored so the UI can show "ProjektManga sources" rather than a raw githubusercontent
+  // Stored so the UI can show the repository's own name rather than a raw githubusercontent
   // URL. Null when the repository publishes none; the panel already falls back to the URL.
   return await extensionRepositoryRepository.createRepository(url, repository);
 };
