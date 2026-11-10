@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import prisma from '../../src/configs/prisma.config.js';
 import { replaceBackup } from '../../src/repositories/restore.repository.js';
+import restoreJobRepository from '../../src/repositories/restoreJob.repository.js';
 import { replaceBackupBodySchema, RESTORE_UPLOAD_LIMIT_BYTES } from '@projekt-manga/schemas';
 import request from 'supertest';
 import app from '../../src/app.js';
@@ -228,6 +229,66 @@ describe('transactional replace backup (real SQLite)', () => {
     const persisted = await prisma.restore_job.findUniqueOrThrow({ where: { id: backup.jobId } });
     expect(JSON.parse(persisted.result ?? 'null')).toMatchObject({ restoredManga: 1 });
     expect(persisted.payload).toBe('');
+    // Recovery counts as a second start.
+    expect(persisted.attempts).toBe(1);
+  });
+
+  it('fails a restore interrupted twice instead of starting it on every launch', async () => {
+    const backup = replaceBackupBodySchema.parse({
+      ...empty,
+      jobId: '5b0c1a52-7c63-4f3e-9d0e-2f61f1f2a9b1',
+      manga: [manga('crashing-title', 'crashing-title', 'crashing-chapter')],
+    });
+    // Started, the server went down, resumed, and it went down again.
+    await prisma.restore_job.create({
+      data: {
+        id: backup.jobId,
+        owner: 'anonymous',
+        state: 'running',
+        attempts: 2,
+        payload: JSON.stringify(backup),
+      },
+    });
+
+    await recoverRestoreJobs();
+
+    const persisted = await prisma.restore_job.findUniqueOrThrow({ where: { id: backup.jobId } });
+    expect(persisted).toMatchObject({ state: 'failed', attempts: 2, payload: '', result: null });
+    const status = await request(app).get(`/api/restore/jobs/${backup.jobId}`);
+    expect(status.body.data.state).toBe('failed');
+    // Not started again in the background either.
+    await new Promise((resolve) => setTimeout(resolve, 3_500));
+    expect(
+      await prisma.manga.findUnique({
+        where: { source_slug: { source: 'test-source', slug: 'crashing-title' } },
+      }),
+    ).toBeNull();
+    // The library is free for another restore.
+    expect(await restoreJobRepository.hasActive('anonymous')).toBe(false);
+  });
+
+  it('resumes a restore interrupted once', async () => {
+    const backup = replaceBackupBodySchema.parse({
+      ...empty,
+      jobId: '9e4f6d2b-3a8c-4b7e-a1d5-6c0f8e2b4a73',
+    });
+    await prisma.restore_job.create({
+      data: {
+        id: backup.jobId,
+        owner: 'anonymous',
+        state: 'running',
+        attempts: 1,
+        payload: JSON.stringify(backup),
+      },
+    });
+
+    const { queued, abandoned } = await restoreJobRepository.requeueInterrupted();
+
+    expect(abandoned).toEqual([]);
+    expect(queued.map((job) => job.id)).toEqual([backup.jobId]);
+    expect(await restoreJobRepository.claim(backup.jobId)).toBe(true);
+    const claimed = await prisma.restore_job.findUniqueOrThrow({ where: { id: backup.jobId } });
+    expect(claimed).toMatchObject({ state: 'running', attempts: 2 });
   });
 
   it('merges without replacing an existing title or its chapter progress', async () => {
