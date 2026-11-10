@@ -39,6 +39,11 @@ describe('restore backup validation', () => {
     expect(parseBackup({ ...emptyBackup, manga: [title('m1')] }).manga).toHaveLength(1);
   });
 
+  it('accepts a title with no cover, as one restored from downloads exports', () => {
+    const coverless = { ...title('m1'), thumbnail_url: '' };
+    expect(parseBackup({ ...emptyBackup, manga: [coverless] }).manga).toHaveLength(1);
+  });
+
   it('rejects malformed nested entries before restore can mutate data', () => {
     expect(() =>
       parseBackup({ ...emptyBackup, manga: [{ id: 'manga', title: 'Title', chapters: null }] }),

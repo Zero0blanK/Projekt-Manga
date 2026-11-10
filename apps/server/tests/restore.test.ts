@@ -94,6 +94,44 @@ describe('background restore API', () => {
     expect(done.body.data.state).toBe('succeeded');
   });
 
+  it('accepts a title with no cover, as one restored from downloads exports', async () => {
+    const jobId = '0d3e6a4c-5f1b-4c2a-9e7d-8b6f5a4c3d21';
+    vi.mocked(startRestore).mockResolvedValue({
+      id: jobId,
+      owner: 'anonymous',
+      state: 'queued',
+      result: null,
+      progress: null,
+    });
+    const response = await request(app)
+      .post('/api/restore/jobs')
+      .send({
+        jobId,
+        expectedUserId: null,
+        version: 2,
+        manga: [
+          {
+            id: 'coverless',
+            source: 'source-a',
+            slug: 'coverless',
+            title: 'Coverless',
+            author: 'Author',
+            thumbnail_url: '',
+            artist: null,
+            description: '',
+            genres: '',
+            status: 'UNKNOWN',
+            rating: null,
+            chapters: [],
+          },
+        ],
+        library: [],
+        history: [],
+      });
+    expect(response.status).toBe(202);
+    expect(vi.mocked(startRestore).mock.calls[0]?.[0].manga[0]?.thumbnail_url).toBe('');
+  });
+
   it('rejects malformed data before creating a job', async () => {
     const response = await request(app).post('/api/restore/jobs').send({
       jobId: 'invalid',
