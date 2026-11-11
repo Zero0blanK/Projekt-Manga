@@ -31,6 +31,17 @@ describe('cached thumbnail serving (real SQLite and filesystem)', () => {
       expect((await prisma.manga.findUnique({ where: { id: manga.id } }))?.thumbnail_url).toBe(
         'https://example.com/source.png',
       );
+      // Unversioned (History, Recents): checked again each time, a 304 when unchanged.
+      expect(response.headers['cache-control']).toBe('private, no-cache');
+
+      // Versioned by the cached file's hash, as library covers are: kept for good.
+      const versioned = await request(app).get(
+        `/api/cache/thumbnail/${manga.id}?v=fixture-sha&w=240`,
+      );
+      expect(versioned.status).toBe(200);
+      expect(versioned.headers['cache-control']).toBe('private, max-age=31536000, immutable');
+      const stale = await request(app).get(`/api/cache/thumbnail/${manga.id}?v=older-sha`);
+      expect(stale.headers['cache-control']).toBe('private, no-cache');
     } finally {
       await storage.removeCachedThumbnail(cachedPath);
     }

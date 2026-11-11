@@ -10,6 +10,7 @@ import { MangaNotFoundError, NotFoundError } from '../utils/customErrors.js';
 import type { TriggerSyncBody } from '@projekt-manga/schemas';
 import sourceService from '../services/source.service.js';
 import mangaOverrideService from '../services/mangaOverride.service.js';
+import thumbnailQueue from '../workers/thumbnailSync.js';
 
 const triggerSync = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -26,6 +27,7 @@ const triggerSync = async (req: Request, res: Response, next: NextFunction) => {
       {
         initiatedByUser: true,
         force: true,
+        sourceId: manga.source,
       },
     );
 
@@ -54,42 +56,43 @@ const getStatus = async (req: Request, res: Response, next: NextFunction) => {
 };
 
 /**
- * A cover may be cached briefly only when the URL's version names the image being sent:
- * `v=custom-…` for a custom cover, any other `v` for the source's. An unversioned URL
- * (History, Recents) or one naming the other kind is revalidated every time, so changing
- * or removing a custom cover never leaves the old image showing for minutes. The
- * revalidation is a cheap 304 when nothing changed (sendFile sends ETag/Last-Modified).
+ * A cover is kept by the browser only when the URL's version names exactly the image being
+ * sent: the custom cover's `custom-<updated_at>`, or the cached source cover's hash. Such a
+ * URL never shows another image (an edit or a new cover changes the version), so it is kept
+ * for good and the app shows it without asking again, also when the server can't be
+ * reached. An unversioned URL (History, Recents), a stale version or one naming the other
+ * kind is revalidated every time, which is a cheap 304 when nothing changed (sendFile sends
+ * ETag/Last-Modified).
  */
-export function coverCacheControl(req: Pick<Request, 'query'>, custom: boolean): string {
+export function coverCacheControl(req: Pick<Request, 'query'>, servedVersion: string): string {
   const version = typeof req.query.v === 'string' ? req.query.v : '';
-  const matches = custom
-    ? version.startsWith('custom-')
-    : !!version && !version.startsWith('custom-');
-  return matches ? 'private, max-age=300' : 'private, no-cache';
+  return version && version === servedVersion
+    ? 'private, max-age=31536000, immutable'
+    : 'private, no-cache';
 }
 
 const getThumbnail = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { manga_id } = req.params as { manga_id: string };
     const width = thumbnailWidth(req.query.w);
-    // This identity's custom cover wins over the cached source one. Clients version the
-    // URL by the override's updated_at, so the short private cache never shows a stale one.
-    let customCover: string | null = null;
+    // This identity's custom cover wins over the cached source one.
+    let customCover: { path: string; version: string } | null = null;
     try {
       customCover = await mangaOverrideService.getCoverFile(manga_id, req.user?.id);
-      if (customCover) await fs.access(customCover);
+      if (customCover) await fs.access(customCover.path);
     } catch {
       if (customCover) console.warn('Custom cover unavailable; using source cover', manga_id);
       customCover = null;
     }
     if (customCover) {
-      res.setHeader('Cache-Control', coverCacheControl(req, true));
-      const sized = width ? await resizedThumbnail(customCover, width) : customCover;
+      res.setHeader('Cache-Control', coverCacheControl(req, customCover.version));
+      const sized = width ? await resizedThumbnail(customCover.path, width) : customCover.path;
       return res.sendFile(sized, (error) => {
         if (error) next(error);
       });
     }
     const cache = await cacheRepository.findByMangaId(manga_id);
+    let cachedFileMissing = false;
     if (cache?.thumbnail_url) {
       let file: string | null = null;
       try {
@@ -97,11 +100,12 @@ const getThumbnail = async (req: Request, res: Response, next: NextFunction) => 
         await fs.access(file);
       } catch {
         file = null;
+        cachedFileMissing = true;
         // A stale cache row must not turn an otherwise valid source cover into a 404.
         console.warn('Cached thumbnail unavailable; using source cover', manga_id);
       }
       if (file) {
-        res.setHeader('Cache-Control', coverCacheControl(req, false));
+        res.setHeader('Cache-Control', coverCacheControl(req, cache.sha256_url ?? ''));
         const sized = width ? await resizedThumbnail(file, width) : file;
         return res.sendFile(sized, (error) => {
           if (error) next(error);
@@ -120,6 +124,12 @@ const getThumbnail = async (req: Request, res: Response, next: NextFunction) => 
       sourceUrl = await sourceService.getMangaThumbnail(manga.source, manga.slug);
     }
     if (!/^https?:\/\//i.test(sourceUrl)) throw new NotFoundError('Thumbnail not found');
+    // Shown from the source this once; cached in the background so the next time it comes
+    // from disk. Titles restored, imported or added before covers were cached have none.
+    thumbnailQueue.cacheWhenShown(manga.id, sourceUrl, {
+      sourceId: manga.source,
+      force: cachedFileMissing,
+    });
     const query = new URLSearchParams({ url: sourceUrl, source_id: manga.source });
     return res.redirect(302, `/api/source/image-proxy?${query}`);
   } catch (error) {

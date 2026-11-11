@@ -111,9 +111,16 @@ const removeCover = async (manga_id: string, user_id?: string) => {
 };
 
 /** The file behind this identity's custom cover, or null to fall back to the cached one. */
+/** This identity's custom cover: the file, and the version clients put in its URL
+ * (`custom-<updated_at>`, see apps/web/src/lib/manga-data.ts). */
 const getCoverFile = async (manga_id: string, user_id?: string) => {
   const row = await mangaOverrideRepository.find(manga_id, user_id ?? null);
-  return row?.cover_path ? storage.resolveCachedThumbnail(row.cover_path) : null;
+  return row?.cover_path
+    ? {
+        path: storage.resolveCachedThumbnail(row.cover_path),
+        version: `custom-${row.updated_at.toISOString()}`,
+      }
+    : null;
 };
 
 const mangaOverrideService = {

@@ -17,6 +17,8 @@ vi.mock('../src/utils/storage.js', () => ({
 import axios from 'axios';
 import storage from '../src/utils/storage.js';
 import sourceService from '../src/services/source.service.js';
+import cacheService from '../src/services/cache.service.js';
+import thumbnailQueue from '../src/workers/thumbnailSync.js';
 
 const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
 
@@ -289,14 +291,115 @@ describe('GET /api/cache/legacy-thumbnail/:source_id/:manga_id', () => {
 
 describe('cover caching', () => {
   const at = (v?: string) => ({ query: v === undefined ? {} : { v } });
-  it('caches a cover only under a URL version naming the image sent', () => {
-    expect(coverCacheControl(at('custom-2026-01-01'), true)).toBe('private, max-age=300');
-    expect(coverCacheControl(at('abc123'), false)).toBe('private, max-age=300');
+  it('keeps a cover for good only under the URL version naming the image sent', () => {
+    const kept = 'private, max-age=31536000, immutable';
+    const custom = 'custom-2026-01-01T00:00:00.000Z';
+    expect(coverCacheControl(at(custom), custom)).toBe(kept);
+    expect(coverCacheControl(at('abc123'), 'abc123')).toBe(kept);
     // History and Recents ask without a version: a custom cover may change any time.
-    expect(coverCacheControl(at(), true)).toBe('private, no-cache');
-    expect(coverCacheControl(at(), false)).toBe('private, no-cache');
+    expect(coverCacheControl(at(), custom)).toBe('private, no-cache');
+    expect(coverCacheControl(at(), 'abc123')).toBe('private, no-cache');
     // A custom cover sent for a source-cover URL (or the reverse) is never kept.
-    expect(coverCacheControl(at('abc123'), true)).toBe('private, no-cache');
-    expect(coverCacheControl(at('custom-2026-01-01'), false)).toBe('private, no-cache');
+    expect(coverCacheControl(at('abc123'), custom)).toBe('private, no-cache');
+    expect(coverCacheControl(at(custom), 'abc123')).toBe('private, no-cache');
+    // Nor is one whose version is stale: an older edit, or a cover since replaced.
+    expect(coverCacheControl(at('custom-2025-01-01T00:00:00.000Z'), custom)).toBe(
+      'private, no-cache',
+    );
+    expect(coverCacheControl(at('old-hash'), 'abc123')).toBe('private, no-cache');
+    expect(coverCacheControl(at(''), '')).toBe('private, no-cache');
+  });
+});
+
+describe('caching a library cover the first time it is shown', () => {
+  it('caches a cover with no cached copy in the background, after sending it live', async () => {
+    const cacheWhenShown = vi.spyOn(thumbnailQueue, 'cacheWhenShown').mockImplementation(() => {});
+    prismaMock.cache.findUnique.mockResolvedValueOnce(null);
+    prismaMock.manga.findFirst.mockResolvedValueOnce({
+      id: 'manga-1',
+      source: 'fixture',
+      thumbnail_url: 'https://example.com/cover.png',
+    });
+    try {
+      const res = await request(app).get('/api/cache/thumbnail/manga-1');
+
+      expect(res.status).toBe(302);
+      expect(cacheWhenShown).toHaveBeenCalledWith('manga-1', 'https://example.com/cover.png', {
+        sourceId: 'fixture',
+        force: false,
+      });
+    } finally {
+      cacheWhenShown.mockRestore();
+    }
+  });
+
+  it('fetches again when the cached file has gone missing', async () => {
+    const cacheWhenShown = vi.spyOn(thumbnailQueue, 'cacheWhenShown').mockImplementation(() => {});
+    prismaMock.cache.findUnique.mockResolvedValueOnce({
+      manga_id: 'manga-1',
+      thumbnail_url: '/cache-assets/missing.png',
+      sha256_url: 'abc',
+    });
+    prismaMock.manga.findFirst.mockResolvedValueOnce({
+      id: 'manga-1',
+      source: 'fixture',
+      thumbnail_url: 'https://example.com/cover.png',
+    });
+    try {
+      await request(app).get('/api/cache/thumbnail/manga-1');
+      expect(cacheWhenShown).toHaveBeenCalledWith(
+        'manga-1',
+        'https://example.com/cover.png',
+        expect.objectContaining({ force: true }),
+      );
+    } finally {
+      cacheWhenShown.mockRestore();
+    }
+  });
+
+  it('tries a title at most once per half hour', async () => {
+    const sync = vi.spyOn(cacheService, 'syncThumbnail').mockResolvedValue({ updated: false });
+    // Earlier tests' cover views queue their own titles on the same shared queue.
+    const tries = () => sync.mock.calls.filter(([id]) => id === 'backoff-title').length;
+    try {
+      thumbnailQueue.cacheWhenShown('backoff-title', 'https://example.com/a.png');
+      thumbnailQueue.cacheWhenShown('backoff-title', 'https://example.com/a.png');
+      await vi.waitFor(() => expect(tries()).toBe(1));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      thumbnailQueue.cacheWhenShown('backoff-title', 'https://example.com/a.png');
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(tries()).toBe(1);
+    } finally {
+      sync.mockRestore();
+    }
+  });
+
+  it('retries a refused cover on a fresh connection, as the image proxy does', async () => {
+    prismaMock.cache.findUnique.mockResolvedValueOnce(null);
+    vi.mocked(axios.get)
+      .mockResolvedValueOnce({ status: 403, headers: {}, data: Readable.from([]) })
+      .mockResolvedValueOnce({ status: 200, headers: {}, data: Readable.from([png]) });
+    prismaMock.cache.upsert.mockResolvedValueOnce({});
+
+    const result = await cacheService.syncThumbnail('manga-1', 'https://example.com/x.png', {
+      sourceId: 'fixture',
+    });
+
+    expect(result.updated).toBe(true);
+    expect(axios.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('caches nothing when the source refuses the cover', async () => {
+    prismaMock.cache.findUnique.mockResolvedValueOnce(null);
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      status: 404,
+      headers: {},
+      data: Readable.from([]),
+    });
+
+    const result = await cacheService.syncThumbnail('manga-1', 'https://example.com/x.png');
+
+    expect(result.updated).toBe(false);
+    expect(storage.uploadBuffer).not.toHaveBeenCalled();
   });
 });
