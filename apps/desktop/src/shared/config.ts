@@ -8,6 +8,9 @@
  * (shared, per-window) ipcRenderer/ipcMain channel space. */
 export const DESKTOP_CHANNELS = {
   openPath: 'desktop:open-path',
+  /** The OS folder picker, returning the chosen folder's path (or null). Used to find
+   * downloads from an earlier install kept in a folder the app doesn't know. */
+  pickFolder: 'desktop:pick-folder',
   /** One consolidated channel for every local-DB read/write ({domain, op, args} in,
    * {success, message, data} envelope out — the same shape packages/api-client already
    * expects from the HTTP path) rather than a channel per operation, so the sandboxed

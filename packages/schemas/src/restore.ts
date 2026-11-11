@@ -69,6 +69,9 @@ const restoreBackupSchema = z.object({
     .array(
       addMangaBodySchema.omit({ chapters: true }).extend({
         id: z.string().min(1).max(512),
+        /** May be empty, unlike when adding a title: one restored from downloads, or from a
+         * source that gave no cover, has none, and its export must still restore. */
+        thumbnail_url: z.string().max(2048),
         artist: z.string().nullable(),
         rating: z.number().nullable(),
         chapters: z.array(chapter).max(50_000),

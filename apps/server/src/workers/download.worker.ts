@@ -8,6 +8,7 @@ import { withRequestId } from '../utils/requestContext.js';
 import downloadRepository from '../repositories/download.repository.js';
 import chapterRepository from '../repositories/chapter.repository.js';
 import { NotFoundError, ValidationError, UpstreamError } from '../utils/customErrors.js';
+import { writeChapterIdentity, writeTitleIdentity } from '../utils/downloadIdentity.js';
 import path from 'path';
 import { promises as fsp } from 'fs';
 import { EventEmitter } from 'events';
@@ -491,6 +492,48 @@ export class DownloadWorker extends EventEmitter {
     }
   }
 
+  /**
+   * Records beside the pages which source, title and chapter they are, so the download can
+   * be restored if the database that knew is ever lost (utils/downloadIdentity.ts).
+   *
+   * The chapter is already downloaded and readable; failing to write these must not undo
+   * that, so a failure is noted and left.
+   */
+  private async writeIdentityFiles(
+    downloadId: string,
+    chapterDir: string,
+    chapter: Chapter & { manga: manga },
+    pageCount: number,
+  ): Promise<void> {
+    try {
+      await writeChapterIdentity(chapterDir, {
+        source: chapter.manga.source,
+        mangaSlug: chapter.manga.slug,
+        mangaTitle: chapter.manga.title,
+        chapterKey: chapter.source_chapter_key,
+        chapterNumber: chapter.chapter_number,
+        chapterName: chapter.name,
+        scanlator: chapter.scanlator,
+        pageCount,
+      });
+      await writeTitleIdentity(path.dirname(chapterDir), {
+        source: chapter.manga.source,
+        slug: chapter.manga.slug,
+        title: chapter.manga.title,
+        author: chapter.manga.author,
+        thumbnailUrl: chapter.manga.thumbnail_url || null,
+      });
+    } catch {
+      recordDiagnosticEvent({
+        level: 'warn',
+        area: 'download',
+        event: 'download.identity_not_written',
+        jobId: downloadId,
+        code: 'FILESYSTEM_UNAVAILABLE',
+      });
+    }
+  }
+
   private async downloadChapterPages(
     downloadId: string,
     download: DownloadRecord,
@@ -583,6 +626,7 @@ export class DownloadWorker extends EventEmitter {
         pages_downloaded: successCount,
       });
       await downloadRepository.updateDownloadStatus(downloadId, 'COMPLETED');
+      await this.writeIdentityFiles(downloadId, downloadedPath, chapter, pages.length);
 
       this.retryCounts.delete(downloadId);
 

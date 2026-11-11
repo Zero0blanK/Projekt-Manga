@@ -1,12 +1,18 @@
 import { Request, Response, NextFunction } from 'express';
 import { HTTPSuccessResponse, HTTPErrorResponse } from '../utils/responseHandlers.js';
 import downloadService from '../services/download.service.js';
+import {
+  restoreDownloads as restoreFoundDownloads,
+  scanForDownloadsToRestore,
+} from '../services/downloadRestore.service.js';
 import { NotFoundError } from '../utils/customErrors.js';
 import { writeStoredZip } from '../utils/storedZip.js';
 import type {
   CleanupOrphanedDownloadsBody,
   InitiateDownloadBody,
   ListPageQuery,
+  RestoreDownloadsBody,
+  ScanDownloadsQuery,
   UpdateDownloadDirectoryBody,
   UpdateDownloadStorageLimitBody,
 } from '@projekt-manga/schemas';
@@ -143,6 +149,26 @@ const cleanupOrphanedDownloadFolders = async (req: Request, res: Response, next:
   }
 };
 
+const scanForDownloads = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { root } = req.validated as ScanDownloadsQuery;
+    const scan = await scanForDownloadsToRestore(root);
+    return HTTPSuccessResponse(res, 200, 'Download folders scanned', scan);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const restoreDownloads = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { titles, root } = req.validated as RestoreDownloadsBody;
+    const result = await restoreFoundDownloads(titles, root);
+    return HTTPSuccessResponse(res, 200, 'Downloads restored', result);
+  } catch (error) {
+    next(error);
+  }
+};
+
 const isChapterDownloaded = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { chapterId } = req.params as { chapterId: string };
@@ -251,6 +277,8 @@ const downloadController = {
   getDownloadStats,
   getOrphanedDownloadFolders,
   cleanupOrphanedDownloadFolders,
+  scanForDownloads,
+  restoreDownloads,
   isChapterDownloaded,
   getDownloadedChapterPages,
   getDownloadedPageFile,
