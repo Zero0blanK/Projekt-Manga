@@ -18,6 +18,7 @@ import { MangaActionBar } from '@/components/manga-detail/action-bar';
 import { SourceActionBar } from '@/components/manga-detail/source-action-bar';
 import { SourceChapterList } from '@/components/manga-detail/source-chapter-list';
 import { SimilarTitles } from '@/components/manga-detail/similar-titles';
+import { ChapterListSkeleton } from '@/components/skeletons';
 import { refreshDownloads } from '@/components/downloads/row-data';
 import { useCurrentUser } from '@/lib/session-resource';
 import { useHistory } from '@/lib/shared-queries';
@@ -45,11 +46,22 @@ export function SourcePreviewClient({
   details: MangaDetails;
 }) {
   const { user, loading } = useCurrentUser();
+  // The details are already here, so show them; only the parts that depend on whose
+  // progress this is (actions, read marks) wait for the reading profile.
   if (loading)
     return (
-      <p role="status" className="py-24 text-center text-sm text-muted-foreground">
-        Loading your reading profile…
-      </p>
+      <MangaDetailLayout
+        manga={fromSourceDetails(details, sourceId)}
+        backHref="/discover"
+        backLabel="Discover"
+        actions={
+          <p role="status" className="text-xs text-muted-foreground">
+            Loading your reading profile…
+          </p>
+        }
+      >
+        <ChapterListSkeleton />
+      </MangaDetailLayout>
     );
   return (
     <SourcePreviewContent
