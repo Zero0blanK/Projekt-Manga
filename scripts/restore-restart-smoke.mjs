@@ -427,9 +427,7 @@ try {
       ['queued', 'running'].includes(persistedRestoreState(workDir, electronRestore.jobId)),
       'The Electron server must stop before restore reaches a terminal state',
     );
-    await electronConnection.page
-      .getByRole('status', { name: 'Restoring your library' })
-      .waitFor();
+    await electronConnection.page.getByRole('status', { name: 'Restoring your library' }).waitFor();
 
     restartedServer = startServer(workDir, port, databaseUrl);
     await waitForHealth(restartedServer, baseUrl);

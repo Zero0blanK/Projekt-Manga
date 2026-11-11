@@ -949,9 +949,7 @@ try {
     await page.getByRole('status', { name: 'Restoring your library' }).waitFor();
     const secondBrowserWindow = await browserContext.newPage();
     await secondBrowserWindow.goto(`${webUrl}/settings`);
-    await secondBrowserWindow
-      .getByRole('status', { name: 'Restoring your library' })
-      .waitFor();
+    await secondBrowserWindow.getByRole('status', { name: 'Restoring your library' }).waitFor();
     fixtureRestoreComplete = true;
     await page.waitForFunction(
       () => localStorage.getItem('projekt-manga-pending-restore') === null,
