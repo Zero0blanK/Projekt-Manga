@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { SourceBrowserSessionStatus } from '@projekt-manga/types';
 import { parsePastedCookies, parsePastedUserAgent } from '@/lib/source-browser';
 import { SourceSessionManager } from '@/components/discover/source-session-manager';
+import { resetSourceChecks, startSourceCheck } from '@/lib/source-check';
 
 const api = vi.hoisted(() => ({
   get: vi.fn(),
@@ -53,6 +54,7 @@ function renderManager(props: { onSaved?: () => void; hideWhenEmpty?: boolean } 
 afterEach(() => {
   vi.clearAllMocks();
   Reflect.deleteProperty(window, 'desktop');
+  resetSourceChecks();
 });
 
 describe('pasted sessions', () => {
@@ -220,6 +222,41 @@ describe('SourceSessionManager', () => {
       expect(openBrowser).toHaveBeenCalledWith('manhuaus', { closeWhenPassed: true }),
     );
     expect(screen.queryByRole('button', { name: 'Refresh in browser' })).not.toBeInTheDocument();
+  });
+
+  it('joins a browser check already running instead of opening a second window', async () => {
+    let finish!: (value: unknown) => void;
+    const openBrowser = vi.fn().mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    Object.defineProperty(window, 'desktop', {
+      configurable: true,
+      value: { source: { openBrowser } },
+    });
+    // Another place (a list, the challenge notice) hit the check first.
+    void startSourceCheck('manhuaus', { auto: true });
+    expect(openBrowser).toHaveBeenCalledTimes(1);
+    api.get.mockResolvedValue({
+      ...savedSession,
+      cookies: [
+        {
+          name: 'cf_clearance',
+          domain: 'manhuaus.com',
+          expires: Math.floor(Date.now() / 1000) - 2,
+        },
+      ],
+    });
+    renderManager();
+
+    expect(
+      await screen.findByText('Opening the source in the browser to refresh the check…'),
+    ).toBeInTheDocument();
+    await act(async () =>
+      finish({
+        success: true,
+        message: 'Saved',
+        data: { saved: true, passed: true, cookieCount: 1, message: 'Passed the check.' },
+      }),
+    );
+    expect(openBrowser).toHaveBeenCalledTimes(1);
   });
 
   it('waits until an expiring browser check actually expires', async () => {

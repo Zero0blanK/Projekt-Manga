@@ -11,13 +11,8 @@ import {
 import type { SourceBrowserSessionStatus } from '@projekt-manga/types';
 import { toast } from '@/hooks/use-toast';
 import { absoluteTime, relativeTime } from '@/lib/relative-time';
-import {
-  openSourceBrowser,
-  parsePastedCookies,
-  parsePastedUserAgent,
-  sourceBrowserBridge,
-  sourceSessionKey,
-} from '@/lib/source-browser';
+import { parsePastedCookies, parsePastedUserAgent, sourceSessionKey } from '@/lib/source-browser';
+import { canCheckSources, startSourceCheck, useSourceCheck } from '@/lib/source-check';
 
 const button =
   'inline-flex items-center gap-1.5 rounded-lg border border-border/60 px-3 py-1.5 font-medium text-foreground transition hover:bg-accent disabled:opacity-60';
@@ -98,39 +93,26 @@ export function SourceSessionManager({
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [opening, setOpening] = useState(false);
-  const [refreshFailed, setRefreshFailed] = useState(false);
   // Read after mount: the bridge only exists in the desktop renderer, and the server
   // render must match the first client render.
   const [desktop, setDesktop] = useState(false);
-  useEffect(() => setDesktop(sourceBrowserBridge() !== undefined), []);
+  useEffect(() => setDesktop(canCheckSources()), []);
+  // The source's shared background check (lib/source-check.ts), so a refresh started here
+  // joins one a list or the challenge notice already started instead of opening a second
+  // window. A pass refreshes the saved session and retries what failed on the source.
+  const check = useSourceCheck(sourceId);
+  const opening = check.status === 'checking' || check.status === 'needs-you';
+  const refreshFailed = check.status === 'failed';
 
-  const refresh = useCallback(async () => {
-    setOpening(true);
-    setRefreshFailed(false);
-    try {
-      // Hidden, like the automatic challenge window: it closes itself once the site shows
-      // past the check, and only becomes visible if the reader must click something.
-      const result = await openSourceBrowser(sourceId, { closeWhenPassed: true });
-      toast({ description: result.message });
-      if (result.saved) {
-        await queryClient.invalidateQueries({ queryKey: sourceSessionKey(sourceId) });
-        onSaved?.();
-      } else {
-        setRefreshFailed(true);
+  const refresh = useCallback(
+    async (auto: boolean) => {
+      const state = await startSourceCheck(sourceId, { auto });
+      if (state?.status === 'passed' || state?.status === 'failed') {
+        toast({ description: state.message });
       }
-    } catch (reason) {
-      setRefreshFailed(true);
-      toast({
-        description:
-          reason instanceof Error && reason.message
-            ? reason.message
-            : `Couldn't refresh the session for ${sourceName}.`,
-      });
-    } finally {
-      setOpening(false);
-    }
-  }, [onSaved, queryClient, sourceId, sourceName]);
+    },
+    [sourceId],
+  );
 
   const warning = data ? clearanceWarning(data.cookies) : null;
 
@@ -140,7 +122,7 @@ export function SourceSessionManager({
     if (!desktop || !warning?.expired) return;
     if (autoRefreshAttempted.get(sourceId) === warning.expiresAt) return;
     autoRefreshAttempted.set(sourceId, warning.expiresAt);
-    void refresh();
+    void refresh(true);
   }, [desktop, refresh, sourceId, warning?.expired, warning?.expiresAt]);
 
   let host = '';
@@ -211,7 +193,7 @@ export function SourceSessionManager({
         )}
         {desktop && warning && refreshFailed && !opening && (
           <div className="mt-2">
-            <button type="button" onClick={() => void refresh()} className={button}>
+            <button type="button" onClick={() => void refresh(false)} className={button}>
               Try refreshing in browser
             </button>
           </div>
