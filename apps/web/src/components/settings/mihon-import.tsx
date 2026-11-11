@@ -15,7 +15,7 @@ import { replaceBackupBodySchema, RESTORE_UPLOAD_LIMIT_BYTES } from '@projekt-ma
 import { toast } from '@/hooks/use-toast';
 import { Field } from '@/components/settings/field-controls';
 import { parseBackup } from '@/lib/backup-validation';
-import { savePendingRestore, clearPendingRestore } from '@/lib/restore-job';
+import { savePendingRestore, clearPendingRestore, markRestoreAccepted } from '@/lib/restore-job';
 import {
   buildMihonImport,
   findTitlesInSources,
@@ -248,6 +248,7 @@ export function MihonImport({
         });
         saveMihonImportExtras(jobId, owner, step.built.extras);
         await startReplaceRestore(parsed.data);
+        markRestoreAccepted(jobId);
       })
       .then(() => {
         toast({
@@ -263,6 +264,9 @@ export function MihonImport({
         )) {
           clearPendingRestore(jobId);
           clearMihonImportExtras(jobId);
+        } else {
+          // The upload may still have arrived; give the server its grace period from now.
+          markRestoreAccepted(jobId);
         }
         toast({
           description: error instanceof Error ? error.message : "Couldn't start the import.",

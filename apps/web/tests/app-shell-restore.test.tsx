@@ -47,8 +47,8 @@ vi.mock('@/components/automatic-desktop-sync', () => ({
 vi.mock('@/components/restore-job-monitor', () => ({
   RestoreJobMonitor: () => <span>Restore monitor</span>,
 }));
-vi.mock('@/components/restore-blocking-screen', () => ({
-  RestoreBlockingScreen: () => <span>Restore blocker</span>,
+vi.mock('@/components/restore-status-card', () => ({
+  RestoreStatusCard: () => <span>Restore status</span>,
 }));
 
 import { AppShell } from '@/components/app-shell';
@@ -70,14 +70,14 @@ function Reader() {
   return <button onClick={() => setPage(page + 1)}>Reader page {page}</button>;
 }
 
-it('stops mounted route effects during restore and remounts fresh route state after completion', () => {
+it('keeps the reader open and usable while a restore runs in the background', () => {
+  route.pathname = '/reader/chapter';
   const view = render(
     <AppShell>
       <Reader />
     </AppShell>,
   );
   fireEvent.click(screen.getByRole('button', { name: 'Reader page 1' }));
-  expect(screen.getByRole('button', { name: 'Reader page 2' })).toBeInTheDocument();
 
   restore.pending = true;
   view.rerender(
@@ -85,15 +85,15 @@ it('stops mounted route effects during restore and remounts fresh route state af
       <Reader />
     </AppShell>,
   );
-  expect(screen.queryByRole('button', { name: /Reader page/ })).not.toBeInTheDocument();
-  expect(unmountReader).toHaveBeenCalledTimes(1);
+  // Still reading, on the same page, with the restore shown beside it.
+  fireEvent.click(screen.getByRole('button', { name: 'Reader page 2' }));
+  expect(screen.getByRole('button', { name: 'Reader page 3' })).toBeInTheDocument();
+  expect(unmountReader).not.toHaveBeenCalled();
+  expect(screen.getByText('Restore status')).toBeInTheDocument();
   expect(screen.getByText('Restore monitor')).toBeInTheDocument();
-  expect(screen.getByText('Restore blocker')).toBeInTheDocument();
+  // What writes in bulk still waits: the restore holds the database's write lock.
   expect(screen.getByTestId('library-suspended')).toHaveTextContent('true');
   expect(screen.getByTestId('sync-ready')).toHaveTextContent('false');
-  fireEvent.keyDown(window, { key: 'g' });
-  fireEvent.keyDown(window, { key: 'l' });
-  expect(push).not.toHaveBeenCalled();
 
   restore.pending = false;
   view.rerender(
@@ -101,35 +101,21 @@ it('stops mounted route effects during restore and remounts fresh route state af
       <Reader />
     </AppShell>,
   );
-  expect(screen.getByRole('button', { name: 'Reader page 1' })).toBeInTheDocument();
+  // Not sent away from the chapter when it finishes.
+  expect(screen.getByRole('button', { name: 'Reader page 3' })).toBeInTheDocument();
+  expect(replace).not.toHaveBeenCalled();
   expect(screen.getByTestId('library-suspended')).toHaveTextContent('false');
   expect(screen.getByTestId('sync-ready')).toHaveTextContent('true');
 });
 
-it.each(['/reader/chapter', '/discover/preview/source/title/read'])(
-  'leaves %s after restore without mounting stale reader props',
-  (pathname) => {
-    route.pathname = pathname;
-    restore.pending = true;
-    const view = render(
-      <AppShell>
-        <Reader />
-      </AppShell>,
-    );
-    restore.pending = false;
-    view.rerender(
-      <AppShell>
-        <Reader />
-      </AppShell>,
-    );
-    expect(replace).toHaveBeenCalledWith('/');
-    expect(screen.queryByRole('button', { name: /Reader page/ })).not.toBeInTheDocument();
-    route.pathname = '/';
-    view.rerender(
-      <AppShell>
-        <span>Restored library</span>
-      </AppShell>,
-    );
-    expect(screen.getByText('Restored library')).toBeInTheDocument();
-  },
-);
+it('keeps keyboard shortcuts working during a restore', () => {
+  restore.pending = true;
+  render(
+    <AppShell>
+      <span>Library</span>
+    </AppShell>,
+  );
+  fireEvent.keyDown(document.body, { key: 'g' });
+  fireEvent.keyDown(document.body, { key: 'd' });
+  expect(push).toHaveBeenCalledWith('/discover');
+});

@@ -148,6 +148,72 @@ test('merge reconciliation keeps local progress while replace discards it', asyn
   }
 });
 
+test('a replace restore keeps reading done while it ran, and sends it next', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    await withStore(async (store) => {
+      store.upsertManga({ id: 'manga-1', slug: 'slug-1', title: 'Local', source: 'source-a' });
+      store.upsertChapter(serverChapter('chapter-1', 1));
+      store.upsertChapter(serverChapter('chapter-2', 2));
+      // Before the restore: replaced by it, as a replace should.
+      store.updateChapterProgress(ref('chapter-1'), 8);
+      const startedAt = Date.now();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      // While it ran: the reader kept going.
+      store.updateChapterProgress(ref('chapter-2'), 6);
+      store.addHistory({
+        source: 'source-a',
+        manga_slug: 'slug-1',
+        manga_id: 'manga-1',
+        title: 'Local',
+        source_chapter_key: 'chapter-2',
+        pages_read: 6,
+        time_read: 30,
+      });
+      const details = {
+        id: 'manga-1',
+        slug: 'slug-1',
+        title: 'Server',
+        source: 'source-a',
+        chapters: [
+          serverChapter('chapter-1', 1, { last_page_read: 2 }),
+          serverChapter('chapter-2', 2, { last_page_read: 0 }),
+        ],
+      };
+      globalThis.fetch = async (url) => {
+        const path = new URL(url).pathname;
+        const data = path.endsWith('/manga/details/manga-1')
+          ? details
+          : path.endsWith('/manga')
+            ? [{ id: 'manga-1' }]
+            : [];
+        return new Response(JSON.stringify({ success: true, data }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      };
+
+      await store.reconcileRestoreFromServer(
+        'http://127.0.0.1:4000/api',
+        'replace',
+        new Date(startedAt).toISOString(),
+      );
+
+      const chapters = store.getMangaDetails('manga-1').chapters;
+      assert.equal(chapters.find((c) => c.id === 'chapter-1').last_page_read, 2);
+      assert.equal(chapters.find((c) => c.id === 'chapter-2').last_page_read, 6);
+      // And it waits to be sent, rather than counting as already pushed.
+      const pending = store.getPendingChanges();
+      assert.deepEqual(
+        pending.chapter_state.map((row) => [row.source_chapter_key, row.last_page_read]),
+        [['chapter-2', 6]],
+      );
+      assert.equal(pending.history.length, 1);
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('a stale desktop generation reconciles before it can push offline progress', async () => {
   const originalFetch = globalThis.fetch;
   try {

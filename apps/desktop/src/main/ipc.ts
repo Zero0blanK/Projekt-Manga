@@ -278,10 +278,19 @@ async function dispatchDataInvoke(
     }
     if (a.mode !== undefined && a.mode !== 'merge' && a.mode !== 'replace')
       throw new Error('Invalid restore mode');
+    // When the restore started, so reading done while it ran is kept. A time in the
+    // future would keep nothing extra, one before 2000 everything unsent: both harmless,
+    // but anything that isn't a plain timestamp is refused.
+    if (
+      a.startedAt !== undefined &&
+      (typeof a.startedAt !== 'number' || !Number.isFinite(a.startedAt) || a.startedAt < 0)
+    )
+      throw new Error('Invalid restore start time');
     return ok(
       await localStore.reconcileRestoreFromServer(
         resolveApiUrl(),
         a.mode === 'merge' ? 'merge' : 'replace',
+        typeof a.startedAt === 'number' ? new Date(a.startedAt).toISOString() : undefined,
       ),
     );
   }

@@ -17,6 +17,7 @@ vi.mock('@projekt-manga/api-client', () => ({
   cancelReplaceRestore: vi.fn(),
   hasLocalDataBridge: () => false,
   localInvoke: vi.fn(),
+  setProgressWriteHold: vi.fn(),
 }));
 vi.mock('@/hooks/use-toast', () => ({ toast: vi.fn() }));
 vi.mock('@/lib/app-store', () => ({ setState: vi.fn() }));
