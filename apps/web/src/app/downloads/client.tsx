@@ -6,6 +6,7 @@ import { OpenFolderButton } from '@/components/downloads/open-folder-button';
 
 import { useDownloadRows } from '@/components/downloads/row-data';
 import { StorageStats } from '@/components/downloads/storage-stats';
+import { RestoreDownloads } from '@/components/downloads/restore-downloads';
 import { ActiveDownloadsList } from '@/components/downloads/active-downloads-list';
 import { CompletedDownloadsList } from '@/components/downloads/completed-downloads-list';
 import { PageShell, PageHeader, PageBody } from '@/components/page-shell';
@@ -49,6 +50,7 @@ export function DownloadsPageClient() {
             </button>
           </div>
         )}
+        <RestoreDownloads onRestored={refresh} />
         <StorageStats />
         {loading && active.length === 0 && completed.length === 0 ? (
           <>

@@ -358,6 +358,8 @@ model restore_job {
   id          String   @id
   owner       String
   request_id  String?
+  /// Times the worker has started this job; see restoreJob.repository.ts requeueInterrupted.
+  attempts    Int      @default(0)
   state       String
   payload     String
   result      String?

@@ -4,6 +4,15 @@ import {
   addHistoryBodySchema,
   replaceBackupBodySchema,
 } from '@projekt-manga/schemas';
+import { z } from 'zod';
+
+/**
+ * A title as an export carries it. Unlike adding a title, a cover is not required: a title
+ * restored from downloads whose source never gave one has an empty cover, and the server's
+ * restore accepts it (replaceBackupBodySchema). Without this the reader's own export of such
+ * a title could not be imported again.
+ */
+const exportedTitleSchema = addMangaBodySchema.extend({ thumbnail_url: z.string().max(2048) });
 
 export type BackupPayload = {
   version: 2;
@@ -95,7 +104,7 @@ export function parseBackup(value: unknown): BackupPayload {
       !Array.isArray(entry.chapters) ||
       typeof entry.id !== 'string' ||
       !entry.id ||
-      !addMangaBodySchema.safeParse({
+      !exportedTitleSchema.safeParse({
         source: entry.source,
         title: entry.title,
         slug: entry.slug,

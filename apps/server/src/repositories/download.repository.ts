@@ -21,6 +21,51 @@ class DownloadRepository {
     });
   }
 
+  async getDownloadsByChapterId(chapter_id: string) {
+    return await prisma.download.findMany({ where: { chapter_id } });
+  }
+
+  /** A chapter whose pages are already on disk: a download found again, not a new one. */
+  async createRestoredDownload(data: {
+    manga_id: string;
+    chapter_id: string;
+    source_id: string;
+    file_path: string;
+    downloaded_path: string;
+    pages: number;
+  }) {
+    const { pages, ...row } = data;
+    return await prisma.download.create({
+      data: {
+        ...row,
+        status: 'COMPLETED',
+        pages_total: pages,
+        pages_downloaded: pages,
+        current_page: pages,
+        completed_at: new Date(),
+      },
+    });
+  }
+
+  /** Points a download whose folder went missing at the copy of it that was found. */
+  async relinkDownload(
+    id: string,
+    data: { file_path: string; downloaded_path: string; pages: number },
+  ) {
+    return await prisma.download.update({
+      where: { id },
+      data: {
+        file_path: data.file_path,
+        downloaded_path: data.downloaded_path,
+        status: 'COMPLETED',
+        pages_total: data.pages,
+        pages_downloaded: data.pages,
+        current_page: data.pages,
+        completed_at: new Date(),
+      },
+    });
+  }
+
   async getDownloadById(id: string) {
     return await prisma.download.findUnique({
       where: { id },

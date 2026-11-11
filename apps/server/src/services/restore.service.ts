@@ -137,7 +137,17 @@ export async function cancelRestore(id: string, userId?: string): Promise<Job> {
 /** Resume interrupted work before the API starts accepting requests. */
 export async function recoverRestoreJobs(): Promise<void> {
   await restoreJobRepository.pruneFinished(new Date(Date.now() - FINISHED_JOB_RETENTION_MS));
-  const queued = await restoreJobRepository.requeueInterrupted();
+  const { queued, abandoned } = await restoreJobRepository.requeueInterrupted();
+  for (const job of abandoned) {
+    recordDiagnosticEvent({
+      level: 'error',
+      area: 'restore',
+      event: 'restore.job_abandoned',
+      requestId: job.request_id,
+      jobId: job.id,
+      code: 'RESTORE_INTERRUPTED',
+    });
+  }
   for (const job of queued) {
     recordDiagnosticEvent({
       level: 'info',

@@ -10,6 +10,8 @@ import type {
   DownloadedPage,
   DownloadWorkerStatus,
   DownloadProgressEvent,
+  DownloadRestoreScan,
+  DownloadRestoreResult,
 } from '@projekt-manga/types';
 export type {
   InitiateDownloadChapter,
@@ -22,6 +24,10 @@ export type {
   DownloadedPage,
   DownloadWorkerStatus,
   DownloadProgressEvent,
+  DownloadRestoreScan,
+  DownloadRestoreResult,
+  RestorableTitle,
+  RestorableTitleStatus,
 } from '@projekt-manga/types';
 
 export const initiateDownload = (input: InitiateDownloadInput, signal?: AbortSignal) =>
@@ -68,6 +74,19 @@ export const cleanupOrphanedDownloadFolders = (ids: string[]) =>
   request<{ removed: number; freedBytes: number }>('/downloads/orphans/cleanup', {
     method: 'POST',
     body: { ids },
+  });
+
+/** Looks for downloads the app has no record of, in `root` or in the folders it knows. */
+export const scanForDownloadsToRestore = (root?: string, signal?: AbortSignal) =>
+  request<DownloadRestoreScan>('/downloads/restore/scan', {
+    signal,
+    query: root ? { root } : undefined,
+  });
+
+export const restoreDownloads = (titles: string[], root?: string) =>
+  request<DownloadRestoreResult>('/downloads/restore', {
+    method: 'POST',
+    body: { titles, ...(root ? { root } : {}) },
   });
 
 export const isChapterDownloaded = (chapterId: string, signal?: AbortSignal) =>

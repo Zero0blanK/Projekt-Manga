@@ -21,6 +21,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 const OPEN_PATH_CHANNEL = 'desktop:open-path';
+const PICK_FOLDER_CHANNEL = 'desktop:pick-folder';
 const DATA_INVOKE_CHANNEL = 'desktop:data:invoke';
 const AUTH_CLEAR_CACHED_SESSION_CHANNEL = 'desktop:auth:clear-cached-session';
 const AUTH_SYNC_CACHED_SESSION_CHANNEL = 'desktop:auth:sync-cached-session';
@@ -90,6 +91,8 @@ contextBridge.exposeInMainWorld('desktop', {
     remove: (id: string) => ipcRenderer.invoke('desktop:archives:remove', id),
   },
   openPath: (targetPath: string) => ipcRenderer.invoke(OPEN_PATH_CHANNEL, targetPath),
+  // The OS folder picker. Resolves to { success, data: path | null }.
+  pickFolder: (title?: string) => ipcRenderer.invoke(PICK_FOLDER_CHANNEL, title),
   // Consumed by apps/web/src/lib/api-config.ts, which passes it to `configureApiClient`
   // before the first request. Absent in a plain browser, where the build-time
   // NEXT_PUBLIC_API_URL is used instead.

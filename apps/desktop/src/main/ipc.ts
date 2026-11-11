@@ -7,6 +7,7 @@
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   nativeImage,
   shell,
@@ -277,10 +278,19 @@ async function dispatchDataInvoke(
     }
     if (a.mode !== undefined && a.mode !== 'merge' && a.mode !== 'replace')
       throw new Error('Invalid restore mode');
+    // When the restore started, so reading done while it ran is kept. A time in the
+    // future would keep nothing extra, one before 2000 everything unsent: both harmless,
+    // but anything that isn't a plain timestamp is refused.
+    if (
+      a.startedAt !== undefined &&
+      (typeof a.startedAt !== 'number' || !Number.isFinite(a.startedAt) || a.startedAt < 0)
+    )
+      throw new Error('Invalid restore start time');
     return ok(
       await localStore.reconcileRestoreFromServer(
         resolveApiUrl(),
         a.mode === 'merge' ? 'merge' : 'replace',
+        typeof a.startedAt === 'number' ? new Date(a.startedAt).toISOString() : undefined,
       ),
     );
   }
@@ -473,6 +483,22 @@ export function registerIpcHandlers(
       throw new Error(error);
     }
     return { ok: true };
+  });
+
+  // Picks a folder for the app to read, such as one holding downloads from an earlier
+  // install. The path comes from the OS dialog, never from the renderer; the title is the
+  // only thing the page chooses, and it is shortened and stripped of control characters.
+  handleFromApp(DESKTOP_CHANNELS.pickFolder, async (event, rawTitle: unknown) => {
+    const title =
+      typeof rawTitle === 'string'
+        ? rawTitle.replace(/\p{Cc}/gu, ' ').slice(0, 120)
+        : 'Choose a folder';
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const options = { title, properties: ['openDirectory' as const] };
+    const selection = owner
+      ? await dialog.showOpenDialog(owner, options)
+      : await dialog.showOpenDialog(options);
+    return ok(selection.canceled ? null : (selection.filePaths[0] ?? null));
   });
 
   ipcMain.handle(

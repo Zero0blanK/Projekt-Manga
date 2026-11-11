@@ -2,6 +2,7 @@ import type { Chapters } from '@projekt-manga/types';
 import { request } from './client.js';
 import { localInvoke, usesLocalFirstData } from './runtime.js';
 import { addHistory } from './history.js';
+import { awaitProgressWrite } from './progressHold.js';
 import type { MangaChapterRecord, MangaWithDetails } from './manga.js';
 import type {
   ChapterBulkPayload,
@@ -48,6 +49,8 @@ export const markChapterAsRead = async (
       chapter: localChapterStub(mangaSlug, sourceChapterKey, chapterMeta),
     }).then(() => ({ count: 1 }));
   }
+  // Held while a restore runs (progressHold.ts); a newer save for the chapter replaces it.
+  if (!(await awaitProgressWrite(`chapter:${mangaSlug}:${sourceChapterKey}`))) return { count: 0 };
   return request<UpdateResult>(
     `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/mark-read`,
     { method: 'POST', body: chapterMeta },
@@ -65,6 +68,7 @@ export const markChapterAsUnread = async (
       chapter: localChapterStub(mangaSlug, sourceChapterKey, chapterMeta),
     }).then(() => ({ count: 1 }));
   }
+  if (!(await awaitProgressWrite(`chapter:${mangaSlug}:${sourceChapterKey}`))) return { count: 0 };
   return request<UpdateResult>(
     `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/mark-unread`,
     { method: 'POST', body: chapterMeta },
@@ -83,6 +87,7 @@ export const markChapterByLastPage = async (
       chapter: localChapterStub(mangaSlug, sourceChapterKey, chapterMeta),
     }).then(() => ({ count: 1 }));
   }
+  if (!(await awaitProgressWrite(`chapter:${mangaSlug}:${sourceChapterKey}`))) return { count: 0 };
   return request<UpdateResult>(
     `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/${lastPageRead}/mark-by-page`,
     { method: 'POST', body: chapterMeta },
@@ -96,6 +101,8 @@ const markChaptersBulk = async (
   manga?: BulkMarkMangaMeta,
 ): Promise<BulkMarkResult> => {
   if (!(await usesLocalFirstData())) {
+    // A bulk mark is one deliberate action, so it waits but is never replaced.
+    await awaitProgressWrite(`bulk:${crypto.randomUUID()}`);
     return request<BulkMarkResult>(
       `/chapter/${encode(mangaSlug)}/bulk-mark-${isRead ? 'read' : 'unread'}`,
       { method: 'POST', body: { chapters, ...manga } },

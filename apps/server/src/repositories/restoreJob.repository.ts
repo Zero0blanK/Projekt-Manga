@@ -3,11 +3,19 @@ import { DuplicateResourceError, NotFoundError } from '../utils/customErrors.js'
 
 const ACTIVE_STATES = ['queued', 'running'];
 
+/**
+ * How many times a job may be started. A job found running at startup was interrupted:
+ * resumed once in case the crash was unrelated, then failed, in case the restore itself is
+ * what brings the server down. Failing is safe: the restore is one transaction, so an
+ * interrupted attempt left the library as it was.
+ */
+export const MAX_RESTORE_ATTEMPTS = 2;
+
 /** Takes a queued job for the worker. False when something else got there first. */
 const claim = async (id: string): Promise<boolean> => {
   const claimed = await prisma.restore_job.updateMany({
     where: { id, state: 'queued' },
-    data: { state: 'running' },
+    data: { state: 'running', attempts: { increment: 1 } },
   });
   return claimed.count === 1;
 };
@@ -54,15 +62,30 @@ const cancelQueued = async (id: string, owner: string) => {
   });
 };
 
-/** Puts jobs a crash left running back in the queue, and lists the queue. */
-const requeueInterrupted = async () => {
-  await prisma.restore_job.updateMany({ where: { state: 'running' }, data: { state: 'queued' } });
-  return prisma.restore_job.findMany({
-    where: { state: 'queued' },
-    select: { id: true, request_id: true },
-    orderBy: { created_at: 'asc' },
+/**
+ * Settles jobs a crash left running, then lists the queue. Those with attempts to spare go
+ * back in the queue; the rest are failed and returned as `abandoned`.
+ */
+const requeueInterrupted = async () =>
+  prisma.$transaction(async (tx) => {
+    const abandoned = await tx.restore_job.findMany({
+      where: { state: 'running', attempts: { gte: MAX_RESTORE_ATTEMPTS } },
+      select: { id: true, request_id: true },
+    });
+    if (abandoned.length) {
+      await tx.restore_job.updateMany({
+        where: { id: { in: abandoned.map((job) => job.id) } },
+        data: { state: 'failed', payload: '' },
+      });
+    }
+    await tx.restore_job.updateMany({ where: { state: 'running' }, data: { state: 'queued' } });
+    const queued = await tx.restore_job.findMany({
+      where: { state: 'queued' },
+      select: { id: true, request_id: true },
+      orderBy: { created_at: 'asc' },
+    });
+    return { queued, abandoned };
   });
-};
 
 /** Finished jobs only exist so a client can read the outcome; a month is plenty. */
 const pruneFinished = async (olderThan: Date) => {

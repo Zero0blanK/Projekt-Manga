@@ -2090,6 +2090,38 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /downloads/restore/scan:
+    get:
+      tags: [Downloads]
+      summary: 'Find downloads on disk the app has no record of'
+      description: >-
+        Looks through the folders downloads have been saved to, or the folder named by
+        `root` (admin only), for chapter folders no download refers to, and says which
+        titles they are and what could be restored.
+      parameters:
+        - name: root
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /downloads/restore:
+    post:
+      tags: [Downloads]
+      summary: 'Add downloads found on disk back to the app'
+      description: >-
+        Restores the chosen titles from a scan: their records are created, or pointed at the
+        folders found, without changing anything on disk. Naming `root` is admin only.
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
   /downloads/storage-limit:
     patch:
       tags: [Downloads]

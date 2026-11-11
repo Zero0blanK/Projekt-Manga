@@ -36,6 +36,7 @@ import {
   removeOrphanedDownloadFolder,
   type OrphanedDownloadFolder,
 } from '../utils/downloadOrphans.js';
+import { isRestorableChapterFolder, sanitizePathSegment } from '../utils/downloadIdentity.js';
 
 /** HTTP status off an axios-shaped rejection, or undefined for anything else (a DNS
  * failure, an abort, a non-axios throw). Replaces an `as any` reach into `.response` —
@@ -62,27 +63,15 @@ const pageExtensionByType: Record<string, string> = {
 };
 const pageFilename = (page: number, ext: string) => `page_${String(page).padStart(3, '0')}.${ext}`;
 
-/** Strips characters that are invalid in filenames on Windows/POSIX and neutralizes
- * path-separator characters so a crafted title can never add extra path segments
- * (and therefore can't escape the download directory via `..`). */
-function sanitizePathSegment(value: string): string {
-  const cleaned = value
-    // The control-character range is deliberate, not a stray escape: a chapter
-    // title scraped from a source can carry them, and they are illegal in
-    // filenames on every platform this runs on.
-    // eslint-disable-next-line no-control-regex
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-    .replace(/^\.+/, '_')
-    .trim();
-  return cleaned.length > 0 ? cleaned : 'untitled';
-}
-
 class DownloadService {
   /** A conservative default for a self-hosted reader. It protects storage without ever
    * deleting completed chapters behind the reader's back. */
   private static readonly DEFAULT_DOWNLOAD_STORAGE_BYTES = 10 * 1024 * 1024 * 1024;
   private storageLimitBytes = DownloadService.DEFAULT_DOWNLOAD_STORAGE_BYTES;
   private readonly storageConfigPath: string;
+  /** The download folder chosen in Settings. Without it the choice lasted only until the
+   * server restarted, and new downloads quietly went back to the default folder. */
+  private readonly folderConfigPath: string;
   private static readonly MAX_PAGE_BYTES = 50 * 1024 * 1024;
   private downloadDir: string =
     process.env.DOWNLOAD_DIR || DownloadService.resolveDefaultDownloadDir();
@@ -110,10 +99,12 @@ class DownloadService {
   }
 
   constructor() {
-    this.ensureDownloadDir();
     const databaseUrl = process.env.DATABASE_URL?.trim() || 'file:./data/projektmanga.db';
     const databaseFile = path.resolve(databaseUrl.slice('file:'.length));
     this.storageConfigPath = path.join(path.dirname(databaseFile), 'download-storage.json');
+    this.folderConfigPath = path.join(path.dirname(databaseFile), 'download-folder.json');
+    if (process.env.NODE_ENV !== 'test') this.loadSavedDownloadDir();
+    this.ensureDownloadDir();
     if (process.env.NODE_ENV !== 'test') {
       try {
         const saved: unknown = JSON.parse(fs.readFileSync(this.storageConfigPath, 'utf8'));
@@ -148,6 +139,46 @@ class DownloadService {
   }
 
   /**
+   * Uses the folder saved by `setDownloadDir`, when it is still there.
+   *
+   * A folder on a drive that is no longer attached is not created again somewhere it
+   * doesn't belong, and must not stop the server starting: downloads go to the usual folder
+   * until the drive is back, and the saved choice is kept for then.
+   */
+  private loadSavedDownloadDir() {
+    try {
+      const saved: unknown = JSON.parse(fs.readFileSync(this.folderConfigPath, 'utf8'));
+      if (!saved || typeof saved !== 'object' || !('dir' in saved)) return;
+      const dir = saved.dir;
+      if (typeof dir !== 'string' || !path.isAbsolute(dir)) return;
+      if (!fs.statSync(dir).isDirectory()) return;
+      this.downloadDir = path.resolve(dir);
+    } catch (error) {
+      if (!isMissingFile(error)) {
+        console.warn(
+          'The saved download folder could not be used; downloading to the default folder until it is available again.',
+        );
+      }
+    }
+  }
+
+  private saveDownloadDirChoice(dir: string | null) {
+    if (process.env.NODE_ENV === 'test') return;
+    try {
+      if (dir === null) {
+        fs.rmSync(this.folderConfigPath, { force: true });
+        return;
+      }
+      fs.mkdirSync(path.dirname(this.folderConfigPath), { recursive: true });
+      const temporary = `${this.folderConfigPath}.${randomUUID()}.tmp`;
+      fs.writeFileSync(temporary, JSON.stringify({ dir }), { mode: 0o600 });
+      fs.renameSync(temporary, this.folderConfigPath);
+    } catch {
+      console.warn('The download folder could not be saved; it applies until the app restarts.');
+    }
+  }
+
+  /**
    * Resolves a path that must land inside the active download directory. Throws if it
    * doesn't — the last line of defense against a path-traversal write/read.
    */
@@ -165,6 +196,7 @@ class DownloadService {
     this.storageUsageBytes = null;
     this.ensureDownloadDir();
     this.downloadDir = this.pathPolicy.approve(this.downloadDir);
+    this.saveDownloadDirChoice(this.downloadDir);
     return this.downloadDir;
   }
 
@@ -173,7 +205,18 @@ class DownloadService {
     this.storageUsageBytes = null;
     this.ensureDownloadDir();
     this.downloadDir = this.pathPolicy.approve(this.downloadDir);
+    this.saveDownloadDirChoice(null);
     return this.downloadDir;
+  }
+
+  /** Every folder downloads have been saved to, the current one included. */
+  getKnownDownloadRoots(): string[] {
+    return this.pathPolicy.getApprovedRoots();
+  }
+
+  /** Lets the app read from a folder found to hold earlier downloads. */
+  approveDownloadRoot(dir: string): string {
+    return this.pathPolicy.approve(path.resolve(dir));
   }
 
   getDownloadDir(): string {
@@ -356,12 +399,28 @@ class DownloadService {
     }
   }
 
-  async getOrphanedDownloadFolders(): Promise<OrphanedDownloadFolder[]> {
+  /**
+   * Chapter folders no download row refers to, that can only be deleted.
+   *
+   * A complete chapter that can be identified is left out: after a reinstall with fresh app
+   * data, every download is such a folder, and offering to delete them all would be the
+   * worst possible answer. The Downloads page offers those for restoring instead
+   * (services/downloadRestore.service.ts).
+   */
+  private async listDeletableOrphans() {
     const references = await this.getReferencedDownloadPaths();
     const candidates = await listOrphanedDownloadFolders(
       this.pathPolicy.getApprovedRoots(),
       references,
     );
+    const restorable = await mapConcurrent(candidates, 8, (candidate) =>
+      isRestorableChapterFolder(candidate.absolutePath),
+    );
+    return candidates.filter((_, index) => !restorable[index]);
+  }
+
+  async getOrphanedDownloadFolders(): Promise<OrphanedDownloadFolder[]> {
+    const candidates = await this.listDeletableOrphans();
     return candidates.map(({ absolutePath: _absolutePath, ...candidate }) => candidate);
   }
 
@@ -369,9 +428,7 @@ class DownloadService {
     ids: string[],
   ): Promise<{ removed: number; freedBytes: number }> {
     return this.withFolderMaintenanceLock(async () => {
-      const roots = this.pathPolicy.getApprovedRoots();
-      const references = await this.getReferencedDownloadPaths();
-      const candidates = await listOrphanedDownloadFolders(roots, references);
+      const candidates = await this.listDeletableOrphans();
       const selectedIds = new Set(ids);
       let removed = 0;
       let freedBytes = 0;
@@ -392,7 +449,8 @@ class DownloadService {
     });
   }
 
-  private async getReferencedDownloadPaths(): Promise<Set<string>> {
+  /** Folders download rows point at, as written and as their real paths. */
+  async getReferencedDownloadPaths(): Promise<Set<string>> {
     const roots = this.pathPolicy.getApprovedRoots();
     const downloads = await downloadRepository.getAllDownloads();
     const references = new Set<string>();

@@ -29,3 +29,25 @@ export const cleanupOrphanedDownloadsBodySchema = z.object({
     .max(200),
 });
 export type CleanupOrphanedDownloadsBody = z.infer<typeof cleanupOrphanedDownloadsBodySchema>;
+
+/** A folder to look for earlier downloads in; without one, the folders the app knows. */
+const restoreRootSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1000)
+  // A drive (C:\ or C:/), a network share (\\server) or a POSIX absolute path.
+  .refine((value) => /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(value), 'Enter a full folder path')
+  .optional();
+
+export const scanDownloadsQuerySchema = z.object({ root: restoreRootSchema });
+export type ScanDownloadsQuery = z.infer<typeof scanDownloadsQuerySchema>;
+
+export const restoreDownloadsBodySchema = z.object({
+  root: restoreRootSchema,
+  titles: z
+    .array(z.string().regex(/^[a-f0-9]{64}$/))
+    .min(1)
+    .max(1000),
+});
+export type RestoreDownloadsBody = z.infer<typeof restoreDownloadsBodySchema>;
