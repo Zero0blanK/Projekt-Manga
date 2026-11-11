@@ -1125,6 +1125,9 @@ try {
     await setReaderSetting('pageLayout', 'Single page');
     await page.reload();
     await page.locator('img[alt*="page"]').first().waitFor({ state: 'attached' });
+    // The first page shows before the chapter's page count arrives; End pressed while the
+    // reader still counts one page has nowhere to go, so wait for the real total first.
+    await page.getByText('1 / 2', { exact: true }).first().waitFor({ state: 'attached' });
     await page.keyboard.press('End');
     await page.getByText('2 / 2', { exact: true }).first().waitFor({ state: 'attached' });
     await page.keyboard.press('Home');
