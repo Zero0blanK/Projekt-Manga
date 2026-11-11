@@ -946,11 +946,11 @@ try {
       () => localStorage.getItem('projekt-manga-pending-restore') !== null,
       { timeout: 10_000 },
     );
-    await page.getByRole('alertdialog', { name: 'Restoring your library' }).waitFor();
+    await page.getByRole('status', { name: 'Restoring your library' }).waitFor();
     const secondBrowserWindow = await browserContext.newPage();
     await secondBrowserWindow.goto(`${webUrl}/settings`);
     await secondBrowserWindow
-      .getByRole('alertdialog', { name: 'Restoring your library' })
+      .getByRole('status', { name: 'Restoring your library' })
       .waitFor();
     fixtureRestoreComplete = true;
     await page.waitForFunction(
@@ -967,7 +967,7 @@ try {
     restorePreviews.length = 0;
     fixtureRestoreComplete = false;
     console.log(
-      'Browser smoke passed: source search, paging, hiding library titles, cross-window restore blocking, retry, and mobile nav.',
+      'Browser smoke passed: source search, paging, hiding library titles, cross-window restore status, retry, and mobile nav.',
     );
     await page.route('**/api/source/image-proxy**', (route) =>
       route.fulfill({
@@ -2019,7 +2019,7 @@ try {
       () => localStorage.getItem('projekt-manga-pending-restore') !== null,
       { timeout: 10_000 },
     );
-    await page.getByRole('alertdialog', { name: 'Restoring your library' }).waitFor();
+    await page.getByRole('status', { name: 'Restoring your library' }).waitFor();
     fixtureRestoreComplete = true;
     await page.waitForFunction(
       () => localStorage.getItem('projekt-manga-pending-restore') === null,

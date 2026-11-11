@@ -264,7 +264,7 @@ async function submitRestoreFromPrivacy(page, prefix, webUrl) {
     () => JSON.parse(localStorage.getItem('projekt-manga-pending-restore') ?? '{}').id,
   );
   assert.equal(typeof jobId, 'string');
-  await page.getByRole('alertdialog', { name: 'Restoring your library' }).waitFor();
+  await page.getByRole('status', { name: 'Restoring your library' }).waitFor();
   return { jobId, titleSlug, chapterId };
 }
 
@@ -362,12 +362,12 @@ try {
     ['queued', 'running'].includes(persistedRestoreState(workDir, browserRestore.jobId)),
     'The first server must stop before the restore reaches a terminal state',
   );
-  await page.getByRole('alertdialog', { name: 'Restoring your library' }).waitFor();
+  await page.getByRole('status', { name: 'Restoring your library' }).waitFor();
 
   restartedServer = startServer(workDir, port, databaseUrl);
   await waitForHealth(restartedServer, baseUrl);
   await page
-    .getByRole('alertdialog', { name: 'Restoring your library' })
+    .getByRole('status', { name: 'Restoring your library' })
     .waitFor({ state: 'hidden', timeout: 20_000 });
   await page.waitForFunction(() => localStorage.getItem('projekt-manga-pending-restore') === null, {
     timeout: 2_000,
@@ -428,13 +428,13 @@ try {
       'The Electron server must stop before restore reaches a terminal state',
     );
     await electronConnection.page
-      .getByRole('alertdialog', { name: 'Restoring your library' })
+      .getByRole('status', { name: 'Restoring your library' })
       .waitFor();
 
     restartedServer = startServer(workDir, port, databaseUrl);
     await waitForHealth(restartedServer, baseUrl);
     await electronConnection.page
-      .getByRole('alertdialog', { name: 'Restoring your library' })
+      .getByRole('status', { name: 'Restoring your library' })
       .waitFor({ state: 'hidden', timeout: 20_000 });
     await electronConnection.page.waitForFunction(
       () => localStorage.getItem('projekt-manga-pending-restore') === null,
