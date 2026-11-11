@@ -11,7 +11,8 @@ import {
   uploadMangaCover,
   type UpdateMangaOverridePayload,
 } from '@projekt-manga/api-client';
-import { MANGA_COVER_MAX_BYTES, MANGA_COVER_MIME_TYPES } from '@projekt-manga/schemas';
+import { MANGA_COVER_MIME_TYPES } from '@projekt-manga/schemas';
+import { coverFileProblem } from '@/lib/cover-file';
 import {
   Dialog,
   DialogContent,
@@ -146,12 +147,9 @@ export function EditMangaDialog({ manga }: { manga: Manga }) {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    if (!(MANGA_COVER_MIME_TYPES as readonly string[]).includes(file.type)) {
-      toast({ description: 'Choose a JPEG, PNG, GIF, WebP or AVIF image.' });
-      return;
-    }
-    if (file.size > MANGA_COVER_MAX_BYTES) {
-      toast({ description: 'That image is larger than 5 MB.' });
+    const problem = coverFileProblem(file);
+    if (problem) {
+      toast({ description: problem });
       return;
     }
     setCover({ file, preview: URL.createObjectURL(file) });
