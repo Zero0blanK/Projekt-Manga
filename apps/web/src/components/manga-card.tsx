@@ -30,8 +30,11 @@ export function MangaCover({
   // progress is a read/total ratio, so the remainder is what's left unread.
   const unread = Math.max(0, manga.chapters - Math.round((manga.progress ?? 0) * manga.chapters));
   const showUnread = chapterBadge && unreadEnabled && unread > 0 && manga.inLibrary;
+  const anyPill = showUnread || showBadge;
   return (
-    <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl shadow-cover">
+    // A size container: the chips follow the cover's own width, not the window's. A cover
+    // is narrow on a wide window too, e.g. with the Recently Updated rail open.
+    <div className="@container relative aspect-[2/3] w-full overflow-hidden rounded-xl shadow-cover">
       <Cover
         sourceId={manga.source}
         src={manga.thumbnailUrl}
@@ -52,18 +55,21 @@ export function MangaCover({
         </div>
       )}
 
-      <div className="absolute inset-x-0 top-0 flex items-start justify-between p-3">
+      <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-1.5 p-2 @[11rem]:p-3">
+        {/* On a narrow cover the status gives way to the counts, and only the unread count
+            shows; the latest chapter returns once both fit. Truncation is the last guard. */}
         {statusBadge ? (
-          <div className="rounded-md bg-black/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white/90 backdrop-blur">
+          <div
+            className={`min-w-0 truncate rounded-md bg-black/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white/90 backdrop-blur ${anyPill ? 'hidden @[10rem]:block' : ''}`}
+          >
             {manga.status}
           </div>
         ) : (
           <span />
         )}
-        <div className="flex items-center gap-1.5">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {/* The unread pill says "unread" and the latest-chapter pill says "Ch." so the two
-              numbers can't be confused. On phones only the unread count shows, so the pills
-              don't cover a small cover. */}
+              numbers can't be confused. */}
           {showUnread && (
             <div
               className="whitespace-nowrap rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur"
@@ -75,7 +81,7 @@ export function MangaCover({
           )}
           {showBadge && (
             <div
-              className={`whitespace-nowrap rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-glow ${showUnread ? 'hidden sm:block' : ''}`}
+              className={`whitespace-nowrap rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-glow ${showUnread ? 'hidden @[14rem]:block' : ''}`}
               title={`Latest chapter: ${manga.latestChapterNum}`}
               aria-label={`Latest chapter ${manga.latestChapterNum}`}
             >
