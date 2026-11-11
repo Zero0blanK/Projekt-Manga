@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { getSourceBrowserSession } from '@projekt-manga/api-client';
 import { Loader2, ShieldQuestion } from 'lucide-react';
 import { getSetting } from '@/lib/app-store';
-import { AUTO_OPEN_CHALLENGE_SETTING } from '@/lib/source-browser';
+import { AUTO_OPEN_CHALLENGE_SETTING, sourceSessionKey } from '@/lib/source-browser';
 import {
   canCheckSources,
   onSourceCheckPassed,
@@ -40,6 +42,15 @@ export function SourceChallengeNotice({
   useEffect(() => setDesktop(canCheckSources()), []);
   const check = useSourceCheck(sourceId);
   const siteUrl = useSources().sources.find((source) => source.id === sourceId)?.base_url;
+  const { data: session } = useQuery({
+    queryKey: sourceSessionKey(sourceId),
+    queryFn: ({ signal }) => getSourceBrowserSession(sourceId, signal),
+    retry: false,
+  });
+  const hasSession = (session?.cookies.length ?? 0) > 0;
+  const savedSessionHint = hasSession
+    ? ' A session is already saved, but the site is asking again — it may have expired, or this server may reach the site from a different network than the browser that earned it.'
+    : '';
 
   // Start the check if nothing has yet: this notice can be the first to see the source ask.
   useEffect(() => {
@@ -103,6 +114,9 @@ export function SourceChallengeNotice({
               </button>
             </>
           )}
+          {savedSessionHint && check.status !== 'passed' && (
+            <p className="mt-2 text-muted-foreground">{savedSessionHint.trim()}</p>
+          )}
           {manual && !busy && (
             <details className="mt-3">
               <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
@@ -116,8 +130,8 @@ export function SourceChallengeNotice({
         <>
           <p className="text-muted-foreground">
             {sourceName} wants a browser check (Cloudflare) that the server can&apos;t pass on its
-            own. Open this source in the Projekt Manga desktop app, which passes it for you, or
-            paste a session from your browser below.
+            own.{savedSessionHint} Open this source in the Projekt Manga desktop app, which passes
+            it for you, or paste a session from your browser below.
           </p>
           {manual}
         </>

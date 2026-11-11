@@ -249,9 +249,9 @@ export function isCloudflareChallenge(
   headers: Headers,
   bodySnippet: string,
 ): boolean {
-  if (headers.get('cf-mitigated')?.toLowerCase() === 'challenge') return true;
+  if (headers.get('cf-mitigated')?.trim().toLowerCase() === 'challenge') return true;
   if (status !== 403 && status !== 503) return false;
-  const server = headers.get('server')?.toLowerCase() ?? '';
+  const server = headers.get('server')?.trim().toLowerCase() ?? '';
   if (!server.includes('cloudflare')) return false;
   return /<title>\s*just a moment|cf-browser-verification|__cf_chl_|challenge-platform/i.test(
     bodySnippet,

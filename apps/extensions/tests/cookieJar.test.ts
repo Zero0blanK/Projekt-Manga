@@ -102,13 +102,28 @@ describe('CookieJar', () => {
 });
 
 describe('isCloudflareChallenge', () => {
-  it('recognises the cf-mitigated header and a Cloudflare-served challenge page only', () => {
+  it('recognises the cf-mitigated header on any status, case and spacing included', () => {
     expect(isCloudflareChallenge(403, new Headers({ 'cf-mitigated': 'challenge' }), '')).toBe(true);
+    expect(isCloudflareChallenge(200, new Headers({ 'cf-mitigated': 'CHALLENGE' }), '')).toBe(true);
+    expect(isCloudflareChallenge(503, new Headers({ 'cf-mitigated': ' challenge ' }), '')).toBe(
+      true,
+    );
+    expect(isCloudflareChallenge(200, new Headers({ 'cf-mitigated': 'block' }), '')).toBe(false);
+  });
+
+  it('falls back to body markers only on a Cloudflare-served error page', () => {
     expect(
       isCloudflareChallenge(
         503,
         new Headers({ server: 'cloudflare' }),
         '<title>Just a moment...</title>',
+      ),
+    ).toBe(true);
+    expect(
+      isCloudflareChallenge(
+        403,
+        new Headers({ server: 'cloudflare' }),
+        '<script src="/cdn-cgi/challenge-platform/x"></script>',
       ),
     ).toBe(true);
     // Not served by Cloudflare, or not an error status: ordinary pages.
@@ -120,6 +135,13 @@ describe('isCloudflareChallenge', () => {
         200,
         new Headers({ server: 'cloudflare' }),
         '<title>Just a moment</title>',
+      ),
+    ).toBe(false);
+    expect(
+      isCloudflareChallenge(
+        403,
+        new Headers({ server: 'nginx' }),
+        '<title>Just a moment...</title>',
       ),
     ).toBe(false);
   });

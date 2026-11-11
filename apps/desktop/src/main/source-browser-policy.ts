@@ -26,7 +26,7 @@ export function parseOpenBrowserArgs(args: unknown): {
 
 /** A page title that is still a browser check rather than the site. */
 export function isChallengeTitle(title: string): boolean {
-  return /just a moment|attention required|checking your browser|verify(ing)? you are human|ddos-guard/i.test(
+  return /just a moment|attention required|checking your browser|checking if the site connection is secure|one more step|verify(ing)? you are human|human verification|ddos-guard/i.test(
     title,
   );
 }
@@ -88,6 +88,7 @@ export function browserUserAgent(defaultUserAgent: string): string {
 export interface BrowserUserAgentMetadata {
   brands: Array<{ brand: string; version: string }>;
   fullVersionList: Array<{ brand: string; version: string }>;
+  fullVersion?: string;
   platform: string;
   platformVersion: string;
   architecture: string;
@@ -107,6 +108,8 @@ export interface BrowserIdentity {
   acceptLanguage: string;
   userAgentMetadata: BrowserUserAgentMetadata;
   clientHints: Record<string, string>;
+  /** Hints Chrome sends only when the server asked for them with Accept-CH. */
+  highEntropyClientHints: Record<string, string>;
 }
 
 function parseChromiumVersion(input: string): { major: string; fullVersion: string } {
@@ -152,6 +155,7 @@ export function browserIdentity(
       { brand: 'Google Chrome', version: fullVersion },
       { brand: 'Not A(Brand', version: '99.0.0.0' },
     ],
+    fullVersion,
     platform: metadataPlatform,
     platformVersion,
     architecture: arm ? 'arm' : 'x86',
@@ -173,6 +177,20 @@ export function browserIdentity(
       'sec-ch-ua-mobile': '?0',
       'sec-ch-ua-platform': `"${metadataPlatform}"`,
     },
+    highEntropyClientHints: {
+      'sec-ch-ua-full-version-list': userAgentMetadata.fullVersionList
+        .map(({ brand, version }) => `"${brand}";v="${version}"`)
+        .join(', '),
+      'sec-ch-ua-full-version': `"${fullVersion}"`,
+      'sec-ch-ua-arch': `"${userAgentMetadata.architecture}"`,
+      'sec-ch-ua-bitness': `"${userAgentMetadata.bitness}"`,
+      'sec-ch-ua-model': '""',
+      'sec-ch-ua-platform-version': `"${platformVersion}"`,
+      'sec-ch-ua-wow64': userAgentMetadata.wow64 ? '?1' : '?0',
+      'sec-ch-ua-form-factors': userAgentMetadata.formFactors
+        .map((factor) => `"${factor}"`)
+        .join(', '),
+    },
   };
 }
 
@@ -186,13 +204,21 @@ export function applyBrowserIdentityHeaders(
   identity: BrowserIdentity,
   includeClientHints = true,
 ): Record<string, string | string[]> {
-  const replaced = new Set(['user-agent', 'sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform']);
+  const highEntropy = new Set(Object.keys(identity.highEntropyClientHints));
+  const requestedHighEntropy = new Set<string>();
   for (const name of Object.keys(headers)) {
-    if (replaced.has(name.toLowerCase())) delete headers[name];
+    const lower = name.toLowerCase();
+    if (lower === 'user-agent' || lower.startsWith('sec-ch-ua')) {
+      if (highEntropy.has(lower)) requestedHighEntropy.add(lower);
+      delete headers[name];
+    }
   }
   headers['User-Agent'] = identity.userAgent;
   if (includeClientHints) {
     for (const [name, value] of Object.entries(identity.clientHints)) headers[name] = value;
+    for (const name of requestedHighEntropy) {
+      headers[name] = identity.highEntropyClientHints[name];
+    }
   }
   return headers;
 }
@@ -211,6 +237,165 @@ export function acceptLanguages(preferred: readonly string[]): string {
     if (/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(tag) && !tags.includes(tag)) tags.push(tag);
   }
   return (tags.length ? tags : ['en-US']).slice(0, 10).join(',');
+}
+
+export function browserSurfacePatch(options: { hidden: boolean; platform: string }): string {
+  return `(() => {
+  const win = window;
+  const platform = ${JSON.stringify(options.platform)};
+  try {
+    if (!win.chrome) win.chrome = {};
+    const chrome = win.chrome;
+    if (typeof chrome.loadTimes !== 'function') {
+      chrome.loadTimes = function () {
+        const timing = performance.timing || {};
+        return {
+          requestTime: (timing.navigationStart || 0) / 1000,
+          startLoadTime: (timing.navigationStart || 0) / 1000,
+          commitLoadTime: (timing.responseStart || 0) / 1000,
+          finishDocumentLoadTime: (timing.domContentLoadedEventEnd || 0) / 1000,
+          finishLoadTime: (timing.loadEventEnd || 0) / 1000,
+          firstPaintTime: (timing.responseStart || 0) / 1000,
+          firstPaintAfterLoadTime: 0,
+          navigationType: 'Other',
+          wasFetchedViaSpdy: true,
+          wasNpnNegotiated: true,
+          npnNegotiatedProtocol: 'h2',
+          wasAlternateProtocolAvailable: false,
+          connectionInfo: 'h2',
+        };
+      };
+    }
+    if (typeof chrome.csi !== 'function') {
+      chrome.csi = function () {
+        const timing = performance.timing || {};
+        return {
+          startE: timing.navigationStart || 0,
+          onloadT: timing.domContentLoadedEventEnd || 0,
+          pageT: performance.now ? performance.now() : 0,
+          tran: 15,
+        };
+      };
+    }
+    if (!chrome.app) {
+      chrome.app = {
+        isInstalled: false,
+        getDetails() { return null; },
+        getIsInstalled() { return false; },
+        installState() {
+          const callback = arguments[0];
+          if (typeof callback === 'function') callback('not_installed');
+        },
+        runningState() { return 'cannot_run'; },
+        InstallState: {
+          DISABLED: 'disabled',
+          INSTALLED: 'installed',
+          NOT_INSTALLED: 'not_installed',
+        },
+        RunningState: {
+          CANNOT_RUN: 'cannot_run',
+          READY_TO_RUN: 'ready_to_run',
+          RUNNING: 'running',
+        },
+      };
+    }
+  } catch (e) {}
+  try {
+    if (typeof Notification !== 'undefined') {
+      const permissionGetter = Object.getOwnPropertyDescriptor({
+        get permission() { return 'default'; },
+      }, 'permission').get;
+      Object.defineProperty(Notification, 'permission', {
+        configurable: true,
+        enumerable: true,
+        get: permissionGetter,
+      });
+      Notification.requestPermission = {
+        requestPermission() {
+          const callback = arguments[0];
+          if (typeof callback === 'function') setTimeout(() => callback('default'), 0);
+          return Promise.resolve('default');
+        },
+      }.requestPermission;
+    }
+  } catch (e) {}
+  try {
+    const Permissions = win.Permissions;
+    if (Permissions && Permissions.prototype && typeof Permissions.prototype.query === 'function') {
+      const states = {
+        notifications: 'prompt',
+        geolocation: 'prompt',
+        camera: 'prompt',
+        microphone: 'prompt',
+        'clipboard-read': 'prompt',
+        'clipboard-write': 'granted',
+        midi: 'prompt',
+        'background-sync': 'granted',
+        'persistent-storage': 'prompt',
+        accelerometer: 'granted',
+        gyroscope: 'granted',
+        magnetometer: 'granted',
+        'screen-wake-lock': 'granted',
+        'idle-detection': 'prompt',
+        'storage-access': 'granted',
+        'window-management': 'prompt',
+      };
+      const original = Permissions.prototype.query;
+      Permissions.prototype.query = {
+        query(parameters) {
+          const result = original.apply(this, arguments);
+          const name = parameters && parameters.name;
+          if (!name || !Object.prototype.hasOwnProperty.call(states, name)) return result;
+          return result.then((status) => new Proxy(status, {
+            get(target, property) {
+              if (property === 'state') return states[name];
+              const value = Reflect.get(target, property, target);
+              return typeof value === 'function' ? value.bind(target) : value;
+            },
+          }));
+        },
+      }.query;
+    }
+  } catch (e) {}
+  try {
+    const softwareVendor = /swiftshader|llvmpipe|basic render driver|software|microsoft/i;
+    const softwareRenderer = /swiftshader|llvmpipe|basic render driver|software/i;
+    const vendor = platform === 'MacIntel' ? 'Apple Inc.' : 'Google Inc. (Intel)';
+    const renderer =
+      platform === 'MacIntel'
+        ? 'Apple M2'
+        : /Linux/.test(platform)
+          ? 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)'
+          : 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+    const patch = function (proto) {
+      if (!proto || typeof proto.getParameter !== 'function') return;
+      const original = proto.getParameter;
+      proto.getParameter = {
+        getParameter(parameter) {
+          const value = original.call(this, parameter);
+          if (parameter === 37445 && softwareVendor.test(String(value))) return vendor;
+          if (parameter === 37446 && softwareRenderer.test(String(value))) return renderer;
+          return value;
+        },
+      }.getParameter;
+    };
+    patch(win.WebGLRenderingContext && win.WebGLRenderingContext.prototype);
+    patch(win.WebGL2RenderingContext && win.WebGL2RenderingContext.prototype);
+  } catch (e) {}
+${
+  options.hidden
+    ? `  try {
+    Object.defineProperty(Document.prototype, 'hasFocus', {
+      configurable: true,
+      writable: true,
+      value: {
+        hasFocus() { return true; },
+      }.hasFocus,
+    });
+  } catch (e) {}`
+    : ''
+}
+})();`;
 }
 
 /** The subset of Electron's `Cookie` this reads. */
@@ -235,6 +420,29 @@ export interface SessionCookie {
   secure: boolean;
   httpOnly: boolean;
   expires?: number;
+}
+
+/**
+ * Whether the window has finished a browser check: it is showing an allowed host, no
+ * challenge title, and the partition holds Cloudflare's clearance cookie. Used to close
+ * the hidden check window as soon as the site is usable, without waiting for a timer.
+ */
+export function hasPassedBrowserCheck(
+  url: string,
+  title: string,
+  cookies: readonly PartitionCookie[],
+  allowedHosts: readonly string[],
+): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  if (!isHostAllowed(host, allowedHosts) || isChallengeTitle(title)) return false;
+  return cookiesForAllowedHosts(cookies, allowedHosts).some(
+    (cookie) => cookie.name.toLowerCase() === 'cf_clearance',
+  );
 }
 
 /**

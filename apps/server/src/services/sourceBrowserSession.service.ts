@@ -205,8 +205,10 @@ export async function imageSessionHeaders(
     )
   )
     return {};
+  const headers: Record<string, string> = { 'User-Agent': session.userAgent };
   const cookie = session.jar.cookieHeader(url);
-  return cookie ? { Cookie: cookie, 'User-Agent': session.userAgent } : {};
+  if (cookie) headers.Cookie = cookie;
+  return headers;
 }
 
 function cancelPendingPersist(sourceKey: string): void {

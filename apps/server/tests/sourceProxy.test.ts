@@ -71,6 +71,25 @@ describe('GET /api/source/image-proxy', () => {
     expect(sent.headers['User-Agent']).toBe('Firefox UA');
   });
 
+  it("uses the source session's User-Agent even when no cookie matches", async () => {
+    const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
+    vi.mocked(imageSessionHeaders).mockResolvedValueOnce({ 'User-Agent': 'Firefox UA' });
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      status: 200,
+      headers: {},
+      data: Readable.from([png]),
+    });
+
+    const response = await request(app)
+      .get('/api/source/image-proxy')
+      .query({ url: 'https://manhuaus.com/cover.png', source_id: 'ManhuaUS' });
+
+    expect(response.status).toBe(200);
+    const sent = vi.mocked(axios.get).mock.calls.at(-1)![1] as { headers: Record<string, string> };
+    expect(sent.headers['User-Agent']).toBe('Firefox UA');
+    expect(sent.headers).not.toHaveProperty('Cookie');
+  });
+
   it('presents the installed source site as the Referer on the retry', async () => {
     const png = Buffer.from('89504e470d0a1a0a00000000', 'hex');
     prismaMock.installed_extension.findMany.mockResolvedValueOnce([

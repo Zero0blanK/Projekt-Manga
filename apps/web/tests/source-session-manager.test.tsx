@@ -50,7 +50,10 @@ function renderManager(props: { onSaved?: () => void; hideWhenEmpty?: boolean } 
   );
 }
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  Reflect.deleteProperty(window, 'desktop');
+});
 
 describe('pasted sessions', () => {
   it('takes a bare clearance value as cf_clearance on the site and its subdomains', () => {
@@ -173,6 +176,76 @@ describe('SourceSessionManager', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await screen.findByText('Paste a session from your browser');
     expect(api.clear).toHaveBeenCalledWith('manhuaus');
+  });
+
+  it('warns when the saved browser check has expired', async () => {
+    api.get.mockResolvedValue({
+      ...savedSession,
+      cookies: [
+        {
+          name: 'cf_clearance',
+          domain: 'manhuaus.com',
+          expires: Math.floor(Date.now() / 1000) - 1,
+        },
+      ],
+    });
+    renderManager();
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/saved browser check has expired/i);
+  });
+
+  it('refreshes an expired browser check automatically in the desktop app', async () => {
+    const openBrowser = vi.fn().mockResolvedValue({
+      success: true,
+      message: 'Saved',
+      data: { saved: true, cookieCount: 1, message: 'Saved the browser session.' },
+    });
+    Object.defineProperty(window, 'desktop', {
+      configurable: true,
+      value: { source: { openBrowser } },
+    });
+    api.get.mockResolvedValue({
+      ...savedSession,
+      cookies: [
+        {
+          name: 'cf_clearance',
+          domain: 'manhuaus.com',
+          expires: Math.floor(Date.now() / 1000) - 1,
+        },
+      ],
+    });
+    renderManager();
+
+    await waitFor(() =>
+      expect(openBrowser).toHaveBeenCalledWith('manhuaus', { closeWhenPassed: true }),
+    );
+    expect(screen.queryByRole('button', { name: 'Refresh in browser' })).not.toBeInTheDocument();
+  });
+
+  it('waits until an expiring browser check actually expires', async () => {
+    const openBrowser = vi.fn().mockResolvedValue({
+      success: true,
+      message: 'Saved',
+      data: { saved: true, cookieCount: 1, message: 'Saved the browser session.' },
+    });
+    Object.defineProperty(window, 'desktop', {
+      configurable: true,
+      value: { source: { openBrowser } },
+    });
+    api.get.mockResolvedValue({
+      ...savedSession,
+      cookies: [
+        {
+          name: 'cf_clearance',
+          domain: 'manhuaus.com',
+          expires: Math.floor(Date.now() / 1000) + 60,
+        },
+      ],
+    });
+    renderManager();
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/expires in a few minutes/i);
+    expect(openBrowser).not.toHaveBeenCalled();
   });
 
   it('shows nothing without a session where it was asked to, or when the server refuses', async () => {

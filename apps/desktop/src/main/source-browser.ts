@@ -21,7 +21,9 @@ import { resolveApiUrl } from '../shared/config';
 import {
   applyBrowserIdentityHeaders,
   browserIdentity,
+  browserSurfacePatch,
   cookiesForAllowedHosts,
+  hasPassedBrowserCheck,
   isChallengeTitle,
   isHostAllowed,
   isLoopbackApi,
@@ -117,23 +119,16 @@ function hardenWindow(win: BrowserWindow, allowedHosts: readonly string[]): void
  * (it needs a click or CAPTCHA), the same window is shown so the reader can finish it. */
 const HIDDEN_ATTEMPT_MS = 20_000;
 
-/** Navigator.webdriver is already false in Electron, but a challenge script may look for
- * the property on the prototype. */
-const WEBDRIVER_PATCH = `(() => {
-  try {
-    Object.defineProperty(Navigator.prototype, 'webdriver', {
-      configurable: true,
-      get: () => false,
-    });
-  } catch {}
-})();`;
-
 /**
  * Makes the page look like the Chrome it really is, not like Electron. The network identity
  * comes from CDP because Electron has no API for User-Agent client hints, and the
  * override follows child frames (Turnstile runs in one) as well as the top page.
  */
-async function disguiseWindow(win: BrowserWindow, identity: BrowserIdentity): Promise<() => void> {
+async function disguiseWindow(
+  win: BrowserWindow,
+  identity: BrowserIdentity,
+  hidden: boolean,
+): Promise<() => void> {
   const dbg = win.webContents.debugger;
   try {
     dbg.attach('1.3');
@@ -146,6 +141,7 @@ async function disguiseWindow(win: BrowserWindow, identity: BrowserIdentity): Pr
   // awaiting the override would deadlock the real navigation.
   await win.loadURL('about:blank').catch(() => {});
 
+  const surfacePatch = browserSurfacePatch({ hidden, platform: identity.platform });
   const applyTo = async (sessionId?: string) => {
     await dbg
       .sendCommand(
@@ -159,8 +155,9 @@ async function disguiseWindow(win: BrowserWindow, identity: BrowserIdentity): Pr
         sessionId,
       )
       .catch(() => {});
+    await dbg.sendCommand('Page.enable', {}, sessionId).catch(() => {});
     await dbg
-      .sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: WEBDRIVER_PATCH }, sessionId)
+      .sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: surfacePatch }, sessionId)
       .catch(() => {});
   };
 
@@ -178,11 +175,21 @@ async function disguiseWindow(win: BrowserWindow, identity: BrowserIdentity): Pr
     const childId = typeof attached.sessionId === 'string' ? attached.sessionId : '';
     if (!childId) return;
     void (async () => {
-      // The Page and Emulation domains are missing on some worker targets; each command
-      // fails on its own, and the target is released either way.
-      await applyTo(childId);
-      if (attached.waitingForDebugger === true) {
-        await dbg.sendCommand('Runtime.runIfWaitingForDebugger', {}, childId).catch(() => {});
+      try {
+        // The Page and Emulation domains are missing on some worker targets; each command
+        // fails on its own, and the target is released either way.
+        await applyTo(childId);
+        await dbg
+          .sendCommand(
+            'Target.setAutoAttach',
+            { autoAttach: true, waitForDebuggerOnStart: true, flatten: true },
+            childId,
+          )
+          .catch(() => {});
+      } finally {
+        if (attached.waitingForDebugger === true) {
+          await dbg.sendCommand('Runtime.runIfWaitingForDebugger', {}, childId).catch(() => {});
+        }
       }
     })();
   };
@@ -209,24 +216,82 @@ async function disguiseWindow(win: BrowserWindow, identity: BrowserIdentity): Pr
   };
 }
 
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+function requestedClientHints(headers: Record<string, string[]>): string[] {
+  const hints: string[] = [];
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (lower !== 'accept-ch' && lower !== 'critical-ch') continue;
+    for (const entry of Array.isArray(value) ? value : [value]) {
+      for (const hint of entry.split(',')) {
+        const normalized = hint.trim().toLowerCase();
+        if (normalized) hints.push(normalized);
+      }
+    }
+  }
+  return hints;
+}
+
 /** Rewrites identity headers for every request in the source's session, so subframes and
- * workers cannot leak Electron's User-Agent or Chromium-only client hints. */
+ * workers cannot leak Electron's User-Agent or Chromium-only client hints. Electron does
+ * not send the high-entropy hints a server asks for with Accept-CH, so remember those
+ * requests per origin and add them to later HTTPS requests. */
 function rewriteIdentityHeaders(ses: Electron.Session, identity: BrowserIdentity): () => void {
-  const listener = (
+  const accepted = new Map<string, Set<string>>();
+  const supported = new Set(Object.keys(identity.highEntropyClientHints));
+  const maxAcceptedOrigins = 64;
+  const onHeadersReceived = (
+    details: Electron.OnHeadersReceivedListenerDetails,
+    callback: (response: Electron.HeadersReceivedResponse) => void,
+  ) => {
+    if (/^https:/i.test(details.url) && details.responseHeaders) {
+      const origin = originOf(details.url);
+      if (origin) {
+        for (const hint of requestedClientHints(details.responseHeaders)) {
+          if (!supported.has(hint)) continue;
+          if (accepted.size >= maxAcceptedOrigins && !accepted.has(origin)) continue;
+          const hints = accepted.get(origin) ?? new Set<string>();
+          hints.add(hint);
+          accepted.set(origin, hints);
+        }
+      }
+    }
+    callback({ responseHeaders: details.responseHeaders });
+  };
+  const onBeforeSendHeaders = (
     details: Electron.OnBeforeSendHeadersListenerDetails,
     callback: (response: Electron.BeforeSendResponse) => void,
   ) => {
     const headers = { ...details.requestHeaders } as Record<string, string | string[]>;
-    applyBrowserIdentityHeaders(headers, identity, /^https:/i.test(details.url));
+    const secure = /^https:/i.test(details.url);
+    applyBrowserIdentityHeaders(headers, identity, secure);
+    if (secure) {
+      const origin = originOf(details.url);
+      const hints = origin ? accepted.get(origin) : undefined;
+      if (hints) {
+        for (const hint of hints) headers[hint] = identity.highEntropyClientHints[hint];
+      }
+    }
     callback({ requestHeaders: headers });
   };
-  ses.webRequest.onBeforeSendHeaders(listener);
-  return () => ses.webRequest.onBeforeSendHeaders(null);
+  ses.webRequest.onBeforeSendHeaders(onBeforeSendHeaders);
+  ses.webRequest.onHeadersReceived(onHeadersReceived);
+  return () => {
+    ses.webRequest.onBeforeSendHeaders(null);
+    ses.webRequest.onHeadersReceived(null);
+  };
 }
 
-/** How long the site has to show itself as passed before the window closes, so a page
- * that flips between the check and the site doesn't close mid-check. */
-const PASSED_SETTLE_MS = 1200;
+/** A short settle after the last event, so a title or cookie that lands slightly after a
+ * navigation is seen on the next check instead of costing another navigation wait. */
+const PASSED_SETTLE_MS = 300;
 
 /**
  * How long the source's own page has to stay up, with no check in sight, before a site
@@ -258,36 +323,46 @@ function closeWhenPassed(
   /** When the page last showed something that is not the source's site past its check. */
   let challengeSeenAt = Date.now();
   const check = () => {
-    if (timer) clearTimeout(timer);
+    // A pending check reads the current page on its own, so late events don't need to
+    // push it back; a page that keeps updating its title must not starve the close.
+    if (timer) return;
     timer = setTimeout(async () => {
       timer = null;
       if (win.isDestroyed() || contents.isDestroyed()) return;
-      let host: string;
-      try {
-        host = new URL(contents.getURL()).hostname;
-      } catch {
-        return;
-      }
-      if (!isHostAllowed(host, allowedHosts) || isChallengeTitle(contents.getTitle())) {
-        challengeSeenAt = Date.now();
-        return;
-      }
-      const cookies = cookiesForAllowedHosts(await ses.cookies.get({}), allowedHosts);
-      const settled = Date.now() - challengeSeenAt >= PASSED_WITHOUT_CLEARANCE_MS;
-      if (!hasClearance(cookies) && !settled) {
-        check();
-        return;
-      }
+      const cookies = await ses.cookies.get({});
       if (win.isDestroyed() || contents.isDestroyed()) return;
+      const url = contents.getURL();
+      const title = contents.getTitle();
+      if (!hasPassedBrowserCheck(url, title, cookies, allowedHosts)) {
+        let host = '';
+        try {
+          host = new URL(url).hostname;
+        } catch {
+          // An unparsable URL is not the source's site.
+        }
+        if (!isHostAllowed(host, allowedHosts) || isChallengeTitle(title)) {
+          challengeSeenAt = Date.now();
+          return;
+        }
+        // The site shows past the check but set no clearance: wait until it has stayed so.
+        if (Date.now() - challengeSeenAt < PASSED_WITHOUT_CLEARANCE_MS) {
+          check();
+          return;
+        }
+      }
       onPassed();
       win.close();
     }, PASSED_SETTLE_MS);
   };
+  const onCookieChanged = () => check();
   contents.on('did-finish-load', check);
   contents.on('did-navigate', check);
+  contents.on('did-stop-loading', check);
   contents.on('page-title-updated', check);
+  ses.cookies.on('changed', onCookieChanged);
   win.once('closed', () => {
     if (timer) clearTimeout(timer);
+    ses.cookies.removeListener('changed', onCookieChanged);
   });
 }
 
@@ -333,7 +408,7 @@ async function runWindow(
   windowsBySource.set(source.source_key, win);
   hardenWindow(win, source.allowed_hosts);
   const stopHeaders = rewriteIdentityHeaders(ses, identity);
-  const stopDisguise = await disguiseWindow(win, identity);
+  const stopDisguise = await disguiseWindow(win, identity, hidden);
   if (!hidden && !win.isDestroyed()) win.show();
   win.once('closed', () => {
     stopHeaders();
@@ -364,8 +439,13 @@ async function runWindow(
   await closed;
   windowsBySource.delete(source.source_key);
 
-  await ses.cookies.flushStore().catch(() => {});
-  const cookies = cookiesForAllowedHosts(await ses.cookies.get({}), source.allowed_hosts);
+  // `get` reads the in-memory jar, so it does not need the disk flush first. Run them
+  // together and keep the flush best-effort: closing the check window is the slow part.
+  const [partitionCookies] = await Promise.all([
+    ses.cookies.get({}),
+    ses.cookies.flushStore().catch(() => {}),
+  ]);
+  const cookies = cookiesForAllowedHosts(partitionCookies, source.allowed_hosts);
   const passed = passedOnItsOwn || hasClearance(cookies);
   if (cookies.length === 0) {
     return {

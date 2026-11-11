@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipboardPaste, Pencil, Trash2 } from 'lucide-react';
 import {
@@ -11,7 +11,13 @@ import {
 import type { SourceBrowserSessionStatus } from '@projekt-manga/types';
 import { toast } from '@/hooks/use-toast';
 import { absoluteTime, relativeTime } from '@/lib/relative-time';
-import { parsePastedCookies, parsePastedUserAgent, sourceSessionKey } from '@/lib/source-browser';
+import {
+  openSourceBrowser,
+  parsePastedCookies,
+  parsePastedUserAgent,
+  sourceBrowserBridge,
+  sourceSessionKey,
+} from '@/lib/source-browser';
 
 const button =
   'inline-flex items-center gap-1.5 rounded-lg border border-border/60 px-3 py-1.5 font-medium text-foreground transition hover:bg-accent disabled:opacity-60';
@@ -23,6 +29,43 @@ function expiry(expires: number | null): string {
   return when <= Date.now()
     ? 'expired'
     : `expires ${relativeTime(new Date(when)) ?? absoluteTime(new Date(when))}`;
+}
+
+/** How soon a clearance is worth refreshing before the site asks again. */
+const CLEARANCE_WARNING_MS = 5 * 60_000;
+
+/** A clearance this app run already tried to refresh, by source and expiry. A fresh
+ * clearance has a new expiry, so it can be refreshed again when that one runs out. */
+const autoRefreshAttempted = new Map<string, number>();
+
+interface ClearanceWarning {
+  message: string;
+  expired: boolean;
+  /** Unix milliseconds, so an automatic retry is keyed to this clearance. */
+  expiresAt: number;
+}
+
+function clearanceWarning(cookies: SourceBrowserSessionStatus['cookies']): ClearanceWarning | null {
+  const clearance = cookies.find((cookie) => cookie.name.toLowerCase() === 'cf_clearance');
+  if (!clearance || clearance.expires === null) return null;
+  const expiresAt = clearance.expires * 1000;
+  const remaining = expiresAt - Date.now();
+  if (remaining <= 0) {
+    return {
+      message: 'The saved browser check has expired. The app is opening the source to replace it.',
+      expired: true,
+      expiresAt,
+    };
+  }
+  if (remaining <= CLEARANCE_WARNING_MS) {
+    return {
+      message:
+        'The saved browser check expires in a few minutes. The app will open the source to refresh it when it expires.',
+      expired: false,
+      expiresAt,
+    };
+  }
+  return null;
 }
 
 /**
@@ -55,6 +98,50 @@ export function SourceSessionManager({
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  // Read after mount: the bridge only exists in the desktop renderer, and the server
+  // render must match the first client render.
+  const [desktop, setDesktop] = useState(false);
+  useEffect(() => setDesktop(sourceBrowserBridge() !== undefined), []);
+
+  const refresh = useCallback(async () => {
+    setOpening(true);
+    setRefreshFailed(false);
+    try {
+      // Hidden, like the automatic challenge window: it closes itself once the site shows
+      // past the check, and only becomes visible if the reader must click something.
+      const result = await openSourceBrowser(sourceId, { closeWhenPassed: true });
+      toast({ description: result.message });
+      if (result.saved) {
+        await queryClient.invalidateQueries({ queryKey: sourceSessionKey(sourceId) });
+        onSaved?.();
+      } else {
+        setRefreshFailed(true);
+      }
+    } catch (reason) {
+      setRefreshFailed(true);
+      toast({
+        description:
+          reason instanceof Error && reason.message
+            ? reason.message
+            : `Couldn't refresh the session for ${sourceName}.`,
+      });
+    } finally {
+      setOpening(false);
+    }
+  }, [onSaved, queryClient, sourceId, sourceName]);
+
+  const warning = data ? clearanceWarning(data.cookies) : null;
+
+  // An expired clearance is refreshed without asking: the hidden window tries to pass the
+  // check by itself and becomes visible only if it needs the reader.
+  useEffect(() => {
+    if (!desktop || !warning?.expired) return;
+    if (autoRefreshAttempted.get(sourceId) === warning.expiresAt) return;
+    autoRefreshAttempted.set(sourceId, warning.expiresAt);
+    void refresh();
+  }, [desktop, refresh, sourceId, warning?.expired, warning?.expiresAt]);
 
   let host = '';
   try {
@@ -112,6 +199,23 @@ export function SourceSessionManager({
           <dt className="text-muted-foreground">Saved</dt>
           <dd title={absoluteTime(data.updatedAt)}>{relativeTime(data.updatedAt) ?? 'Unknown'}</dd>
         </dl>
+        {warning && (
+          <p role="status" className="mt-2 text-amber-500">
+            {warning.message}
+          </p>
+        )}
+        {opening && (
+          <p className="mt-2 text-muted-foreground">
+            Opening the source in the browser to refresh the check…
+          </p>
+        )}
+        {desktop && warning && refreshFailed && !opening && (
+          <div className="mt-2">
+            <button type="button" onClick={() => void refresh()} className={button}>
+              Try refreshing in browser
+            </button>
+          </div>
+        )}
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {confirmDelete ? (
             <>

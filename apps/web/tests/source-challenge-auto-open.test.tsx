@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
+import { act, fireEvent, render as renderPlain, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+/** The notice reads the saved session through React Query. */
+const render = (ui: ReactElement) =>
+  renderPlain(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      {ui}
+    </QueryClientProvider>,
+  );
 
 const mocks = vi.hoisted(() => ({
   listeners: [] as Array<(failure: { path: string; code?: string }) => void>,
@@ -14,6 +26,13 @@ vi.mock('@projekt-manga/api-client', async (importOriginal) => ({
     return () => mocks.listeners.splice(mocks.listeners.indexOf(listener), 1);
   },
   getSourceHealth: vi.fn(async () => mocks.health),
+  getSourceBrowserSession: vi.fn(async () => ({
+    sourceId: 'manhuaus',
+    hosts: [],
+    updatedAt: null,
+    userAgent: null,
+    cookies: [],
+  })),
 }));
 vi.mock('@/hooks/use-toast', () => ({ toast: vi.fn() }));
 vi.mock('@/lib/app-store', () => ({ getSetting: () => mocks.setting }));
