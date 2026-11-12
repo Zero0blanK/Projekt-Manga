@@ -10,7 +10,7 @@ import type {
 } from '@projekt-manga/types';
 import downloadService from './download.service.js';
 import sourceService from './source.service.js';
-import { resolveSource } from './sourceResolver.service.js';
+import verifiedSource from './verifiedSource.service.js';
 import downloadRepository from '../repositories/download.repository.js';
 import chapterRepository from '../repositories/chapter.repository.js';
 import mangaRepository from '../repositories/manga.repository.js';
@@ -302,7 +302,7 @@ async function resolveTitle(found: FoundTitle): Promise<ResolvedTitle> {
   let lookup: Lookup | null = null;
   let sourceMissing = false;
   if (legacyChapters.length > 0) {
-    if (!(await resolveSource(source))) {
+    if (!(await verifiedSource.isInstalled(source))) {
       sourceMissing = true;
     } else {
       lookup = await lookUpOnSource(

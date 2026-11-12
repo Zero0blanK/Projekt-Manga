@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useInstalledExtensions } from '@/lib/extensions-store';
+import { installedExtensionFor } from '@projekt-manga/types';
 import { useMangaLibrary, useSources } from '@/lib/library-store';
 import { isAdultSource, useContentPrivacy } from './content-privacy';
 
@@ -16,7 +17,7 @@ export function CoverPrivacyProvider({ children }: { children: ReactNode }) {
     const ids = new Set<string>();
     if (!privacy.blurAdult) return { sources: ids, manga: new Set<string>() };
     for (const source of sources) {
-      const extension = installed.find((item) => item.source_key === source.id);
+      const extension = installedExtensionFor(installed, source.id);
       if (extension ? isAdultSource(extension.content_rating, extension.is_nsfw) : source.isNSFW)
         ids.add(source.id);
     }

@@ -1,0 +1,143 @@
+{
+  "//": "The reading-progress merge rules, as cases. The server (apps/server/src/utils/readingProgress.ts) and the desktop cache (apps/desktop/src/main/db/chapter-state.ts) each implement them in their own runtime; both test suites run this one table, so the two cannot drift apart silently.",
+  "fold": [
+    {
+      "name": "the furthest page wins",
+      "a": { "is_read": false, "is_bookmark": false, "last_page_read": 12 },
+      "b": { "is_read": false, "is_bookmark": false, "last_page_read": 7 },
+      "expect": { "is_read": false, "is_bookmark": false, "last_page_read": 12 }
+    },
+    {
+      "name": "the furthest page wins from the other side",
+      "a": { "is_read": false, "is_bookmark": false, "last_page_read": 3 },
+      "b": { "is_read": false, "is_bookmark": false, "last_page_read": 9 },
+      "expect": { "is_read": false, "is_bookmark": false, "last_page_read": 9 }
+    },
+    {
+      "name": "read if either says read",
+      "a": { "is_read": false, "is_bookmark": false, "last_page_read": 0 },
+      "b": { "is_read": true, "is_bookmark": false, "last_page_read": 0 },
+      "expect": { "is_read": true, "is_bookmark": false, "last_page_read": 0 }
+    },
+    {
+      "name": "bookmarked if either says bookmarked",
+      "a": { "is_read": false, "is_bookmark": true, "last_page_read": 0 },
+      "b": { "is_read": false, "is_bookmark": false, "last_page_read": 4 },
+      "expect": { "is_read": false, "is_bookmark": true, "last_page_read": 4 }
+    },
+    {
+      "name": "each field merges on its own",
+      "a": { "is_read": true, "is_bookmark": false, "last_page_read": 2 },
+      "b": { "is_read": false, "is_bookmark": true, "last_page_read": 20 },
+      "expect": { "is_read": true, "is_bookmark": true, "last_page_read": 20 }
+    },
+    {
+      "name": "equal states stay as they are",
+      "a": { "is_read": true, "is_bookmark": true, "last_page_read": 5 },
+      "b": { "is_read": true, "is_bookmark": true, "last_page_read": 5 },
+      "expect": { "is_read": true, "is_bookmark": true, "last_page_read": 5 }
+    }
+  ],
+  "push": [
+    {
+      "name": "an older push with less progress does not drag the stored page back",
+      "existing": {
+        "is_read": true,
+        "is_bookmark": false,
+        "last_page_read": 50,
+        "updated_at": "2026-08-20T00:00:00.000Z"
+      },
+      "incoming": {
+        "is_read": false,
+        "is_bookmark": false,
+        "last_page_read": 10,
+        "updated_at": "2026-08-10T00:00:00.000Z"
+      },
+      "expect": { "is_read": true, "is_bookmark": false, "last_page_read": 50 }
+    },
+    {
+      "name": "an older push with more progress still advances the page",
+      "existing": {
+        "is_read": false,
+        "is_bookmark": false,
+        "last_page_read": 5,
+        "updated_at": "2026-08-20T00:00:00.000Z"
+      },
+      "incoming": {
+        "is_read": true,
+        "is_bookmark": false,
+        "last_page_read": 30,
+        "updated_at": "2026-08-10T00:00:00.000Z"
+      },
+      "expect": { "is_read": true, "is_bookmark": false, "last_page_read": 30 }
+    },
+    {
+      "name": "a newer push can clear a bookmark",
+      "existing": {
+        "is_read": false,
+        "is_bookmark": true,
+        "last_page_read": 5,
+        "updated_at": "2026-08-10T00:00:00.000Z"
+      },
+      "incoming": {
+        "is_read": false,
+        "is_bookmark": false,
+        "last_page_read": 5,
+        "updated_at": "2026-08-20T00:00:00.000Z"
+      },
+      "expect": { "is_read": false, "is_bookmark": false, "last_page_read": 5 }
+    },
+    {
+      "name": "an older push cannot change a bookmark",
+      "existing": {
+        "is_read": false,
+        "is_bookmark": true,
+        "last_page_read": 5,
+        "updated_at": "2026-08-20T00:00:00.000Z"
+      },
+      "incoming": {
+        "is_read": false,
+        "is_bookmark": false,
+        "last_page_read": 5,
+        "updated_at": "2026-08-10T00:00:00.000Z"
+      },
+      "expect": { "is_read": false, "is_bookmark": true, "last_page_read": 5 }
+    },
+    {
+      "name": "a push stamped the same instant leaves the stored bookmark",
+      "existing": {
+        "is_read": false,
+        "is_bookmark": false,
+        "last_page_read": 0,
+        "updated_at": "2026-08-20T00:00:00.000Z"
+      },
+      "incoming": {
+        "is_read": false,
+        "is_bookmark": true,
+        "last_page_read": 0,
+        "updated_at": "2026-08-20T00:00:00.000Z"
+      },
+      "expect": { "is_read": false, "is_bookmark": false, "last_page_read": 0 }
+    }
+  ],
+  "pull": [
+    {
+      "name": "a pulled state newer than the local one replaces it",
+      "local_updated_at": "2026-08-10T00:00:00.000Z",
+      "pulled_updated_at": "2026-08-20T00:00:00.000Z",
+      "replaces": true
+    },
+    {
+      "name": "a pulled state stamped the same instant replaces it",
+      "local_updated_at": "2026-08-20T00:00:00.000Z",
+      "pulled_updated_at": "2026-08-20T00:00:00.000Z",
+      "replaces": true
+    },
+    {
+      "name": "a local edit newer than the pulled state is kept",
+      "local_updated_at": "2026-08-20T00:00:00.000Z",
+      "pulled_updated_at": "2026-08-10T00:00:00.000Z",
+      "replaces": false
+    }
+  ]
+}

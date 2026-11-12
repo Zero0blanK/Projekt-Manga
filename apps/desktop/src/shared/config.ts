@@ -131,7 +131,28 @@ function isValidWebUrl(value: string): boolean {
   }
 }
 
+/** Where the servers this app started itself are listening. */
+export interface ManagedServerUrls {
+  /** The page the window loads. */
+  webUrl: string;
+  /** The API as the main process reaches it (seed, sync). */
+  apiUrl: string;
+}
+
+let managedServerUrls: ManagedServerUrls | null = null;
+
+/**
+ * Called once the app has started its own servers and their ports are known
+ * (main/managed-servers.ts). From then on `resolveWebUrl()` and `resolveApiUrl()` answer
+ * with these, ahead of the environment: the ports are chosen at run time, so nothing set
+ * beforehand could name them. Null puts the configured addresses back.
+ */
+export function setManagedServerUrls(urls: ManagedServerUrls | null): void {
+  managedServerUrls = urls;
+}
+
 export function resolveWebUrl(): string {
+  if (managedServerUrls) return managedServerUrls.webUrl;
   const configured = process.env.PROJEKT_MANGA_WEB_URL?.trim();
   if (!configured) {
     return DEFAULT_WEB_URL;
@@ -161,6 +182,7 @@ export const DEFAULT_API_URL = 'http://localhost:4000/api';
 export const SESSION_COOKIE_NAME = 'pm_session';
 
 export function resolveApiUrl(): string {
+  if (managedServerUrls) return managedServerUrls.apiUrl;
   const configured = process.env.PROJEKT_MANGA_API_URL?.trim();
   if (!configured) {
     return DEFAULT_API_URL;

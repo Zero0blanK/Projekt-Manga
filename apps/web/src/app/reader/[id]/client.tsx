@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SelectMenu } from '@/components/ui/select-menu';
 import { Button } from '@/components/ui/button';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -32,7 +32,7 @@ import { usePagePrefetch } from '@/components/reader/use-page-prefetch';
 import { useChapterPages, useLoadedPage } from '@/components/reader/use-chapter-pages';
 import { useAutoMarkRead, useReaderProgress } from '@/components/reader/use-reader-progress';
 import { reportError } from '@/lib/report-error';
-import { fetchDownloads, useDownloads } from '@/lib/shared-queries';
+import { fetchDownloads } from '@/lib/shared-queries';
 import { invalidateSavedReadingProgress } from '@/lib/query-client';
 import { useProfilePreference, useReadingQueue } from '@/lib/profile-preferences';
 import { Pause, Play } from 'lucide-react';
@@ -50,33 +50,16 @@ import { markDuplicatesRead } from '@/lib/chapter-gaps';
 import { useSourceIncognito } from '@/lib/incognito';
 import { useAutoAdvanceCountdown } from '@/lib/auto-advance';
 import { useReaderZoom, ZOOM_MAX, ZOOM_MIN } from '@/lib/reader-zoom';
-import {
-  SKIP_DUPLICATE_CHAPTERS,
-  SKIP_READ_CHAPTERS,
-  adjacentChapter,
-  adjacentRelease,
-  releaseStops,
-} from '@/lib/chapter-skip';
-import {
-  DEFAULT_CHAPTER_FILTER,
-  SKIP_FILTERED_CHAPTERS,
-  chapterFilterKey,
-  isFilterActive,
-  parseChapterFilter,
-  releasePassesFilter,
-} from '@/lib/chapter-filter';
-import { useChapterBookmarks } from '@/lib/chapter-bookmarks';
 import { toast } from '@/hooks/use-toast';
-import { useSetting } from '@/lib/app-store';
 import { useReaderInput } from '@/components/reader/use-reader-input';
+import { useChapterOrder } from '@/components/reader/use-chapter-order';
+import { useNextChapterPreload } from '@/components/reader/use-next-chapter-preload';
+import { useReaderChrome } from '@/components/reader/use-reader-chrome';
 import { ReaderShortcuts } from '@/components/reader/reader-shortcuts';
 import { WebtoonSuggestion } from '@/components/reader/webtoon-suggestion';
 import { setPageAsCover } from '@/components/reader/set-page-as-cover';
 import { LinkedSourceFallback } from '@/components/reader/linked-source-fallback';
 import { ReaderContextMenu } from '@/components/reader/reader-context-menu';
-
-/** How long the reader chrome stays up after the last thing the reader did. */
-const CHROME_IDLE_MS = 2200;
 
 function positiveIntParam(searchParams: URLSearchParams, key: string): number | undefined {
   const raw = Number(searchParams.get(key));
@@ -161,73 +144,29 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   useEffect(() => {
     setImmersive(immersiveSetting);
   }, [immersiveSetting]);
-  const [chromeShown, setChromeShown] = useState(true);
 
-  const chapterByNumber = useMemo(() => {
-    const map = new Map<number, MangaChapterRecord>();
-    for (const c of chapters) {
-      if (!map.has(c.chapter_number) || (preferredGroup && c.scanlator === preferredGroup))
-        map.set(c.chapter_number, c);
-    }
-    if (requestedChapterId) {
-      const explicit = chapters.find((record) => record.id === requestedChapterId);
-      if (explicit) map.set(explicit.chapter_number, explicit);
-    }
-    return map;
-  }, [chapters, preferredGroup, requestedChapterId]);
-  // Chapter numbers are not contiguous integers (10.3, 11.1, 11.2 …), so "next"/"previous"
-  // must come from the real sorted list rather than ±1.
-  const sortedChapterNumbers = useMemo(
-    () => [...new Set(chapters.map((c) => c.chapter_number))].sort((a, b) => a - b),
-    [chapters],
-  );
-  // Settings › Reader › Skip read chapters / Skip filtered chapters. A release is passed
-  // over when it is read, or when the title's chapter-list filter hides it; a chapter
-  // number is passed over when every release of it is.
-  const skipRead = useSetting(SKIP_READ_CHAPTERS, false) as boolean;
-  const skipFiltered = useSetting(SKIP_FILTERED_CHAPTERS, false) as boolean;
-  const skipDuplicates = useSetting(SKIP_DUPLICATE_CHAPTERS, false) as boolean;
-  const [listFilter] = useProfilePreference(
-    chapterFilterKey(manga.id),
-    parseChapterFilter,
-    DEFAULT_CHAPTER_FILTER,
-  );
-  const filtering = skipFiltered && isFilterActive(listFilter);
-  const bookmarkTargets = useMemo(
-    () => chapters.map((c) => ({ id: c.source_chapter_key, is_bookmark: c.is_bookmark })),
-    [chapters],
-  );
-  const { isBookmarked, toggle: toggleChapterBookmark } = useChapterBookmarks(bookmarkTargets);
-  // Only fetched when the filter is "Downloaded", the one filter that needs it.
-  const { data: filterDownloads } = useDownloads({
-    enabled: filtering && listFilter.status === 'Downloaded',
+  const {
+    chapterByNumber,
+    sortedChapterNumbers,
+    currentRecord,
+    nextChapterAfter,
+    nextChapter,
+    prevChapter,
+    nextRelease,
+    prevRelease,
+    byRelease,
+    stopIndexOf,
+    stripStop,
+    nextStopAfter,
+    isBookmarked,
+    toggleChapterBookmark,
+  } = useChapterOrder({
+    mangaId: manga.id,
+    chapters,
+    chapter,
+    preferredGroup,
+    requestedChapterId,
   });
-  const downloadedIds: ReadonlySet<string> = useMemo(
-    () =>
-      new Set(
-        (filterDownloads ?? [])
-          .filter((d) => d.status === 'COMPLETED' && d.chapter_id)
-          .map((d) => d.chapter_id),
-      ),
-    [filterDownloads],
-  );
-  const skipRelease = (record: MangaChapterRecord) =>
-    (skipRead && record.is_read) ||
-    (filtering &&
-      !releasePassesFilter(record, listFilter, { downloaded: downloadedIds, isBookmarked }));
-  const releasesByNumber = useMemo(() => {
-    const map = new Map<number, MangaChapterRecord[]>();
-    for (const c of chapters) map.set(c.chapter_number, [...(map.get(c.chapter_number) ?? []), c]);
-    return map;
-  }, [chapters]);
-  const skipChapter = (n: number) =>
-    (skipRead || filtering) && (releasesByNumber.get(n) ?? []).every(skipRelease);
-  const nextChapterAfter = (n: number): number | null =>
-    adjacentChapter(sortedChapterNumbers, n, 1, skipChapter);
-  const prevChapterBefore = (n: number): number | null =>
-    adjacentChapter(sortedChapterNumbers, n, -1, skipChapter);
-
-  const currentRecord = chapterByNumber.get(chapter);
   const invalidChapterId =
     chaptersLoaded &&
     requestedChapterId !== null &&
@@ -324,225 +263,23 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     return () => controller.abort();
   }, [manga.id, manga.slug, manga.source, chaptersRetry]);
 
-  // When nearing the end of the current chapter, warm the next chapter's first page so
-  // stepping across the boundary doesn't stall on a fresh chapter-pages fetch. Gated on
-  // the *current* chapter's own real pages already being loaded (not just the metadata
-  // page_count, which some sources — e.g. MangaGeko — never populate, leaving it 0) so
-  // this never fires a next-chapter scrape concurrently with the current chapter's own
-  // still-in-flight one.
-  const nextChapterRef = useRef(nextChapterAfter);
-  nextChapterRef.current = nextChapterAfter;
-  const fetchPagesRef = useRef(fetchPages);
-  fetchPagesRef.current = fetchPages;
-  useEffect(() => {
-    if (!preloadNextChapter || effectiveLayout === 'Long strip') return;
-    if (pageUrls.length === 0) return;
-    // The trigger distance follows the page-prefetch window, so raising one doesn't leave
-    // the other reaching across the chapter boundary too late to help.
-    const trigger = Math.max(1, pagePrefetchAhead);
-    if (pageUrls.length - page > trigger) return;
-
-    // Settings > Reader > Chapters to preload: walk that many chapters forward.
-    const upcoming: number[] = [];
-    let cursor = chapter;
-    for (let i = 0; i < chapterPrefetchCount; i++) {
-      const next = nextChapterRef.current(cursor);
-      if (next === null) break;
-      upcoming.push(next);
-      cursor = next;
-    }
-    if (upcoming.length === 0) return;
-
-    let cancelled = false;
-    // Sequential, not parallel: several concurrent chapter scrapes against one source is
-    // exactly the traffic pattern that gets a scraper rate-limited. This re-runs on every
-    // page turn near the boundary, which fetchPages makes free: a list that's already
-    // loading or loaded isn't asked for twice.
-    void (async () => {
-      for (const target of upcoming) {
-        if (cancelled) return;
-        try {
-          const urls = await fetchPagesRef.current(target);
-          if (cancelled || urls.length === 0) return;
-          const img = new window.Image();
-          img.src = urls[0];
-        } catch {
-          return;
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    preloadNextChapter,
-    chapterPrefetchCount,
-    pagePrefetchAhead,
+  useNextChapterPreload({
+    enabled: preloadNextChapter && effectiveLayout !== 'Long strip',
     chapter,
     page,
     pageUrls,
-    effectiveLayout,
-  ]);
+    pagePrefetchAhead,
+    chapterPrefetchCount,
+    nextChapterAfter,
+    fetchPages,
+  });
 
-  /**
-   * Set while the reader is scrolling down, so the inactivity timer below does not
-   * immediately undo the hide.
-   *
-   * Scrolling fires `mousemove` on some setups and `touchstart` on every phone, and both
-   * of those mean "reveal" to the timer — without this the chrome would reappear a frame
-   * after the scroll hid it, reading as a flicker.
-   */
-  const scrolledAway = useRef(false);
-
-  /**
-   * True while the pointer is over the reader chrome, or focus is inside it.
-   *
-   * Controls that move the page — zoom, the auto-scroll toggle, the speed sliders — are
-   * *in* the bar they would otherwise dismiss. Hiding a control at the moment it is being
-   * used is never what the reader meant, whatever the scroll position did.
-   */
-  const chromeHovered = useRef(false);
-  /**
-   * Actually *engaged* with the chrome: a pointer held down on it, or focus inside it.
-   *
-   * Narrower than hover on purpose. Hovering is enough to stop a scroll from dismissing
-   * the bar — a click on zoom reflows the strip, and the pointer is still over the button
-   * when that scroll event lands. It is not enough to stop the idle timer: a pointer
-   * parked at the top of the screen is not someone using the controls, and treating it as
-   * such would keep the bar up indefinitely.
-   */
-  const chromeEngaged = useRef(false);
-  /** Hovering a control counts as engagement; hovering the bar's empty space does not. */
-  const overControl = (target: EventTarget | null) =>
-    target instanceof Element && !!target.closest('button, a, input, select, [role="slider"]');
-
-  const chromeInteraction = {
-    onPointerEnter: () => {
-      chromeHovered.current = true;
-    },
-    // The bar is full-width, so a pointer parked at the top of the screen sits on it
-    // without meaning anything by it. Poised over a button or a slider is different: that
-    // one must not disappear as it is reached for.
-    onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => {
-      chromeHovered.current = true;
-      chromeEngaged.current = overControl(event.target);
-    },
-    onPointerLeave: () => {
-      chromeHovered.current = false;
-      chromeEngaged.current = false;
-    },
-    onPointerDown: () => {
-      chromeEngaged.current = true;
-    },
-    onFocusCapture: () => {
-      chromeEngaged.current = true;
-    },
-    onBlurCapture: (event: React.FocusEvent<HTMLDivElement>) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-        chromeEngaged.current = false;
-      }
-    },
-  };
-
-  // A drag can finish anywhere, including outside the bar it started in.
-  useEffect(() => {
-    const release = () => {
-      chromeEngaged.current = false;
-    };
-    window.addEventListener('pointerup', release);
-    window.addEventListener('pointercancel', release);
-    return () => {
-      window.removeEventListener('pointerup', release);
-      window.removeEventListener('pointercancel', release);
-    };
-  }, []);
-
-  /**
-   * One owner of the chrome's visibility, and of the timer that hides it.
-   *
-   * Scrolling and the inactivity timer must not set `chromeShown` independently, or they
-   * fight: scrolling back up reveals the bars and a timer still counting down from the
-   * last mouse move hides them again a moment later. Every reveal restarts the timer and
-   * every hide cancels it, so the last thing the reader did is the thing that decides.
-   */
-  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const immersiveRef = useRef(immersive);
-  immersiveRef.current = immersive;
-
-  const revealChrome = useCallback(() => {
-    setChromeShown(true);
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    if (!immersiveRef.current) return;
-    hideTimer.current = setTimeout(() => {
-      // Never mid-interaction — a slider being dragged, or focus sitting in the bar.
-      if (chromeEngaged.current) return;
-      setChromeShown(false);
-    }, CHROME_IDLE_MS);
-  }, []);
-
-  const hideChrome = useCallback(() => {
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    setChromeShown(false);
-  }, []);
-
-  useEffect(() => () => void (hideTimer.current && clearTimeout(hideTimer.current)), []);
-
-  const onScrollDirection = useCallback(
-    (direction: 'up' | 'down') => {
-      if (!hideChromeOnScroll) return;
-      if (direction === 'up') {
-        scrolledAway.current = false;
-        revealChrome();
-        return;
-      }
-      // Scrolling down only hides when the reader is not at the controls. Hover counts
-      // here: zoom reflows the strip, and the pointer is still on the button when that
-      // scroll event arrives.
-      if (chromeHovered.current || chromeEngaged.current) return;
-      scrolledAway.current = true;
-      hideChrome();
-    },
-    [hideChromeOnScroll, revealChrome, hideChrome],
-  );
-
-  /**
-   * While immersive, the chrome auto-hides after a couple of seconds and comes back on
-   * activity — but what counts as activity depends on the layout.
-   *
-   * In a paged layout nothing the reader does moves the page except paging itself, so
-   * reacting to mouse movement would bring the bars back whenever the pointer crossed the
-   * window, over the top of the page being read. There the tap zones are the control
-   * surface (Settings > Reader > Tap zones, "Controls" by default on the centre third),
-   * so after the first auto-hide the chrome stays put until something explicitly asks for
-   * it. Key presses still reveal it: paging with the arrow keys is reading, and a
-   * keyboard user has no tap zone.
-   *
-   * The long strip keeps pointer and touch reveals, because there scrolling is the
-   * reading gesture and hide-on-scroll is what the chrome follows.
-   */
-  useEffect(() => {
-    if (!immersive) {
-      setChromeShown(true);
-      return;
-    }
-    const reveal = () => {
-      // Deliberately not clearing `scrolledAway`: only scrolling back up should do that,
-      // or the first stray mouse move would cancel the hide.
-      if (scrolledAway.current) return;
-      revealChrome();
-    };
-    reveal();
-    window.addEventListener('keydown', reveal);
-    if (longStrip) {
-      window.addEventListener('mousemove', reveal);
-      window.addEventListener('touchstart', reveal);
-    }
-    return () => {
-      window.removeEventListener('keydown', reveal);
-      window.removeEventListener('mousemove', reveal);
-      window.removeEventListener('touchstart', reveal);
-    };
-  }, [immersive, longStrip, revealChrome]);
+  const {
+    shown: chromeShown,
+    interaction: chromeInteraction,
+    onScrollDirection,
+    toggle: toggleChrome,
+  } = useReaderChrome({ immersive, longStrip, hideChromeOnScroll });
 
   /* ----------------------------------------------------- progress persistence */
 
@@ -647,20 +384,6 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   };
 
   const pagesPerView = effectiveLayout === 'Single page' ? 1 : 2;
-
-  // Settings › Reader › Skip duplicate chapters, off: each group's release of a chapter is
-  // its own stop, so next and previous move between releases rather than numbers.
-  const stops = useMemo(
-    () => (skipDuplicates ? [] : releaseStops(chapters, preferredGroup, currentRecord?.id)),
-    [skipDuplicates, chapters, preferredGroup, currentRecord?.id],
-  );
-  const byRelease = !skipDuplicates && !!currentRecord;
-  const nextRelease = byRelease ? adjacentRelease(stops, currentRecord, 1, skipRelease) : null;
-  const prevRelease = byRelease ? adjacentRelease(stops, currentRecord, -1, skipRelease) : null;
-  const nextChapter = byRelease ? (nextRelease?.chapter_number ?? null) : nextChapterAfter(chapter);
-  const prevChapter = byRelease
-    ? (prevRelease?.chapter_number ?? null)
-    : prevChapterBefore(chapter);
   const hasNextChapter = nextChapter !== null;
   const hasPrevChapter = prevChapter !== null;
   // Opening a library title that sits on no shelf files it under Reading, so the library
@@ -740,33 +463,6 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
 
   // Long strip streams chapter-to-chapter itself; only sync the URL when the chapter
   // it's currently showing actually changes, so page-only scroll doesn't spam history.
-  // Long strip with "Skip duplicate chapters" off: the strip runs through the same stops as
-  // next/previous in the paged reader, each group's release in turn. Its segments are
-  // numbered by position in `stops` (stable: `keep` only swaps which release of one
-  // chapter-and-group stands for it), and translated back to releases here.
-  const stopIndexOf = (record: MangaChapterRecord | undefined) => {
-    if (!record) return -1;
-    const exact = stops.findIndex((stop) => stop.id === record.id);
-    if (exact !== -1) return exact;
-    const next = adjacentRelease(stops, record, 1);
-    const previous = adjacentRelease(stops, record, -1);
-    return stops.indexOf(
-      stops.find(
-        (stop) =>
-          stop.chapter_number === record.chapter_number &&
-          (stop.scanlator ?? '') === (record.scanlator ?? ''),
-      ) ??
-        next ??
-        previous ??
-        stops[0],
-    );
-  };
-  const stripStop = (index: number) => stops[index];
-  const nextStopAfter = (index: number): number | null => {
-    const stop = stripStop(index);
-    const next = stop ? adjacentRelease(stops, stop, 1, skipRelease) : null;
-    return next ? stops.indexOf(next) : null;
-  };
   const handleStripRelease = (index: number, streamPage: number, streamTotal: number) => {
     const record = stripStop(index);
     if (!record) return;
@@ -1089,7 +785,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
               offsetFirstPage={offsetFirstPage}
               onPageReady={(p) => onPageReady(chapter, p)}
               tapActions={tapActions}
-              onToggleControls={() => setChromeShown((value) => !value)}
+              onToggleControls={toggleChrome}
               completionActions={completionActions}
               fitOverride={zoomBehavior}
               autoAdvanceSecondsLeft={autoAdvanceCountdown.secondsLeft}

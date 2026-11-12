@@ -10,8 +10,9 @@ import { rescueAnonymousLibrary } from './library-rescue';
 import { registerIpcHandlers } from './ipc';
 import { getDb } from './db/connection';
 import { localStore } from './db/local-store';
-import { buildLocalWebUrl, LOCAL_API_BASE_URL, resolveApiUrl } from '../shared/config';
-import { resolveServerPaths, shouldManageServers, startServers, stopServers } from './servers';
+import { resolveApiUrl } from '../shared/config';
+import { stopServers } from './servers';
+import { startManagedServers } from './managed-servers';
 import { resolveServerTokenKey } from './server-secrets';
 import { captureConsole } from './log-buffer';
 import { recordStartupError } from './diagnostics';
@@ -93,70 +94,6 @@ if (!gotLock) {
     else showBackgroundWindow();
   });
 
-  /**
-   * Starts the bundled API and web app, when this build is responsible for them.
-   *
-   * Sets `PROJEKT_MANGA_WEB_URL` / `PROJEKT_MANGA_API_URL` rather than threading the
-   * ports through every call site: `resolveWebUrl()` and `resolveApiUrl()` already read
-   * them, so the window loader, the local-DB seed and main/sync.ts all pick up the chosen
-   * ports with no further change.
-   *
-   * Returns the base URL the renderer should use, or undefined to leave it on its
-   * build-time default (the dev setup, where the developer started both servers).
-   */
-  async function startManagedServers(): Promise<string | undefined> {
-    if (!shouldManageServers(app.isPackaged)) return undefined;
-
-    // app.getAppPath() is apps/desktop in a monorepo run; the repo root is two up.
-    const appRoot = path.join(app.getAppPath(), '..', '..');
-    const paths = resolveServerPaths(process.resourcesPath, appRoot);
-
-    if (!paths) {
-      console.warn(
-        '[main] Managed servers requested but no bundled API/web build was found — falling back to whatever is already running.',
-      );
-      return undefined;
-    }
-
-    // Alongside the desktop's own local cache, in a directory the OS guarantees is
-    // writable and preserves across updates.
-    const databaseFile = path.join(app.getPath('userData'), 'projektmanga.db');
-    // Same directory, same reasoning: writable without elevation, and preserved across
-    // updates so installed sources survive one.
-    const extensionBundlesDir = path.join(app.getPath('userData'), 'installed-extensions');
-    let tokenEncryptionKey: string | undefined;
-    try {
-      tokenEncryptionKey = resolveServerTokenKey();
-    } catch (error) {
-      // Not fatal: only stored credentials need it, and the server says so when asked.
-      console.warn(
-        '[main] Could not prepare the server encryption key:',
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-    markApiStarting();
-    const { apiPort, webPort, ready, apiReady } = await startServers(
-      paths,
-      databaseFile,
-      extensionBundlesDir,
-      { tokenEncryptionKey },
-    );
-    process.env.PROJEKT_MANGA_WEB_URL = buildLocalWebUrl(webPort);
-    process.env.PROJEKT_MANGA_API_URL = `http://127.0.0.1:${apiPort}/api`;
-
-    apiReady.then(markApiReady, markApiFailed);
-
-    // Not awaited: the window is created immediately and shows its own "Starting…"
-    // screen while these boot. Failures still have to be visible, hence the catch.
-    ready.catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('[main] Bundled servers did not become ready:', message);
-      recordStartupError('servers-ready', error);
-    });
-
-    return LOCAL_API_BASE_URL;
-  }
-
   // Children hold their ports and, on Windows, are not reaped by the OS when the parent
   // exits — without this the next launch finds the ports occupied.
   app.on('will-quit', stopServers);
@@ -220,19 +157,26 @@ if (!gotLock) {
     // Before the window: this is what decides which URL it loads. A failure here is not
     // fatal — the window falls back to the configured/default URL and shows its own
     // "can't connect" screen, which is more useful than no window at all.
-    let apiBaseUrl: string | undefined;
-    try {
-      apiBaseUrl = await startManagedServers();
-      // Only the app's own server: a remote one's library isn't this device's to merge into.
-      if (apiBaseUrl) void rescueAnonymousLibrary(apiBaseUrl);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('[main] Failed to start bundled servers:', message);
-      recordStartupError('servers-start', error);
-    }
+    const servers = await startManagedServers({
+      isPackaged: app.isPackaged,
+      appPath: app.getAppPath(),
+      resourcesPath: process.resourcesPath,
+      userDataDir: app.getPath('userData'),
+      resolveTokenKey: resolveServerTokenKey,
+      onApiStarting: markApiStarting,
+      onApiReady: markApiReady,
+      onApiFailed: markApiFailed,
+      recordStartupError,
+    });
+    // Undefined leaves the renderer on its build-time default (the dev setup, where the
+    // developer started both servers).
+    const apiBaseUrl = servers.kind === 'managed' ? servers.apiBaseUrl : undefined;
+    // Only the app's own server: a remote one's library isn't this device's to merge into.
+    if (apiBaseUrl) void rescueAnonymousLibrary(apiBaseUrl);
 
-    // After the servers, so the diagnostics handler reports the real supervision state.
-    registerIpcHandlers({ managedServers: apiBaseUrl !== undefined });
+    // After the servers, so the diagnostics handler reports the real supervision state:
+    // servers this app failed to start are still its own, not a development setup.
+    registerIpcHandlers({ managedServers: servers.kind !== 'unmanaged' });
     // Before the window, so a configured lock is in force before anything shows.
     initializeAppLock();
 

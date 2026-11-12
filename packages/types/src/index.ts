@@ -8,3 +8,4 @@ export * from './backup.js';
 export * from './sourceNetwork.js';
 export * from './api.js';
 export * from './restore.js';
+export * from './sourceIdentity.js';
