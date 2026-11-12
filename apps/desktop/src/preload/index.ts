@@ -16,7 +16,8 @@
  * `contextBridge.exposeInMainWorld` silently never run, leaving `window.desktop`
  * `undefined` with no error. Channel names are therefore duplicated as literals below and
  * must stay in sync with `DESKTOP_CHANNELS` in shared/config.ts, which main/ipc.ts
- * imports normally (the main process isn't sandboxed).
+ * imports normally (the main process isn't sandboxed). tests/channel-parity.cjs fails when
+ * the two drift.
  */
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
