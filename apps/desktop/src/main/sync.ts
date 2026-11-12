@@ -13,6 +13,9 @@
  */
 import { halve, pushableRows, splitIntoBatches } from './sync-rows';
 import type { PendingSyncPush } from './db/local-store';
+import type { SyncConflictCode } from '@projekt-manga/api-client' with {
+  'resolution-mode': 'import',
+};
 import { session as electronSession } from 'electron';
 import { localStore } from './db/local-store';
 import { getCachedSession, clearCachedSession } from './auth-cache';
@@ -52,17 +55,33 @@ export interface SyncResult {
 interface ResponseEnvelope<T> {
   success: boolean;
   message?: string;
+  code?: string;
   data?: T;
 }
 
 class SyncHttpError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** The server's machine-readable reason, when it gave one. */
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'SyncHttpError';
     this.status = status;
+    this.code = code;
   }
 }
+
+/** `SYNC_CONFLICT.resetRequired` in packages/types, which this CommonJS build can only
+ * import as a type: the annotation is what keeps the two the same. */
+const SYNC_RESET_REQUIRED: SyncConflictCode = 'SYNC_RESET_REQUIRED';
+
+/** The server took a restore since this device last synced: adopt it before pushing. A
+ * server from before the code was sent says so only in its message. */
+const isSyncResetRequired = (error: unknown): boolean =>
+  error instanceof SyncHttpError &&
+  error.status === 409 &&
+  (error.code === SYNC_RESET_REQUIRED ||
+    (error.code === undefined && error.message === 'Sync reset required after a library restore'));
 
 async function callJson<T>(
   url: string,
@@ -83,6 +102,7 @@ async function callJson<T>(
     throw new SyncHttpError(
       envelope?.message || `Sync request failed with status ${res.status}`,
       res.status,
+      typeof envelope?.code === 'string' ? envelope.code : undefined,
     );
   }
   return envelope.data as T;
@@ -311,12 +331,7 @@ async function runSyncOnce(
 
     return { pushed, pulled: totals };
   } catch (error) {
-    if (
-      error instanceof SyncHttpError &&
-      error.status === 409 &&
-      error.message === 'Sync reset required after a library restore' &&
-      !resetRetried
-    ) {
+    if (isSyncResetRequired(error) && !resetRetried) {
       assertSameAccount();
       await localStore.reconcileRestoreFromServer(apiBaseUrl);
       return runSyncOnce(apiBaseUrl, true, signal);

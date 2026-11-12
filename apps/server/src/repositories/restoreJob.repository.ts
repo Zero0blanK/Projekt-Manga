@@ -1,7 +1,15 @@
 import prisma from '../configs/prisma.config.js';
+import type { Prisma } from '@prisma/client';
+import { ACTIVE_RESTORE_STATES, type RestoreState } from '@projekt-manga/types';
 import { DuplicateResourceError, NotFoundError } from '../utils/customErrors.js';
 
-const ACTIVE_STATES = ['queued', 'running'];
+/**
+ * Every transition of a restore job (see `RestoreState` in packages/types for the
+ * machine). Nothing else writes `restore_job.state`.
+ */
+const ACTIVE_STATES: string[] = [...ACTIVE_RESTORE_STATES];
+/** Typed so a state that is not one of the machine's cannot be written. */
+const to = (state: RestoreState) => state;
 
 /**
  * How many times a job may be started. A job found running at startup was interrupted:
@@ -14,8 +22,8 @@ export const MAX_RESTORE_ATTEMPTS = 2;
 /** Takes a queued job for the worker. False when something else got there first. */
 const claim = async (id: string): Promise<boolean> => {
   const claimed = await prisma.restore_job.updateMany({
-    where: { id, state: 'queued' },
-    data: { state: 'running', attempts: { increment: 1 } },
+    where: { id, state: to('queued') },
+    data: { state: to('running'), attempts: { increment: 1 } },
   });
   return claimed.count === 1;
 };
@@ -27,8 +35,19 @@ const getByIdOrThrow = async (id: string) =>
 
 const markFailed = async (id: string) => {
   await prisma.restore_job.updateMany({
-    where: { id, state: 'running' },
-    data: { state: 'failed', payload: '' },
+    where: { id, state: to('running') },
+    data: { state: to('failed'), payload: '' },
+  });
+};
+
+/**
+ * The restore's own transaction ends the job, so the library and "succeeded" commit
+ * together or not at all: called with that transaction's client.
+ */
+const markSucceeded = async (tx: Prisma.TransactionClient, id: string, result: unknown) => {
+  await tx.restore_job.update({
+    where: { id },
+    data: { state: to('succeeded'), result: JSON.stringify(result), payload: '' },
   });
 };
 
@@ -52,13 +71,13 @@ const createOrGetExisting = async (data: {
       select: { id: true },
     });
     if (active) throw new DuplicateResourceError('A restore is already running for this library');
-    return tx.restore_job.create({ data: { ...data, state: 'queued' } });
+    return tx.restore_job.create({ data: { ...data, state: to('queued') } });
   });
 
 const cancelQueued = async (id: string, owner: string) => {
   await prisma.restore_job.updateMany({
-    where: { id, owner, state: 'queued' },
-    data: { state: 'cancelled', payload: '' },
+    where: { id, owner, state: to('queued') },
+    data: { state: to('cancelled'), payload: '' },
   });
 };
 
@@ -69,18 +88,21 @@ const cancelQueued = async (id: string, owner: string) => {
 const requeueInterrupted = async () =>
   prisma.$transaction(async (tx) => {
     const abandoned = await tx.restore_job.findMany({
-      where: { state: 'running', attempts: { gte: MAX_RESTORE_ATTEMPTS } },
+      where: { state: to('running'), attempts: { gte: MAX_RESTORE_ATTEMPTS } },
       select: { id: true, request_id: true },
     });
     if (abandoned.length) {
       await tx.restore_job.updateMany({
         where: { id: { in: abandoned.map((job) => job.id) } },
-        data: { state: 'failed', payload: '' },
+        data: { state: to('failed'), payload: '' },
       });
     }
-    await tx.restore_job.updateMany({ where: { state: 'running' }, data: { state: 'queued' } });
+    await tx.restore_job.updateMany({
+      where: { state: to('running') },
+      data: { state: to('queued') },
+    });
     const queued = await tx.restore_job.findMany({
-      where: { state: 'queued' },
+      where: { state: to('queued') },
       select: { id: true, request_id: true },
       orderBy: { created_at: 'asc' },
     });
@@ -107,6 +129,7 @@ const restoreJobRepository = {
   getById,
   getByIdOrThrow,
   markFailed,
+  markSucceeded,
   createOrGetExisting,
   cancelQueued,
   requeueInterrupted,

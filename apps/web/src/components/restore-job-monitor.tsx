@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useCurrentUser } from '@/lib/session-resource';
-import { checkPendingRestore } from '@/lib/restore-job';
+import { checkPendingRestore, subscribeToRestore } from '@/lib/restore-job';
 import { reportError } from '@/lib/report-error';
 
 export function RestoreJobMonitor() {
@@ -31,15 +31,14 @@ export function RestoreJobMonitor() {
       clearTimeout(timer);
       void check();
     };
-    window.addEventListener('projekt-manga-restore-started', started);
-    window.addEventListener('storage', started);
+    // Not on progress: this check is what saves it.
+    const unsubscribe = subscribeToRestore(started, ['started']);
     void check();
     return () => {
       stopped = true;
       controller.abort();
       clearTimeout(timer);
-      window.removeEventListener('projekt-manga-restore-started', started);
-      window.removeEventListener('storage', started);
+      unsubscribe();
     };
   }, [user?.id, loading]);
   return null;

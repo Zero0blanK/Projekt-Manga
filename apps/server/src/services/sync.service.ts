@@ -7,6 +7,7 @@ import chapterRepository from '../repositories/chapter.repository.js';
 import { shareReadState } from './chapter.service.js';
 import categoryRepository from '../repositories/category.repository.js';
 import type { SyncPushBody } from '@projekt-manga/schemas';
+import { SYNC_CONFLICT, type SyncConflictCode } from '@projekt-manga/types';
 import { ValidationError } from '../utils/customErrors.js';
 import userRepository from '../repositories/user.repository.js';
 import restoreJobRepository from '../repositories/restoreJob.repository.js';
@@ -249,13 +250,23 @@ async function applyEach<T>(
   return { applied, failed };
 }
 
+/** A refused push a device acts on: told apart by `code`, not by the message's wording. */
+function syncConflict(message: string, code: SyncConflictCode): DuplicateResourceError {
+  const error = new DuplicateResourceError(message);
+  error.code = code;
+  return error;
+}
+
 const push = async (user_id: string, body: SyncPushBody) =>
   withAccountWriteLock(user_id, async () => {
     const generation = await userRepository.getSyncGeneration(user_id);
     if ((body.generation ?? 0) !== generation)
-      throw new DuplicateResourceError('Sync reset required after a library restore');
+      throw syncConflict(
+        'Sync reset required after a library restore',
+        SYNC_CONFLICT.resetRequired,
+      );
     if (await restoreJobRepository.hasActive(user_id))
-      throw new DuplicateResourceError('Library restore is in progress');
+      throw syncConflict('Library restore is in progress', SYNC_CONFLICT.restoreInProgress);
     const library = await applyEach(
       body.library ?? [],
       (row) => row.manga_id,

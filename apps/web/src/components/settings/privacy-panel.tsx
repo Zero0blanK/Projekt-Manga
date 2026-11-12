@@ -5,16 +5,10 @@ import { toast } from '@/hooks/use-toast';
 import {
   exportReadingDataFromServer,
   previewRestore as previewServerRestore,
-  startReplaceRestore,
   ApiError,
 } from '@projekt-manga/api-client';
 import { replaceBackupBodySchema, RESTORE_UPLOAD_LIMIT_BYTES } from '@projekt-manga/schemas';
-import {
-  savePendingRestore,
-  clearPendingRestore,
-  markRestoreAccepted,
-  getPendingRestore,
-} from '@/lib/restore-job';
+import { startTrackedRestore, subscribeToRestore, getPendingRestore } from '@/lib/restore-job';
 import { parseBackup, previewBackupMerge, type BackupPayload } from '@/lib/backup-validation';
 import { useHistory } from '@/lib/shared-queries';
 import { ChangePasswordField } from '@/components/settings/change-password-field';
@@ -204,14 +198,7 @@ export function PrivacyPanel() {
     const refresh = () =>
       setRestorePending(getPendingRestore()?.owner === (user?.id ?? 'anonymous'));
     refresh();
-    window.addEventListener('projekt-manga-restore-started', refresh);
-    window.addEventListener('projekt-manga-restore-finished', refresh);
-    window.addEventListener('storage', refresh);
-    return () => {
-      window.removeEventListener('projekt-manga-restore-started', refresh);
-      window.removeEventListener('projekt-manga-restore-finished', refresh);
-      window.removeEventListener('storage', refresh);
-    };
+    return subscribeToRestore(refresh, ['started', 'finished']);
   }, [sessionLoading, user?.id]);
 
   // AlertDialogAction closes the dialog on click, which would hide the "Deleting…" state before
@@ -329,16 +316,16 @@ export function PrivacyPanel() {
         if (new Blob([JSON.stringify(parsed.data)]).size > RESTORE_UPLOAD_LIMIT_BYTES) {
           throw new Error('The restore request exceeds the 10 MiB limit. No data was changed.');
         }
-        savePendingRestore({
-          id: jobId,
-          mode,
-          owner: user?.id ?? 'anonymous',
-          settings: importableSettings(backup.settings, user?.id ?? 'anonymous'),
-          skippedDownloads: backup.downloads?.length ?? 0,
-          startedAt: Date.now(),
-        });
-        await startReplaceRestore(parsed.data);
-        markRestoreAccepted(jobId);
+        await startTrackedRestore(
+          {
+            id: jobId,
+            mode,
+            owner: user?.id ?? 'anonymous',
+            settings: importableSettings(backup.settings, user?.id ?? 'anonymous'),
+            skippedDownloads: backup.downloads?.length ?? 0,
+          },
+          parsed.data,
+        );
         return null;
       })
       .then((result) => {
@@ -360,10 +347,6 @@ export function PrivacyPanel() {
         setBackup(null);
       })
       .catch((error) => {
-        if (!(error instanceof ApiError && (error.kind === 'network' || error.kind === 'timeout')))
-          clearPendingRestore(jobId);
-        // The upload may still have arrived; give the server its grace period from now.
-        else markRestoreAccepted(jobId);
         toast({
           description: error instanceof Error ? error.message : "Couldn't restore that export.",
         });

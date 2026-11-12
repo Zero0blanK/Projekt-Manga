@@ -8,14 +8,13 @@ import {
   getSourceKeysFromUrls,
   previewRestore,
   searchSourceMangaPage,
-  startReplaceRestore,
   type RestorePreview,
 } from '@projekt-manga/api-client';
 import { replaceBackupBodySchema, RESTORE_UPLOAD_LIMIT_BYTES } from '@projekt-manga/schemas';
 import { toast } from '@/hooks/use-toast';
 import { Field } from '@/components/settings/field-controls';
 import { parseBackup } from '@/lib/backup-validation';
-import { savePendingRestore, clearPendingRestore, markRestoreAccepted } from '@/lib/restore-job';
+import { startTrackedRestore } from '@/lib/restore-job';
 import {
   buildMihonImport,
   findTitlesInSources,
@@ -30,7 +29,7 @@ import {
 } from '@/lib/mihon-backup';
 import { useMigrationPreferences } from '@/lib/migration-state';
 import { SourceOrderList } from '@/components/settings/source-order-list';
-import { clearMihonImportExtras, saveMihonImportExtras } from '@/lib/mihon-backup/extras';
+import { saveMihonImportExtras } from '@/lib/mihon-backup/extras';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -238,17 +237,12 @@ export function MihonImport({
           throw new Error('This backup cannot be imported safely. No data was changed.');
         if (new Blob([JSON.stringify(parsed.data)]).size > RESTORE_UPLOAD_LIMIT_BYTES)
           throw new Error('The import exceeds the 10 MiB limit. No data was changed.');
-        savePendingRestore({
-          id: jobId,
-          mode: 'merge',
-          owner,
-          settings: {},
-          skippedDownloads: 0,
-          startedAt: Date.now(),
-        });
-        saveMihonImportExtras(jobId, owner, step.built.extras);
-        await startReplaceRestore(parsed.data);
-        markRestoreAccepted(jobId);
+        await startTrackedRestore(
+          { id: jobId, mode: 'merge', owner, settings: {}, skippedDownloads: 0 },
+          parsed.data,
+          // Applied when the restore finishes, by the id it is tracked under.
+          () => saveMihonImportExtras(jobId, owner, step.built.extras),
+        );
       })
       .then(() => {
         toast({
@@ -258,16 +252,6 @@ export function MihonImport({
         setStep({ kind: 'closed' });
       })
       .catch((error: unknown) => {
-        if (!(
-          error instanceof ApiError &&
-          (error.kind === 'network' || error.kind === 'timeout')
-        )) {
-          clearPendingRestore(jobId);
-          clearMihonImportExtras(jobId);
-        } else {
-          // The upload may still have arrived; give the server its grace period from now.
-          markRestoreAccepted(jobId);
-        }
         toast({
           description: error instanceof Error ? error.message : "Couldn't start the import.",
         });

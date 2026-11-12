@@ -1,7 +1,7 @@
 import { request } from './client.js';
 import type { PreviewBackupBody, ReplaceBackupBody } from '@projekt-manga/schemas';
 import type { RestoreJob, RestorePreview } from '@projekt-manga/types';
-export type { RestoreJob, RestorePreview } from '@projekt-manga/types';
+export type { RestoreJob, RestorePreview, SyncConflictCode } from '@projekt-manga/types';
 
 export const previewRestore = (backup: PreviewBackupBody, signal?: AbortSignal) =>
   request<RestorePreview>('/restore/preview', { method: 'POST', body: backup, signal });

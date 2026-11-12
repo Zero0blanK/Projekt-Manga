@@ -7,22 +7,11 @@ import {
   cancelPendingRestore,
   discardTrackedRestore,
   getPendingRestore,
+  restoreTracking,
+  subscribeToRestore,
 } from '@/lib/restore-job';
 import { useCurrentUser } from '@/lib/session-resource';
 import { RestoreAccountRecovery } from '@/components/settings/account-panel';
-
-const subscribe = (listener: () => void) => {
-  window.addEventListener('projekt-manga-restore-started', listener);
-  window.addEventListener('projekt-manga-restore-finished', listener);
-  window.addEventListener('projekt-manga-restore-progress', listener);
-  window.addEventListener('storage', listener);
-  return () => {
-    window.removeEventListener('projekt-manga-restore-started', listener);
-    window.removeEventListener('projekt-manga-restore-finished', listener);
-    window.removeEventListener('projekt-manga-restore-progress', listener);
-    window.removeEventListener('storage', listener);
-  };
-};
 
 /**
  * Where a library restore stands, in a corner of the app while it runs.
@@ -43,15 +32,16 @@ export function RestoreStatusCard() {
   const ownerMismatch = !!pending && !userLoading && !ownerMatches;
   useEffect(() => {
     const refresh = () => setPending(getPendingRestore());
-    const unsubscribe = subscribe(refresh);
+    const unsubscribe = subscribeToRestore(refresh);
     refresh();
     return unsubscribe;
   }, []);
   if (!pending) return null;
-  const failed = pending.failed === true;
-  const cancelled = pending.cancelled === true;
-  const statusUnknown = pending.statusUnknown === true;
-  const running = !failed && !cancelled && !statusUnknown;
+  const tracking = restoreTracking(pending);
+  const failed = tracking === 'failed';
+  const cancelled = tracking === 'cancelled';
+  const statusUnknown = tracking === 'unknown';
+  const running = tracking === 'running';
   const progress = pending.progress;
   const hasProgress = ownerMatches && !!progress && progress.total > 0;
   const progressPercent = hasProgress
