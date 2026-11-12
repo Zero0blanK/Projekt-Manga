@@ -2,6 +2,7 @@ import prisma from '../configs/prisma.config.js';
 import type { Chapters } from '@projekt-manga/types';
 import { withBusyRetry } from '../utils/sqliteRetry.js';
 import type { ChapterSyncPlan } from '../utils/chapterSync.js';
+import { foldReadingProgress } from '../utils/readingProgress.js';
 
 // `manga_id` is only spread into `data` when truthy, here and in the two functions below —
 // the caller's slug lookup can miss and pass `''`, and writing that would blank the
@@ -255,9 +256,7 @@ async function mergeChapterInto(tx: Tx, fromId: string, intoId: string) {
   await tx.chapter.update({
     where: { id: intoId },
     data: {
-      is_read: into.is_read || from.is_read,
-      is_bookmark: into.is_bookmark || from.is_bookmark,
-      last_page_read: Math.max(into.last_page_read, from.last_page_read),
+      ...foldReadingProgress(into, from),
       page_count: into.page_count || from.page_count,
     },
   });
@@ -276,11 +275,7 @@ async function mergeChapterInto(tx: Tx, fromId: string, intoId: string) {
     }
     await tx.user_chapter_state.update({
       where: { id: existing.id },
-      data: {
-        is_read: existing.is_read || state.is_read,
-        is_bookmark: existing.is_bookmark || state.is_bookmark,
-        last_page_read: Math.max(existing.last_page_read, state.last_page_read),
-      },
+      data: foldReadingProgress(existing, state),
     });
     await tx.user_chapter_state.delete({ where: { id: state.id } });
   }

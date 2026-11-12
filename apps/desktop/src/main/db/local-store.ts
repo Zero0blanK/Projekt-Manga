@@ -9,6 +9,15 @@
  * restart with no server running.
  */
 import { getDb } from './connection';
+import {
+  adoptPulledChapterState,
+  foldChapterState,
+  foldChapterStateInto,
+  overwriteChapterState,
+  seedChapterState,
+  setChapterPage,
+  setChapterRead,
+} from './chapter-state';
 import { createId } from '@paralleldrive/cuid2';
 import { getCachedSession, type CachedSession } from '../auth-cache';
 import { SESSION_COOKIE_NAME } from '../../shared/config';
@@ -179,16 +188,7 @@ function upsertChapter(input: LocalChapterInput): void {
   // Read state is only ever written by seedChapterState (first sight, "adopt whatever
   // the server said") or the local mark-read/progress calls below — a catalog re-upsert
   // must never clobber it, so this only creates the row if it doesn't exist yet.
-  db.prepare(
-    `INSERT OR IGNORE INTO chapter_state (chapter_id, is_read, is_bookmark, last_page_read, updated_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(
-    input.id,
-    input.is_read ? 1 : 0,
-    input.is_bookmark ? 1 : 0,
-    input.last_page_read ?? 0,
-    FROM_SERVER,
-  );
+  seedChapterState(db, input.id, input, FROM_SERVER);
 
   if (stub) mergeChapterInto(stub.id, input.id);
 }
@@ -201,34 +201,7 @@ function upsertChapter(input: LocalChapterInput): void {
  */
 function mergeChapterInto(fromId: string, intoId: string): void {
   const db = getDb();
-  const from = db
-    .prepare(`SELECT is_read, is_bookmark, last_page_read FROM chapter_state WHERE chapter_id = ?`)
-    .get(fromId) as { is_read: number; is_bookmark: number; last_page_read: number } | undefined;
-  if (from) {
-    const intoHasState = db.prepare(`SELECT 1 FROM chapter_state WHERE chapter_id = ?`).get(intoId);
-    if (intoHasState) {
-      db.prepare(
-        `UPDATE chapter_state SET
-           is_read = MAX(is_read, ?), is_bookmark = MAX(is_bookmark, ?),
-           last_page_read = MAX(last_page_read, ?), updated_at = ?
-         WHERE chapter_id = ? AND (is_read < ? OR is_bookmark < ? OR last_page_read < ?)`,
-      ).run(
-        from.is_read,
-        from.is_bookmark,
-        from.last_page_read,
-        nowIso(),
-        intoId,
-        from.is_read,
-        from.is_bookmark,
-        from.last_page_read,
-      );
-    } else {
-      db.prepare(`UPDATE chapter_state SET chapter_id = ? WHERE chapter_id = ?`).run(
-        intoId,
-        fromId,
-      );
-    }
-  }
+  foldChapterStateInto(db, fromId, intoId, nowIso());
   // One live history row per chapter: a row the other chapter already has takes this
   // one's reading, and this one becomes a tombstone (as deleteHistory leaves it, with
   // last_read bumped so the next push carries it) for the server and other devices.
@@ -525,23 +498,12 @@ function ensureChapterRow(stub: LocalChapterStub): string {
 
 function markChapterRead(stub: LocalChapterStub, isRead: boolean): void {
   const chapterId = ensureChapterRow(stub);
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO chapter_state (chapter_id, is_read, last_page_read, updated_at) VALUES (?, ?, 0, ?)
-     ON CONFLICT(chapter_id) DO UPDATE SET
-       is_read = excluded.is_read,
-       last_page_read = CASE WHEN excluded.is_read = 0 THEN 0 ELSE chapter_state.last_page_read END,
-       updated_at = excluded.updated_at`,
-  ).run(chapterId, isRead ? 1 : 0, nowIso());
+  setChapterRead(getDb(), chapterId, isRead, nowIso());
 }
 
 function updateChapterProgress(stub: LocalChapterStub, lastPageRead: number): void {
   const chapterId = ensureChapterRow(stub);
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO chapter_state (chapter_id, last_page_read, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(chapter_id) DO UPDATE SET last_page_read = excluded.last_page_read, updated_at = excluded.updated_at`,
-  ).run(chapterId, lastPageRead, nowIso());
+  setChapterPage(getDb(), chapterId, lastPageRead, nowIso());
 }
 
 // ─── History ─────────────────────────────────────────────────────────────────────────
@@ -1061,13 +1023,7 @@ function reapplyUnsentLocalChanges(changes: UnsentLocalChanges, at: string): voi
       chapter_number: 0,
       page_count: null,
     });
-    db.prepare(
-      `INSERT INTO chapter_state (chapter_id, is_read, is_bookmark, last_page_read, updated_at)
-       VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(chapter_id) DO UPDATE SET
-         is_read = excluded.is_read, is_bookmark = excluded.is_bookmark,
-         last_page_read = excluded.last_page_read, updated_at = excluded.updated_at`,
-    ).run(chapterId, state.is_read, state.is_bookmark, state.last_page_read, at);
+    overwriteChapterState(db, chapterId, state, at);
   }
   for (const state of changes.mangaStates) {
     // A title the restore left without a row here has nothing to attach the state to.
@@ -1279,14 +1235,13 @@ async function reconcileRestoreFromServer(
           })
         : null;
       if (chapterId) {
-        db.prepare(
-          `INSERT INTO chapter_state (chapter_id, is_read, last_page_read, updated_at)
-           VALUES (?, ?, ?, ?)
-           ON CONFLICT(chapter_id) DO UPDATE SET
-             is_read = MAX(chapter_state.is_read, excluded.is_read),
-             last_page_read = MAX(chapter_state.last_page_read, excluded.last_page_read),
-             updated_at = excluded.updated_at`,
-        ).run(chapterId, row.is_read ? 1 : 0, row.last_page_read ?? 0, stamped);
+        foldChapterState(
+          db,
+          chapterId,
+          { is_read: row.is_read, last_page_read: row.last_page_read },
+          stamped,
+          'always',
+        );
       }
       db.prepare(
         `INSERT INTO history (id, source, manga_id, manga_slug, source_manga_id, title, thumbnail_url, chapter_id, read_at, last_read, pages_read, time_read) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1674,18 +1629,7 @@ function applyPulledChanges(pulled: PulledSyncData): ApplyPulledChangesResult {
     // would, rather than being skipped: the key is all a row needs.
     for (const row of pulled.chapter_state) {
       const chapterId = ensureChapterRow(row);
-      db.prepare(
-        `INSERT INTO chapter_state (chapter_id, is_read, is_bookmark, last_page_read, updated_at) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(chapter_id) DO UPDATE SET is_read = excluded.is_read, is_bookmark = excluded.is_bookmark,
-           last_page_read = excluded.last_page_read, updated_at = excluded.updated_at
-         WHERE chapter_state.updated_at <= excluded.updated_at`,
-      ).run(
-        chapterId,
-        row.is_read ? 1 : 0,
-        row.is_bookmark ? 1 : 0,
-        row.last_page_read,
-        row.updated_at,
-      );
+      adoptPulledChapterState(db, chapterId, row, row.updated_at);
     }
 
     for (const row of pulled.manga_category) {

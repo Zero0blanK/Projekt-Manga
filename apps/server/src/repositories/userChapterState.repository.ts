@@ -1,5 +1,6 @@
 import prisma from '../configs/prisma.config.js';
 import { excludeExisting } from '../utils/skipDuplicates.js';
+import { mergePushedReadingProgress } from '../utils/readingProgress.js';
 
 export interface UserChapterStatePatch {
   is_read?: boolean;
@@ -128,14 +129,9 @@ const mergeIncoming = async (
     });
   }
 
-  const serverWins = existing.updated_at >= incoming.updated_at;
   return await prisma.user_chapter_state.update({
     where: { user_id_chapter_id: { user_id, chapter_id } },
-    data: {
-      is_read: existing.is_read || incoming.is_read,
-      last_page_read: Math.max(existing.last_page_read, incoming.last_page_read),
-      is_bookmark: serverWins ? existing.is_bookmark : incoming.is_bookmark,
-    },
+    data: mergePushedReadingProgress(existing, incoming),
   });
 };
 
