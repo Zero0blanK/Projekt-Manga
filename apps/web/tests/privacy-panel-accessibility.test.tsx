@@ -13,7 +13,7 @@ const {
   previewRestore,
   safeParse,
   startReplaceRestore,
-  savePendingRestore,
+  startTrackedRestore,
   toast,
 } = vi.hoisted(() => ({
   currentUser: { user: null as { id: string; email: string } | null, loading: false },
@@ -25,7 +25,7 @@ const {
   previewRestore: vi.fn(),
   safeParse: vi.fn(),
   startReplaceRestore: vi.fn(),
-  savePendingRestore: vi.fn(),
+  startTrackedRestore: vi.fn(),
   toast: vi.fn(),
 }));
 
@@ -45,8 +45,8 @@ vi.mock('@projekt-manga/schemas', () => ({
   RESTORE_UPLOAD_LIMIT_BYTES: 10 * 1024 * 1024,
 }));
 vi.mock('@/lib/restore-job', () => ({
-  savePendingRestore,
-  clearPendingRestore: vi.fn(),
+  startTrackedRestore,
+  subscribeToRestore: () => () => {},
   getPendingRestore,
 }));
 vi.mock('@/lib/backup-validation', () => ({
@@ -127,7 +127,7 @@ describe('PrivacyPanel accessibility', () => {
         description: 'The restore request exceeds the 10 MiB limit. No data was changed.',
       }),
     );
-    expect(savePendingRestore).not.toHaveBeenCalled();
+    expect(startTrackedRestore).not.toHaveBeenCalled();
     expect(startReplaceRestore).not.toHaveBeenCalled();
   });
 

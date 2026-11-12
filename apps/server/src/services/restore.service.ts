@@ -1,4 +1,5 @@
 import type { PreviewBackupBody, ReplaceBackupBody } from '@projekt-manga/schemas';
+import { isRestoreState, type RestoreState } from '@projekt-manga/types';
 import { previewBackupConflicts, replaceBackup } from '../repositories/restore.repository.js';
 import restoreJobRepository from '../repositories/restoreJob.repository.js';
 import { NotFoundError } from '../utils/customErrors.js';
@@ -10,7 +11,7 @@ type Result = Awaited<ReturnType<typeof replaceBackup>>;
 type Job = {
   id: string;
   owner: string;
-  state: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  state: RestoreState;
   result: Result | null;
   progress: { phase: string; completed: number; total: number } | null;
 };
@@ -25,12 +26,11 @@ const RESTORE_CANCELLATION_GRACE_MS = 3_000;
 const FINISHED_JOB_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 function publicJob(row: { id: string; owner: string; state: string; result: string | null }): Job {
-  if (!['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(row.state))
-    throw new Error('Invalid persisted restore state');
+  if (!isRestoreState(row.state)) throw new Error('Invalid persisted restore state');
   return {
     id: row.id,
     owner: row.owner,
-    state: row.state as Job['state'],
+    state: row.state,
     result: row.result ? (JSON.parse(row.result) as Result) : null,
     progress: progressByJob.get(row.id) ?? null,
   };

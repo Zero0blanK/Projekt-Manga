@@ -7,6 +7,7 @@ import { randomUUID as createId } from 'node:crypto';
 import mangaOverrideRepository from './mangaOverride.repository.js';
 import mangaLinkRepository from './mangaLink.repository.js';
 import { ValidationError } from '../utils/customErrors.js';
+import restoreJobRepository from './restoreJob.repository.js';
 
 const LOOKUP_CHUNK_SIZE = 200;
 const INSERT_CHUNK_SIZE = 50;
@@ -963,12 +964,7 @@ export async function replaceBackup(
           data: { sync_generation: { increment: 1 } },
         });
       }
-      if (jobId) {
-        await tx.restore_job.update({
-          where: { id: jobId },
-          data: { state: 'succeeded', result: JSON.stringify(result), payload: '' },
-        });
-      }
+      if (jobId) await restoreJobRepository.markSucceeded(tx, jobId, result);
       return result;
     },
     { maxWait: 15_000, timeout: restoreTimeoutMs(input) },

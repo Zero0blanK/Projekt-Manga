@@ -12,6 +12,7 @@ import type {
   UpdateLogKind,
 } from './enums.js';
 import type { Chapters } from './extension.js';
+import type { RestoreState } from './restore.js';
 
 // ── auth ─────────────────────────────────────────────────────────────────────
 
@@ -612,7 +613,7 @@ export interface NotificationChannel {
 
 export type RestoreJob = {
   id: string;
-  state: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  state: RestoreState;
   result: { restoredManga: number; restoredProgress: number; restoredHistory: number } | null;
   progress: { phase: string; completed: number; total: number } | null;
 };

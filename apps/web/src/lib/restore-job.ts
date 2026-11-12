@@ -10,24 +10,67 @@ import {
   hasLocalDataBridge,
   localInvoke,
   setProgressWriteHold,
+  startReplaceRestore,
 } from '@projekt-manga/api-client';
+import { isRestoreActive } from '@projekt-manga/types';
 import { toast } from '@/hooks/use-toast';
 import { setState } from './app-store';
 import { queryClient, queryKeys } from './query-client';
 import { profileSettingsForImport, replaceProfileSettings } from './profile-settings';
 import { applyMihonImportExtras, clearMihonImportExtras } from './mihon-backup/extras';
 
+/**
+ * The restore this browser is tracking: the one record of it (localStorage, so it
+ * survives a reload and is seen by other tabs), what state it is in, and the only code
+ * that changes it. Everything else asks through the functions here and hears of changes
+ * through `subscribeToRestore`.
+ *
+ * The server's job has its own states (`RestoreState` in packages/types). This side adds
+ * what only a client can be in: still uploading, and "unknown", when the server no longer
+ * has the job and cannot say how it ended.
+ */
 const storageKey = 'projekt-manga-pending-restore';
-const pendingEvents = [
-  'projekt-manga-restore-started',
-  'projekt-manga-restore-finished',
-  'projekt-manga-restore-progress',
-] as const;
+
+/**
+ * What changed about the tracked restore:
+ * - `started`: one began, or its status changed (failed, cancelled, unknown);
+ * - `finished`: it stopped being tracked;
+ * - `progress`: only its progress figures moved.
+ */
+export type RestoreChange = 'started' | 'finished' | 'progress';
+const ALL_CHANGES: readonly RestoreChange[] = ['started', 'finished', 'progress'];
+const eventName = (change: RestoreChange) => `projekt-manga-restore-${change}`;
+
+/**
+ * Calls `listener` when the tracked restore changes in one of the given ways, in this
+ * tab or another. Returns the unsubscribe.
+ */
+export function subscribeToRestore(
+  listener: () => void,
+  changes: readonly RestoreChange[] = ALL_CHANGES,
+): () => void {
+  for (const change of changes) window.addEventListener(eventName(change), listener);
+  window.addEventListener('storage', listener);
+  return () => {
+    for (const change of changes) window.removeEventListener(eventName(change), listener);
+    window.removeEventListener('storage', listener);
+  };
+}
+
+/** Where a tracked restore stands, as far as this browser knows. */
+export type RestoreTracking = 'running' | 'failed' | 'cancelled' | 'unknown';
+
+export function restoreTracking(pending: PendingRestore): RestoreTracking {
+  if (pending.failed) return 'failed';
+  if (pending.cancelled) return 'cancelled';
+  if (pending.statusUnknown) return 'unknown';
+  return 'running';
+}
 
 /** A restore still being applied, as opposed to one that failed, was cancelled or lost. */
 export function isRestoreRunning(): boolean {
   const pending = getPendingRestore();
-  return !!pending && !pending.failed && !pending.cancelled && !pending.statusUnknown;
+  return !!pending && restoreTracking(pending) === 'running';
 }
 
 /** Settles once no restore is being applied (finished, failed, cancelled or discarded). */
@@ -35,14 +78,18 @@ function untilRestoreEnds(): Promise<void> {
   return new Promise((resolve) => {
     const check = () => {
       if (isRestoreRunning()) return;
-      for (const event of pendingEvents) window.removeEventListener(event, check);
-      window.removeEventListener('storage', check);
+      unsubscribe();
       resolve();
     };
-    for (const event of pendingEvents) window.addEventListener(event, check);
-    window.addEventListener('storage', check);
+    const unsubscribe = subscribeToRestore(check);
     check();
   });
+}
+
+/** The one place the record is written; every change is announced. */
+function store(pending: PendingRestore, change: RestoreChange | null): void {
+  localStorage.setItem(storageKey, JSON.stringify(pending));
+  if (change) window.dispatchEvent(new Event(eventName(change)));
 }
 
 // Reading carries on during a restore; progress saves to the server wait for it to end
@@ -53,14 +100,7 @@ if (typeof window !== 'undefined') {
 
 export function useRestorePending(): boolean {
   return useSyncExternalStore(
-    (listener) => {
-      for (const event of pendingEvents) window.addEventListener(event, listener);
-      window.addEventListener('storage', listener);
-      return () => {
-        for (const event of pendingEvents) window.removeEventListener(event, listener);
-        window.removeEventListener('storage', listener);
-      };
-    },
+    (listener) => subscribeToRestore(listener),
     () => getPendingRestore() !== null,
     () => false,
   );
@@ -90,8 +130,41 @@ export function savePendingRestore(value: PendingRestore): void {
     throw new Error(
       'A restore is already being tracked in this browser. Wait for it to finish before starting another.',
     );
-  localStorage.setItem(storageKey, JSON.stringify(value));
-  window.dispatchEvent(new Event('projekt-manga-restore-started'));
+  store(value, 'started');
+}
+
+/**
+ * Starts a restore on the server and tracks it here, in the order the tracking depends
+ * on: the record exists before the upload begins (so a reload mid-upload still knows of
+ * it), the server's "no such job" grace period starts when the upload lands, and a start
+ * that failed is forgotten, unless the connection dropped, when the upload may still have
+ * arrived. `afterTracked` runs once the record exists and before the upload.
+ *
+ * Throws what stopped it, for the caller to show; nothing is left to clean up.
+ */
+export async function startTrackedRestore(
+  tracked: Omit<
+    PendingRestore,
+    'startedAt' | 'acceptedAt' | 'failed' | 'cancelled' | 'statusUnknown' | 'progress'
+  >,
+  backup: Parameters<typeof startReplaceRestore>[0],
+  afterTracked?: () => void,
+): Promise<void> {
+  savePendingRestore({ ...tracked, startedAt: Date.now() });
+  try {
+    afterTracked?.();
+    await startReplaceRestore(backup);
+    markRestoreAccepted(tracked.id);
+  } catch (error) {
+    if (error instanceof ApiError && (error.kind === 'network' || error.kind === 'timeout')) {
+      // The upload may still have arrived; give the server its grace period from now.
+      markRestoreAccepted(tracked.id);
+    } else {
+      clearMihonImportExtras(tracked.id);
+      clearPendingRestore(tracked.id);
+    }
+    throw error;
+  }
 }
 
 export function getPendingRestore(): PendingRestore | null {
@@ -213,7 +286,7 @@ async function refreshRestoredLibrary(): Promise<void> {
 export function markRestoreAccepted(id: string): void {
   const pending = getPendingRestore();
   if (pending?.id !== id) return;
-  localStorage.setItem(storageKey, JSON.stringify({ ...pending, acceptedAt: Date.now() }));
+  store({ ...pending, acceptedAt: Date.now() }, null);
 }
 
 /**
@@ -231,7 +304,7 @@ export function discardTrackedRestore(): void {
 export function clearPendingRestore(id: string): void {
   if (getPendingRestore()?.id === id) {
     localStorage.removeItem(storageKey);
-    window.dispatchEvent(new Event('projekt-manga-restore-finished'));
+    window.dispatchEvent(new Event(eventName('finished')));
   }
 }
 
@@ -241,8 +314,7 @@ export async function cancelPendingRestore(): Promise<'cancelled' | 'running'> {
   const job = await cancelReplaceRestore(pending.id, pending.owner);
   if (job.state === 'cancelled') {
     clearMihonImportExtras(pending.id);
-    localStorage.setItem(storageKey, JSON.stringify({ ...pending, cancelled: true }));
-    window.dispatchEvent(new Event('projekt-manga-restore-started'));
+    store({ ...pending, cancelled: true }, 'started');
     return 'cancelled';
   }
   return 'running';
@@ -251,8 +323,7 @@ export async function cancelPendingRestore(): Promise<'cancelled' | 'running'> {
 function saveRestoreProgress(id: string, progress: PendingRestore['progress']): void {
   const pending = getPendingRestore();
   if (!pending || pending.id !== id || pending.failed) return;
-  localStorage.setItem(storageKey, JSON.stringify({ ...pending, progress }));
-  window.dispatchEvent(new Event('projekt-manga-restore-progress'));
+  store({ ...pending, progress }, 'progress');
 }
 
 export async function checkPendingRestore(
@@ -261,9 +332,8 @@ export async function checkPendingRestore(
 ): Promise<'idle' | 'waiting' | 'finished' | 'failed' | 'cancelled' | 'unknown'> {
   const pending = getPendingRestore();
   if (!pending || pending.owner !== owner) return 'idle';
-  if (pending.failed) return 'failed';
-  if (pending.cancelled) return 'cancelled';
-  if (pending.statusUnknown) return 'unknown';
+  const tracking = restoreTracking(pending);
+  if (tracking !== 'running') return tracking;
   let job;
   try {
     job = await getReplaceRestore(pending.id, owner, signal);
@@ -279,8 +349,7 @@ export async function checkPendingRestore(
         return 'waiting';
       }
       // The server cannot prove whether a database reset or endpoint change lost a completed job.
-      localStorage.setItem(storageKey, JSON.stringify({ ...pending, statusUnknown: true }));
-      window.dispatchEvent(new Event('projekt-manga-restore-started'));
+      store({ ...pending, statusUnknown: true }, 'started');
       toast({
         description:
           'The server no longer has this restore job. Its result is unknown, so the library remains blocked until you review the current server data.',
@@ -291,16 +360,14 @@ export async function checkPendingRestore(
   }
   signal?.throwIfAborted();
   saveRestoreProgress(pending.id, job.progress);
-  if (job.state === 'queued' || job.state === 'running') return 'waiting';
+  if (isRestoreActive(job.state)) return 'waiting';
   if (job.state === 'cancelled') {
-    localStorage.setItem(storageKey, JSON.stringify({ ...pending, cancelled: true }));
-    window.dispatchEvent(new Event('projekt-manga-restore-started'));
+    store({ ...pending, cancelled: true }, 'started');
     return 'cancelled';
   }
   if (job.state === 'failed') {
     clearMihonImportExtras(pending.id);
-    localStorage.setItem(storageKey, JSON.stringify({ ...pending, failed: true }));
-    window.dispatchEvent(new Event('projekt-manga-restore-started'));
+    store({ ...pending, failed: true }, 'started');
     toast({ description: 'Restore failed. Your previous library and history were kept.' });
     return 'failed';
   }

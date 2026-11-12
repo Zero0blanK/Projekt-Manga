@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getReplaceRestore = vi.fn();
 const cancelReplaceRestore = vi.fn();
+const startReplaceRestore = vi.fn();
 const localInvoke = vi.fn();
 const toast = vi.fn();
 const setState = vi.fn();
@@ -9,7 +10,10 @@ const invalidateQueries = vi.fn().mockResolvedValue(undefined);
 const setProgressWriteHold = vi.fn();
 
 class FakeApiError extends Error {
-  constructor(public status: number) {
+  constructor(
+    public status: number,
+    public kind?: string,
+  ) {
     super('Not found');
   }
 }
@@ -19,6 +23,7 @@ vi.mock('@projekt-manga/api-client', () => ({
   getReplaceRestore: (...args: unknown[]) => getReplaceRestore(...args),
   getCurrentUser: async () => ({ user: { id: 'account-1' } }),
   cancelReplaceRestore: (...args: unknown[]) => cancelReplaceRestore(...args),
+  startReplaceRestore: (...args: unknown[]) => startReplaceRestore(...args),
   hasLocalDataBridge: () => true,
   localInvoke: (...args: unknown[]) => localInvoke(...args),
   setProgressWriteHold: (...args: unknown[]) => setProgressWriteHold(...args),
@@ -44,6 +49,9 @@ const {
   discardTrackedRestore,
   isRestoreRunning,
   markRestoreAccepted,
+  restoreTracking,
+  startTrackedRestore,
+  subscribeToRestore,
 } = await import('@/lib/restore-job');
 // Installed once at import; captured before beforeEach clears the mock.
 const installedHold = setProgressWriteHold.mock.calls[0]?.[0] as () => Promise<void> | null;
@@ -272,5 +280,82 @@ describe('restore job recovery', () => {
     expect(released).toBe(true);
     expect(isRestoreRunning()).toBe(false);
     expect(hold()).toBeNull();
+  });
+});
+
+describe('starting a tracked restore', () => {
+  const tracked = { id: 'restore-id', owner: 'account-1', settings: {}, skippedDownloads: 0 };
+  const backup = { jobId: 'restore-id' } as never;
+
+  it('tracks before the upload, and counts the grace period from when it landed', async () => {
+    const order: string[] = [];
+    startReplaceRestore.mockImplementationOnce(async () => {
+      order.push(getPendingRestore()?.acceptedAt === undefined ? 'upload:tracked' : 'upload:late');
+    });
+    await startTrackedRestore(tracked, backup, () => order.push('afterTracked'));
+    expect(order).toEqual(['afterTracked', 'upload:tracked']);
+    expect(getPendingRestore()?.acceptedAt).toEqual(expect.any(Number));
+    expect(isRestoreRunning()).toBe(true);
+  });
+
+  it('forgets a restore the server refused', async () => {
+    startReplaceRestore.mockRejectedValueOnce(new FakeApiError(409));
+    await expect(startTrackedRestore(tracked, backup)).rejects.toBeInstanceOf(FakeApiError);
+    expect(getPendingRestore()).toBeNull();
+  });
+
+  it('keeps tracking when the connection dropped: the upload may have arrived', async () => {
+    startReplaceRestore.mockRejectedValueOnce(new FakeApiError(0, 'network'));
+    await expect(startTrackedRestore(tracked, backup)).rejects.toBeInstanceOf(FakeApiError);
+    expect(getPendingRestore()?.acceptedAt).toEqual(expect.any(Number));
+  });
+
+  it('leaves a restore already being tracked alone', async () => {
+    savePendingRestore(pending);
+    await expect(startTrackedRestore({ ...tracked, id: 'second' }, backup)).rejects.toThrow(
+      /already being tracked/,
+    );
+    expect(startReplaceRestore).not.toHaveBeenCalled();
+    expect(getPendingRestore()?.id).toBe('restore-id');
+  });
+});
+
+describe('hearing about the tracked restore', () => {
+  it('names one state for a record, whichever flags it carries', () => {
+    expect(restoreTracking(pending)).toBe('running');
+    expect(restoreTracking({ ...pending, failed: true, statusUnknown: true })).toBe('failed');
+    expect(restoreTracking({ ...pending, cancelled: true })).toBe('cancelled');
+    expect(restoreTracking({ ...pending, statusUnknown: true })).toBe('unknown');
+  });
+
+  it('announces a start, a status change and the end, and stops when unsubscribed', async () => {
+    const any = vi.fn();
+    const statusOnly = vi.fn();
+    const stopAny = subscribeToRestore(any);
+    const stopStatus = subscribeToRestore(statusOnly, ['started']);
+
+    savePendingRestore(pending);
+    expect(any).toHaveBeenCalledTimes(1);
+    expect(statusOnly).toHaveBeenCalledTimes(1);
+
+    // Progress reaches only those who asked for it.
+    getReplaceRestore.mockResolvedValueOnce({
+      state: 'running',
+      result: null,
+      progress: { phase: 'Restoring', completed: 1, total: 4 },
+    });
+    await checkPendingRestore('account-1');
+    expect(any).toHaveBeenCalledTimes(2);
+    expect(statusOnly).toHaveBeenCalledTimes(1);
+
+    discardTrackedRestore();
+    expect(any).toHaveBeenCalledTimes(3);
+    expect(statusOnly).toHaveBeenCalledTimes(1);
+
+    stopAny();
+    stopStatus();
+    savePendingRestore(pending);
+    expect(any).toHaveBeenCalledTimes(3);
+    expect(statusOnly).toHaveBeenCalledTimes(1);
   });
 });
