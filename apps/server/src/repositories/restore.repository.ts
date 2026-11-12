@@ -7,6 +7,7 @@ import { randomUUID as createId } from 'node:crypto';
 import mangaOverrideRepository from './mangaOverride.repository.js';
 import mangaLinkRepository from './mangaLink.repository.js';
 import { ValidationError } from '../utils/customErrors.js';
+import { foldReadingProgress } from '../utils/readingProgress.js';
 
 const LOOKUP_CHUNK_SIZE = 200;
 const INSERT_CHUNK_SIZE = 50;
@@ -594,11 +595,7 @@ export async function replaceBackup(
           // outside the library had been read here.
           const mergedState =
             !replacing && existing
-              ? {
-                  is_read: existing.is_read || chapter.is_read,
-                  is_bookmark: existing.is_bookmark || chapter.is_bookmark,
-                  last_page_read: Math.max(existing.last_page_read, chapter.last_page_read),
-                }
+              ? foldReadingProgress(existing, chapter)
               : {
                   is_read: chapter.is_read,
                   is_bookmark: chapter.is_bookmark,
@@ -671,11 +668,7 @@ export async function replaceBackup(
         if (!current) continue;
         await tx.user_chapter_state.update({
           where: { user_id_chapter_id: { user_id: row.user_id, chapter_id: row.chapter_id } },
-          data: {
-            is_read: current.is_read || Boolean(row.is_read),
-            is_bookmark: current.is_bookmark || Boolean(row.is_bookmark),
-            last_page_read: Math.max(current.last_page_read, row.last_page_read ?? 0),
-          },
+          data: foldReadingProgress(current, row),
         });
       }
       const newUserChapterState = userChapterStateRows.filter(
@@ -902,6 +895,7 @@ export async function replaceBackup(
                 where: { user_id_chapter_id: { user_id: userId, chapter_id: chapterId } },
                 select: { last_page_read: true, is_read: true },
               });
+              const merged = foldReadingProgress(current, row);
               await tx.user_chapter_state.upsert({
                 where: { user_id_chapter_id: { user_id: userId, chapter_id: chapterId } },
                 create: {
@@ -910,14 +904,13 @@ export async function replaceBackup(
                   last_page_read: row.last_page_read,
                   is_read: row.is_read ?? false,
                 },
-                update: {
-                  last_page_read: Math.max(current?.last_page_read ?? 0, row.last_page_read),
-                  is_read: (current?.is_read ?? false) || (row.is_read ?? false),
-                },
+                update: { last_page_read: merged.last_page_read, is_read: merged.is_read },
               });
             } else {
-              const lastPageRead = Math.max(chapter?.last_page_read ?? 0, row.last_page_read);
-              const isRead = (chapter?.is_read ?? false) || (row.is_read ?? false);
+              const { last_page_read: lastPageRead, is_read: isRead } = foldReadingProgress(
+                chapter,
+                row,
+              );
               await tx.chapter.update({
                 where: { id: chapterId },
                 data: { last_page_read: lastPageRead, is_read: isRead },
