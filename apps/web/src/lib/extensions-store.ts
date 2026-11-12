@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useHydrated } from './use-hydrated';
 import {
   ApiError,
   addExtensionRepository,
@@ -46,8 +46,7 @@ const pendingInstalls = new Map<string, Promise<void>>();
  * dead repository never hides the others.
  */
 export function useExtensionRepositories() {
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
+  const hydrated = useHydrated();
   const { data, isPending, error, refetch } = useQuery({
     ...staticDataQueries.repositories,
   });
@@ -61,8 +60,7 @@ export function useExtensionRepositories() {
 }
 
 export function useInstalledExtensions() {
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
+  const hydrated = useHydrated();
   const { data, isPending, error } = useQuery({
     ...staticDataQueries.installedExtensions,
   });

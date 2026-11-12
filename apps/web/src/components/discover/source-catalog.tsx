@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { CircleArrowUp, PackageCheck, PackageOpen, RefreshCw } from 'lucide-react';
-import { ApiError } from '@projekt-manga/api-client';
+import { ApiError, buildInstalledExtensionIconUrl } from '@projekt-manga/api-client';
 import type { ExtensionListingEntry } from '@projekt-manga/schemas';
 import { extensionActions, useSourceCatalog, type CatalogEntry } from '@/lib/extensions-store';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -19,7 +19,8 @@ import {
   type SourceFiltersValue,
 } from './source-filters';
 import { useContentPrivacy, isAdultSource } from './content-privacy';
-import { isProxyPlaceholder, sourceIconUrl } from '@/lib/source-url';
+import { sourceIconUrl } from '@/lib/source-url';
+import { CachedSourceIcon } from './cached-source-icon';
 
 /**
  * Installing and removing sources, on the page where they get used.
@@ -54,32 +55,32 @@ function ratingSuffix(rating: string | null | undefined, isNSFW: boolean): strin
 /**
  * A source's icon, or nothing at all.
  *
- * A bare `<img>` rather than `next/image` on purpose. The optimizer only fetches hosts
- * listed in `images.remotePatterns`, and an icon URL here comes from whatever repository
- * the reader added — so making these load through it would mean opening that allowlist wide
- * enough for the server to fetch and re-encode an arbitrary attacker-chosen URL. A plain tag
- * asks the *viewer's* browser instead, the same exposure as any other third-party image, and
- * needs no server-side allowlist.
+ * Not `next/image`: the optimizer only fetches hosts listed in `images.remotePatterns`, and
+ * an icon URL here comes from whatever repository the reader added. An installed source's
+ * icon comes from the copy stored with it, which may be an SVG; any other goes through the
+ * guarded image proxy, which refuses SVGs. Either way the icon is kept in this browser
+ * (CachedSourceIcon), so it shows at once on the next visit and survives a failed load.
  *
- * Renders nothing when there is no icon or it fails to load: the repository format makes
- * icons optional and asks for a fallback rather than a broken image.
+ * Renders nothing when there is no icon: the repository format makes icons optional and
+ * asks for a fallback rather than a broken image.
  */
-function SourceIcon({ url }: { url: string | null | undefined }) {
-  const [failed, setFailed] = useState(false);
-  const src = sourceIconUrl(url);
-  if (!src || failed) return null;
+function SourceIcon({
+  sourceKey,
+  url,
+  installedId,
+}: {
+  sourceKey: string;
+  url: string | null | undefined;
+  /** The installed copy's id, whose stored icon can be served even when it is an SVG. */
+  installedId: string | null;
+}) {
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- see the note above
-    <img
-      src={src}
-      alt=""
-      aria-hidden
-      width={20}
-      height={20}
-      loading="lazy"
-      onError={() => setFailed(true)}
-      onLoad={(event) => setFailed(isProxyPlaceholder(event.currentTarget))}
+    <CachedSourceIcon
+      cacheKey={sourceKey}
+      url={installedId ? buildInstalledExtensionIconUrl(installedId) : sourceIconUrl(url)}
+      size={20}
       className="mt-0.5 size-5 shrink-0 rounded object-contain"
+      fallback={null}
     />
   );
 }
@@ -368,7 +369,11 @@ export function SourceCatalog({
                                   className="flex items-start justify-between gap-4 px-5 py-3"
                                 >
                                   <div className="flex min-w-0 gap-2.5">
-                                    <SourceIcon url={item.entry.icon_url} />
+                                    <SourceIcon
+                                      sourceKey={item.entry.source_key}
+                                      url={item.entry.icon_url}
+                                      installedId={item.installedId}
+                                    />
                                     <div className="min-w-0">
                                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                         <span className="max-w-full truncate text-sm font-medium text-foreground">

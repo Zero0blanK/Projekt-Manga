@@ -81,8 +81,8 @@ export function ExtensionsPanel() {
           <Toggle settingKey={HIDE_LIBRARY_IN_SOURCES} />
         </Field>
         <Field
-          label="Open browser checks automatically"
-          hint="Desktop app: pass source checks out of sight, showing the window only if a check needs you"
+          label="Pass browser checks automatically"
+          hint="Desktop app: when a source asks for a Cloudflare check, pass it in the background, showing its window only if the check needs you"
         >
           <Toggle settingKey={AUTO_OPEN_CHALLENGE_SETTING} defaultOn />
         </Field>

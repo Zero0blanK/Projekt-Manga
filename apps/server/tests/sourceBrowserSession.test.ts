@@ -179,6 +179,21 @@ describe('source browser sessions', () => {
     );
   });
 
+  it("keeps the session's User-Agent for an allowed image host with no matching cookie", async () => {
+    prismaMock.source_browser_session.findMany.mockResolvedValue([]);
+    await request(app)
+      .put('/api/source/cf-source/browser-session')
+      .send({
+        userAgent: 'Mozilla/5.0 Test',
+        cookies: [cookie('session', 'login-secret', 'www.cf.example', { hostOnly: true })],
+      })
+      .expect(200);
+
+    expect(await imageSessionHeaders('cf-source', new URL('https://cf.example/1.jpg'))).toEqual({
+      'User-Agent': 'Mozilla/5.0 Test',
+    });
+  });
+
   it('loads a stored session from the database and skips rows it cannot decrypt', async () => {
     // Encrypt the way the service does, by saving once and capturing the row.
     prismaMock.source_browser_session.findMany.mockResolvedValue([]);

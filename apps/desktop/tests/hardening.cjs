@@ -399,20 +399,41 @@ test('source browser policy keeps cookies for allowed hosts only, on a local ser
     { brand: 'Google Chrome', version: '142.0.7444.175' },
     { brand: 'Not A(Brand', version: '99.0.0.0' },
   ]);
+  assert.equal(identity.userAgentMetadata.fullVersion, '142.0.7444.175');
   assert.equal(identity.clientHints['sec-ch-ua-mobile'], '?0');
   assert.equal(identity.clientHints['sec-ch-ua-platform'], '"Windows"');
   assert.match(identity.clientHints['sec-ch-ua'], /"Google Chrome";v="142"/);
+  assert.equal(
+    identity.highEntropyClientHints['sec-ch-ua-full-version-list'],
+    '"Chromium";v="142.0.7444.175", "Google Chrome";v="142.0.7444.175", "Not A(Brand";v="99.0.0.0"',
+  );
+  assert.equal(identity.highEntropyClientHints['sec-ch-ua-full-version'], '"142.0.7444.175"');
+  assert.equal(identity.highEntropyClientHints['sec-ch-ua-arch'], '"x86"');
+  assert.equal(identity.highEntropyClientHints['sec-ch-ua-bitness'], '"64"');
+  assert.equal(identity.highEntropyClientHints['sec-ch-ua-model'], '""');
+  assert.equal(identity.highEntropyClientHints['sec-ch-ua-platform-version'], '"10.0.0"');
+  assert.equal(identity.highEntropyClientHints['sec-ch-ua-wow64'], '?0');
+  assert.equal(identity.highEntropyClientHints['sec-ch-ua-form-factors'], '"Desktop"');
 
   const headers = {
     'User-Agent': 'Electron/43.8.0',
     'sec-ch-ua': '"Chromium";v="142"',
     'sec-ch-ua-mobile': '?0',
     'sec-ch-ua-platform': '"Windows"',
+    'Sec-CH-UA-Full-Version-List': '"Chromium";v="1"',
+    'Sec-CH-UA-Arch': '"arm"',
+    'Sec-CH-UA-Bogus': '"x"',
     Accept: 'text/html',
   };
   policy.applyBrowserIdentityHeaders(headers, identity);
   assert.equal(headers['User-Agent'], identity.userAgent);
   assert.equal(headers['sec-ch-ua'], identity.clientHints['sec-ch-ua']);
+  assert.equal(
+    headers['sec-ch-ua-full-version-list'],
+    identity.highEntropyClientHints['sec-ch-ua-full-version-list'],
+  );
+  assert.equal(headers['sec-ch-ua-arch'], '"x86"');
+  assert.equal(headers['sec-ch-ua-bogus'], undefined);
   assert.equal(headers.Accept, 'text/html');
   assert.equal(
     Object.keys(headers).filter((name) => name.toLowerCase() === 'user-agent').length,
@@ -422,13 +443,24 @@ test('source browser policy keeps cookies for allowed hosts only, on a local ser
   const insecure = {
     'user-agent': 'Electron/43.8.0',
     'sec-ch-ua': '"Chromium";v="142"',
+    'Sec-CH-UA-Full-Version-List': '"Chromium";v="1"',
     Accept: 'text/html',
   };
   policy.applyBrowserIdentityHeaders(insecure, identity, false);
   assert.equal(insecure['User-Agent'], identity.userAgent);
   assert.equal(insecure['user-agent'], undefined);
   assert.equal(insecure['sec-ch-ua'], undefined);
+  assert.equal(insecure['sec-ch-ua-full-version-list'], undefined);
   assert.equal(insecure.Accept, 'text/html');
+
+  const hiddenPatch = policy.browserSurfacePatch({ hidden: true, platform: 'Win32' });
+  assert.match(hiddenPatch, /chrome\.app/);
+  assert.match(hiddenPatch, /Notification/);
+  assert.match(hiddenPatch, /clipboard-write/);
+  assert.match(hiddenPatch, /storage-access/);
+  assert.match(hiddenPatch, /hasFocus/);
+  assert.match(hiddenPatch, /Basic Render Driver/i);
+  assert.doesNotMatch(policy.browserSurfacePatch({ hidden: false, platform: 'Win32' }), /hasFocus/);
 
   const kept = policy.cookiesForAllowedHosts(
     [
@@ -781,7 +813,47 @@ test('a source window the app opened by itself may close once the site shows pas
   );
   assert.equal(policy.isChallengeTitle('Just a moment...'), true);
   assert.equal(policy.isChallengeTitle('Attention Required! | Cloudflare'), true);
+  assert.equal(policy.isChallengeTitle('One more step'), true);
+  assert.equal(policy.isChallengeTitle('Checking if the site connection is secure'), true);
   assert.equal(policy.isChallengeTitle('ManhuaUS - Read Manhua Online'), false);
+
+  const clearance = [{ name: 'cf_clearance', value: 'a', domain: 'site.example' }];
+  assert.equal(
+    policy.hasPassedBrowserCheck(
+      'https://www.site.example/',
+      'ManhuaUS - Read Manhua Online',
+      clearance,
+      ['site.example'],
+    ),
+    true,
+  );
+  assert.equal(
+    policy.hasPassedBrowserCheck('https://www.site.example/', 'Just a moment...', clearance, [
+      'site.example',
+    ]),
+    false,
+  );
+  assert.equal(
+    policy.hasPassedBrowserCheck('https://other.example/', 'Site', clearance, ['site.example']),
+    false,
+  );
+  assert.equal(
+    policy.hasPassedBrowserCheck('not a url', 'Site', clearance, ['site.example']),
+    false,
+  );
+  assert.equal(
+    policy.hasPassedBrowserCheck('https://www.site.example/', 'Site', [], ['site.example']),
+    false,
+  );
+  assert.equal(
+    policy.hasPassedBrowserCheck(
+      'https://www.site.example/',
+      'Site',
+      [{ name: 'cf_clearance', value: 'a', domain: 'challenges.cloudflare.com' }],
+      ['site.example'],
+    ),
+    false,
+  );
 });
 
 test('release notes come from the changelog and the built files', async () => {

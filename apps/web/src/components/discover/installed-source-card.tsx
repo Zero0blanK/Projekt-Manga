@@ -34,29 +34,22 @@ import { sourceLanguageName as languageName, repairSourceName } from '@/lib/sour
 import { extensionActions, type CatalogEntry } from '@/lib/extensions-store';
 import { toast } from '@/hooks/use-toast';
 import { useSourceHealthStatus } from '@/lib/source-health-status';
-import { isProxyPlaceholder, sourceIconUrl, websiteUrl } from '@/lib/source-url';
+import { sourceIconUrl, websiteUrl } from '@/lib/source-url';
+import { CachedSourceIcon } from '@/components/discover/cached-source-icon';
 import { useConfirm } from '@/hooks/use-confirm';
 /** The extension's own icon when its repository ships one, the lettered tile otherwise. */
-function SourceAvatar({ name, accent, url }: { name: string; accent: string; url: string | null }) {
-  const [failed, setFailed] = useState(false);
-  if (url && !failed)
-    return (
-      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-secondary">
-        {/* eslint-disable-next-line @next/next/no-img-element -- repository icons are small remote SVGs, not optimisable images */}
-        <img
-          src={url}
-          alt=""
-          aria-hidden
-          width={28}
-          height={28}
-          loading="lazy"
-          onError={() => setFailed(true)}
-          onLoad={(event) => setFailed(isProxyPlaceholder(event.currentTarget))}
-          className="size-7 pointer-coarse:size-11 rounded-md object-contain"
-        />
-      </span>
-    );
-  return (
+function SourceAvatar({
+  sourceKey,
+  name,
+  accent,
+  url,
+}: {
+  sourceKey: string;
+  name: string;
+  accent: string;
+  url: string | null;
+}) {
+  const letters = (
     <div
       className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-sm font-semibold text-white"
       // Darkened so white initials keep ≥4.5:1 contrast on the lighter accent colours.
@@ -64,6 +57,20 @@ function SourceAvatar({ name, accent, url }: { name: string; accent: string; url
     >
       {name.slice(0, 2).toUpperCase()}
     </div>
+  );
+  return (
+    <CachedSourceIcon
+      cacheKey={sourceKey}
+      url={url}
+      size={28}
+      className="size-7 pointer-coarse:size-11 rounded-md object-contain"
+      fallback={letters}
+      frame={(icon) => (
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-secondary">
+          {icon}
+        </span>
+      )}
+    />
   );
 }
 
@@ -176,7 +183,12 @@ export function InstalledSourceCard({
             className="mt-1 size-4 shrink-0 accent-primary pointer-coarse:size-6"
           />
         )}
-        <SourceAvatar key={iconSrc} name={source.name} accent={source.accent} url={iconSrc} />
+        <SourceAvatar
+          sourceKey={source.id}
+          name={source.name}
+          accent={source.accent}
+          url={iconSrc}
+        />
         <div className="min-w-0 flex-1">
           <h2 className="truncate font-semibold">{source.name}</h2>
           {/* Language and version always share the first line; status badges get their own
