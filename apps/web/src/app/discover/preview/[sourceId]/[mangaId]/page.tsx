@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getSourceMangaDetails, ApiError } from '@projekt-manga/api-client';
@@ -8,15 +9,18 @@ import { decodeSourceRouteId } from '@/lib/source-route-id';
 type PreviewParams = { sourceId: string; mangaId: string };
 
 /** Reads a title straight from the source, without it being in the library — the
- * catalog item only carries id/title/cover, so full details need this extra call. */
-async function fetchPreview(sourceId: string, mangaId: string): Promise<MangaDetails | null> {
-  try {
-    return await getSourceMangaDetails(sourceId, decodeSourceRouteId(mangaId));
-  } catch (error) {
-    if (error instanceof ApiError && error.status === 404) return null;
-    throw error;
-  }
-}
+ * catalog item only carries id/title/cover, so full details need this extra call.
+ * Cached per request: the metadata and the page share one scrape. */
+const fetchPreview = cache(
+  async (sourceId: string, mangaId: string): Promise<MangaDetails | null> => {
+    try {
+      return await getSourceMangaDetails(sourceId, decodeSourceRouteId(mangaId));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
+  },
+);
 
 export async function generateMetadata({
   params,

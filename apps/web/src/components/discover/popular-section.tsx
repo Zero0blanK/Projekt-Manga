@@ -10,6 +10,7 @@ import { useMangaLibrary } from '@/lib/library-store';
 import { isInLibrary } from '@/lib/library-titles';
 import { Cover } from '@/components/cover';
 import { Check, Plus } from 'lucide-react';
+import { rememberSourcePreview } from '@/lib/source-preview-seed';
 
 export function SourceResultCard({ sourceId, item }: { sourceId: string; item: Mangas }) {
   const [adding, setAdding] = useState(false);
@@ -45,12 +46,16 @@ export function SourceResultCard({ sourceId, item }: { sourceId: string; item: M
     ? buildImageProxyUrl(item.thumbnail_url, item.source)
     : null;
   const previewHref = `/discover/preview/${encodeURIComponent(sourceId)}/${encodeURIComponent(item.id)}`;
+  // The title page shows this card's title and cover while the source sends the rest.
+  const seedPreview = () =>
+    rememberSourcePreview(sourceId, item.id, { title: item.title, thumbnailUrl });
 
   return (
     <div className="group relative flex flex-col gap-3">
       {dialog}
       <Link
         href={previewHref}
+        onClick={seedPreview}
         aria-label={`Preview "${item.title}"`}
         className="relative block aspect-2/3 w-full overflow-hidden rounded-xl shadow-cover outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
@@ -91,6 +96,7 @@ export function SourceResultCard({ sourceId, item }: { sourceId: string; item: M
 
       <Link
         href={previewHref}
+        onClick={seedPreview}
         className="line-clamp-2 text-sm font-semibold text-foreground transition hover:text-primary"
       >
         {item.title}
