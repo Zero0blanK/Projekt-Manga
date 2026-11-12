@@ -1,3 +1,4 @@
+import { installedExtensionFor } from '@projekt-manga/types';
 import extensionRepository from '../repositories/extensionRepository.repository.js';
 import { hasImageReferer } from '../utils/userAgent.js';
 
@@ -14,8 +15,9 @@ export const UPSTREAM_RETRY_DELAY_MS = 300;
 export async function sourceReferer(sourceId: string): Promise<Record<string, string>> {
   if (!sourceId || hasImageReferer(sourceId)) return {};
   try {
-    const installed = (await extensionRepository.getInstalledExtensions()).find(
-      (row) => row.source_key === sourceId,
+    const installed = installedExtensionFor(
+      await extensionRepository.getInstalledExtensions(),
+      sourceId,
     );
     const site = installed?.homepage || installed?.base_url;
     return site ? { Referer: `${new URL(site).origin}/` } : {};

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { prismaMock } from './mocks/prismaMock.js';
 import downloadService from '../src/services/download.service.js';
 import downloadWorker from '../src/workers/download.worker.js';
+import verifiedSource from '../src/services/verifiedSource.service.js';
 import {
   CHAPTER_IDENTITY_FILE,
   TITLE_IDENTITY_FILE,
@@ -55,15 +56,13 @@ describe('a finished download', () => {
         thumbnail_url: 'https://source.invalid/cover.jpg',
       },
     };
-    const source = {
-      base_url: 'https://source.invalid',
-      fetchChapterPages: async () => ({
-        items: [
-          { image_url: 'https://source.invalid/1.jpg' },
-          { image_url: 'https://source.invalid/2.jpg' },
-        ],
-      }),
-    };
+    const source = { id: 'src', base_url: 'https://source.invalid' };
+    vi.spyOn(verifiedSource, 'getChapterPages').mockResolvedValue({
+      items: [
+        { index: 0, image_url: 'https://source.invalid/1.jpg' },
+        { index: 1, image_url: 'https://source.invalid/2.jpg' },
+      ],
+    } as never);
     const worker = downloadWorker as unknown as {
       downloadChapterPages: (...args: unknown[]) => Promise<void>;
       assertDiskSpaceAvailable: () => Promise<void>;

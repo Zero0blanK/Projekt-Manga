@@ -19,6 +19,7 @@ import { toast } from '@/hooks/use-toast';
 import { useCurrentUser } from '@/lib/session-resource';
 import { queryClient, queryKeys } from '@/lib/query-client';
 import { useInstalledExtensions } from '@/lib/extensions-store';
+import { installedExtensionFor } from '@projekt-manga/types';
 import { isAdultSource, useContentPrivacy } from '@/components/discover/content-privacy';
 import { scheduleSourceSearch } from '@/lib/source-search-queue';
 import {
@@ -72,10 +73,7 @@ export function SourceMigration({ manga }: { manga: Manga }) {
     (entry) =>
       entry.id !== manga.source &&
       (!privacy.hideAdult ||
-        !isAdultSource(
-          installed.find((extension) => extension.source_key === entry.id)?.content_rating,
-          entry.isNSFW,
-        )),
+        !isAdultSource(installedExtensionFor(installed, entry.id)?.content_rating, entry.isNSFW)),
   );
   const { manga: library, refresh } = useMangaLibrary();
   const { shelf, bookmarks } = useLibraryState();

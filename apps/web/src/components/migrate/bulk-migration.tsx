@@ -6,6 +6,7 @@ import { AlertCircle, ArrowRightLeft, Check, Eye, Loader2, Search, Undo2 } from 
 import type { Manga } from '@/lib/manga-data';
 import { useLibraryState, useMangaLibrary, useSources } from '@/lib/library-store';
 import { useInstalledExtensions } from '@/lib/extensions-store';
+import { installedExtensionFor } from '@projekt-manga/types';
 import { isAdultSource, useContentPrivacy } from '@/components/discover/content-privacy';
 import { useCurrentUser } from '@/lib/session-resource';
 import { useMigrationPreferences, type MigrationOptions } from '@/lib/migration-state';
@@ -76,10 +77,7 @@ export function BulkMigration({ initialSource }: { initialSource?: string }) {
     (entry) =>
       entry.id !== work.from &&
       (!privacy.hideAdult ||
-        !isAdultSource(
-          installed.find((extension) => extension.source_key === entry.id)?.content_rating,
-          entry.isNSFW,
-        )),
+        !isAdultSource(installedExtensionFor(installed, entry.id)?.content_rating, entry.isNSFW)),
   );
   // Starts from the order single migrations use, until the reader changes it.
   const targetOrder = (work.order ?? preferences.sourceOrder).filter((id) =>

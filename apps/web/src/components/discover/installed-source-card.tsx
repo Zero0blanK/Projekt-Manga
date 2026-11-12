@@ -30,7 +30,11 @@ import {
 } from 'lucide-react';
 import { useSourceFilters, useSourceCapabilities } from '@/lib/library-store';
 import { sourceLanguageFilter, useSourceDisplayLanguage } from '@/lib/source-display-language';
-import { sourceLanguageName as languageName, repairSourceName } from '@/lib/source-language';
+import {
+  isMangaDexSource,
+  sourceLanguageName as languageName,
+  repairSourceName,
+} from '@/lib/source-language';
 import { extensionActions, type CatalogEntry } from '@/lib/extensions-store';
 import { toast } from '@/hooks/use-toast';
 import { useSourceHealthStatus } from '@/lib/source-health-status';
@@ -163,7 +167,7 @@ export function InstalledSourceCard({
   };
   const website =
     websiteUrl(record?.homepage) ??
-    (source.id.startsWith('mangadex') ? 'https://mangadex.org/' : websiteUrl(source.base_url));
+    (isMangaDexSource(source.id) ? 'https://mangadex.org/' : websiteUrl(source.base_url));
   // The copy stored with the installed source shows offline; the listing's icon covers a
   // source installed before its repository published one. A Suwayomi source has no record
   // and brings its own icon from that server.

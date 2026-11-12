@@ -1,6 +1,5 @@
-import type { Source } from '@projekt-manga/types';
 import type { download, chapter as Chapter, manga } from '@prisma/client';
-import { resolveSource } from '../services/sourceResolver.service.js';
+import verifiedSource, { type SourceInfo } from '../services/verifiedSource.service.js';
 import { announceLibraryChange, EVERYONE } from '../utils/libraryChanges.js';
 import downloadService from '../services/download.service.js';
 import { recordDiagnosticEvent } from '../utils/diagnosticLog.js';
@@ -416,8 +415,7 @@ export class DownloadWorker extends EventEmitter {
     // extension can be added, updated or removed at any time, and a download queued
     // against one installed five minutes ago must see that change, not a stale reference
     // to a process that may already have been torn down.
-    const source = await resolveSource(sourceId);
-    if (!source) throw new NotFoundError(`Source not found: ${sourceId}`);
+    const source = await verifiedSource.requireSource(sourceId);
 
     const run = () =>
       this.downloadChapterPages(
@@ -538,7 +536,7 @@ export class DownloadWorker extends EventEmitter {
     downloadId: string,
     download: DownloadRecord,
     chapter: Chapter & { manga: manga },
-    source: Source,
+    source: SourceInfo,
   ): Promise<void> {
     // Before anything is written, so a full disk fails once and clearly rather than as
     // a page-by-page write error with partial files left behind.
@@ -554,7 +552,9 @@ export class DownloadWorker extends EventEmitter {
       await this.rateLimiter.wait();
 
       const result = await Promise.race([
-        source.fetchChapterPages(chapter.source_chapter_key, chapter.manga.slug, {
+        // Through the same checks as the reader's page list: a source's output is not
+        // trusted here either, and a download that fails shows in the source's health.
+        verifiedSource.getChapterPages(source.id, chapter.source_chapter_key, chapter.manga.slug, {
           limit: DownloadWorker.PAGE_BATCH_SIZE,
           offset: 0,
         }),

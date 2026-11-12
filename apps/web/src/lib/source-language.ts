@@ -33,6 +33,11 @@ export function repairSourceName(value: string): string {
     .replaceAll('Ãª', 'ê');
 }
 
+/** MangaDex ships one source per language (`mangadex`, `mangadex-es`, …): one family. */
+export function isMangaDexSource(sourceKey: string): boolean {
+  return sourceKey === 'mangadex' || sourceKey.startsWith('mangadex-');
+}
+
 export function sourceLanguageEditions(
   sourceKey: string,
   repositoryId: string | undefined,
@@ -46,12 +51,10 @@ export function sourceLanguageEditions(
   if (!repository) return [];
   const family = (item: CatalogEntry) =>
     item.entry.family_key ??
-    (item.entry.source_key === 'mangadex' || item.entry.source_key.startsWith('mangadex-')
-      ? 'mangadex'
-      : item.entry.source_key);
+    (isMangaDexSource(item.entry.source_key) ? 'mangadex' : item.entry.source_key);
   const familyKey = current
     ? family(current)
-    : sourceKey === 'mangadex' || sourceKey.startsWith('mangadex-')
+    : isMangaDexSource(sourceKey)
       ? 'mangadex'
       : sourceKey;
   return entries
