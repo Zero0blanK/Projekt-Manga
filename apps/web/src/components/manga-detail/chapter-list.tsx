@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { toast } from '@/hooks/use-toast';
 import { toastWithUndo } from '@/lib/undo-toast';
+import { useChapterMarking } from '@/lib/chapter-marking';
 import {
   getMangaChapters,
   markChapterAsRead,
@@ -460,109 +461,86 @@ export function ChapterList({ manga }: { manga: Manga }) {
   );
   const newUnread = chapters.filter((c) => newIds.has(c.id) && !c.read).length;
 
-  const onToggleRead = (c: ChapterRow) => {
-    if (
-      batchBusy ||
-      sessionLoading ||
-      (queryClient.getQueryData<PublicUser | null>(queryKeys.session)?.id ?? 'anonymous') !== owner
-    )
-      return;
-    const requestGeneration = generation.current;
-    const mutate = c.read ? markChapterAsUnread : markChapterAsRead;
-    setRecords((prev) => prev.map((r) => (r.id === c.id ? { ...r, is_read: !c.read } : r)));
-    mutate(manga.slug, c.key, { source: manga.source })
-      .then(() => {
-        invalidateSavedReadingProgress();
-        if (c.read) return;
-        // Settings > Sync & Storage > Delete after reading. Best effort.
-        const numbers = [...new Set(records.map((r) => r.chapter_number))].sort((a, b) => a - b);
-        void afterChapterRead(manga, c.n, numbers, (number) =>
-          records.find((r) => r.chapter_number === number),
-        ).catch(() => undefined);
-        // Settings > Reader > Mark duplicates read: the other groups' releases go too.
-        void markDuplicatesRead(manga, records, c.n, c.id)
-          .then((marked) => {
-            if (marked.length === 0 || generation.current !== requestGeneration) return;
-            const ids = new Set(marked);
-            setRecords((prev) => prev.map((r) => (ids.has(r.id) ? { ...r, is_read: true } : r)));
-          })
-          .catch(() => undefined);
-      })
-      .catch(() => {
-        if (generation.current !== requestGeneration) return;
-        setRecords((prev) => prev.map((r) => (r.id === c.id ? { ...r, is_read: c.read } : r)));
-        toast({ description: "Couldn't update chapter — try again" });
-      });
-  };
-
-  /** "Previous" is inclusive of the chapter you right-clicked, matching how readers think
-   * about it ("I've read up to here"). Only chapters that would actually change are sent,
-   * so marking previous-as-read over an already-read run is a no-op rather than a burst of
-   * redundant writes. */
-  const onMarkPrevious = (c: ChapterRow, read: boolean) => {
-    const requestGeneration = generation.current;
-    const targets = records.filter((r) => r.chapter_number <= c.n && r.is_read !== read);
-    if (targets.length === 0) {
-      toast({
-        description: read
-          ? 'Everything up to here is already read'
-          : 'Everything up to here is already unread',
-      });
-      return;
-    }
-    const previous = records;
-    setRecords((prev) => prev.map((r) => (r.chapter_number <= c.n ? { ...r, is_read: read } : r)));
-    // Only the fields the server needs to create the row if it doesn't exist yet
-    // (ensureChapterExists) plus `source` — the target read/unread state itself is the
-    // `read` flag chosen above, via markPreviousChaptersAsRead/Unread, not anything on
-    // the payload.
-    const payload: ChapterBulkPayload[] = targets.map((r) => bulkPayload(r, manga.source));
-    const mutate = read ? markPreviousChaptersAsRead : markPreviousChaptersAsUnread;
-    mutate(manga.slug, payload, {
-      manga_id: manga.id,
-      title: manga.title,
-    })
-      .then((result) => {
-        if (generation.current !== requestGeneration) return;
-        invalidateSavedReadingProgress();
-        if (result.failed_source_chapter_keys.length > 0) {
-          const failed = new Set(result.failed_source_chapter_keys);
-          setRecords((current) =>
-            current.map((row) =>
-              failed.has(row.source_chapter_key)
-                ? (previous.find((old) => old.id === row.id) ?? row)
-                : row,
-            ),
+  // The marking flow itself (optimistic state, what a failure puts back, the undo) is
+  // shared with the source list: lib/chapter-marking.ts. This is what differs here: read
+  // state lives on the stored rows, and a mark sets off the library's own follow-ups.
+  const bulkMeta = { manga_id: manga.id, title: manga.title };
+  const marking = useChapterMarking<MangaChapterRecord>({
+    begin: () => {
+      if (
+        batchBusy ||
+        sessionLoading ||
+        (queryClient.getQueryData<PublicUser | null>(queryKeys.session)?.id ?? 'anonymous') !==
+          owner
+      )
+        return null;
+      const requestGeneration = generation.current;
+      return () => generation.current === requestGeneration;
+    },
+    rows: () => records,
+    id: (r) => r.id,
+    sourceKey: (r) => r.source_chapter_key,
+    chapterNumber: (r) => r.chapter_number,
+    isRead: (r) => r.is_read,
+    setRead: (changes) =>
+      setRecords((prev) =>
+        prev.map((r) => (changes.has(r.id) ? { ...r, is_read: changes.get(r.id)! } : r)),
+      ),
+    mark: (r, read) =>
+      (read ? markChapterAsRead : markChapterAsUnread)(manga.slug, r.source_chapter_key, {
+        source: manga.source,
+      }),
+    onMarked: (r, read, still) => {
+      invalidateSavedReadingProgress();
+      if (!read) return;
+      // Settings > Sync & Storage > Delete after reading. Best effort.
+      const numbers = [...new Set(records.map((row) => row.chapter_number))].sort((a, b) => a - b);
+      void afterChapterRead(manga, r.chapter_number, numbers, (number) =>
+        records.find((row) => row.chapter_number === number),
+      ).catch(() => undefined);
+      // Settings > Reader > Mark duplicates read: the other groups' releases go too.
+      void markDuplicatesRead(manga, records, r.chapter_number, r.id)
+        .then((marked) => {
+          if (marked.length === 0 || !still()) return;
+          const ids = new Set(marked);
+          setRecords((prev) =>
+            prev.map((row) => (ids.has(row.id) ? { ...row, is_read: true } : row)),
           );
-        }
-        if (result.failed_source_chapter_keys.length > 0) {
-          toast({
-            description: `Updated ${result.count} chapters; ${result.failed_source_chapter_keys.length} failed`,
-          });
-          return;
-        }
-        toastWithUndo(
-          `Marked ${targets.length} chapter${targets.length === 1 ? '' : 's'} as ${read ? 'read' : 'unread'}`,
-          async () => {
-            const changed = new Set(targets.map((target) => target.id));
-            await (read ? markPreviousChaptersAsUnread : markPreviousChaptersAsRead)(
-              manga.slug,
-              payload,
-              { manga_id: manga.id, title: manga.title },
-            );
-            if (generation.current !== requestGeneration) return;
-            setRecords((current) =>
-              current.map((row) => (changed.has(row.id) ? { ...row, is_read: !read } : row)),
-            );
-            invalidateSavedReadingProgress();
-          },
-        );
-      })
-      .catch(() => {
-        if (generation.current !== requestGeneration) return;
-        setRecords(previous);
-        toast({ description: "Couldn't mark previous chapters — try again" });
-      });
+        })
+        .catch(() => undefined);
+    },
+    // Only the fields the server needs to create the row if it doesn't exist yet
+    // (ensureChapterExists) plus `source`; the read state itself is which endpoint is called.
+    markMany: (targets, read) =>
+      (read ? markPreviousChaptersAsRead : markPreviousChaptersAsUnread)(
+        manga.slug,
+        targets.map((r): ChapterBulkPayload => bulkPayload(r, manga.source)),
+        bulkMeta,
+      ),
+    onManyMarked: invalidateSavedReadingProgress,
+    undoMany: async (targets, read, still) => {
+      await (read ? markPreviousChaptersAsUnread : markPreviousChaptersAsRead)(
+        manga.slug,
+        targets.map((r): ChapterBulkPayload => bulkPayload(r, manga.source)),
+        bulkMeta,
+      );
+      if (!still()) return;
+      const changed = new Set(targets.map((target) => target.id));
+      setRecords((current) =>
+        current.map((row) => (changed.has(row.id) ? { ...row, is_read: !read } : row)),
+      );
+      invalidateSavedReadingProgress();
+    },
+  });
+  // Rows are a view of the stored records; marks are made on the record behind one.
+  const recordOf = (c: ChapterRow) => records.find((r) => r.id === c.id);
+  const onToggleRead = (c: ChapterRow) => {
+    const record = recordOf(c);
+    if (record) void marking.toggleRead(record);
+  };
+  const onMarkPrevious = (c: ChapterRow, read: boolean) => {
+    const record = recordOf(c);
+    if (record) marking.markPrevious(record, read);
   };
 
   const allGroups = Array.from(new Set(chapters.map((c) => c.group).filter(Boolean))).sort();
