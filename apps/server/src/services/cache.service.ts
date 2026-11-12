@@ -10,7 +10,14 @@ import {
   isDisallowedRedirectHost,
   guardedHttpAgent,
   guardedHttpsAgent,
+  freshGuardedAgents,
 } from '../utils/ssrfGuard.js';
+import { imageSessionHeaders } from './sourceBrowserSession.service.js';
+import {
+  RETRYABLE_UPSTREAM_STATUSES,
+  UPSTREAM_RETRY_DELAY_MS,
+  sourceReferer,
+} from './sourceImageRequest.service.js';
 import { MAX_IMAGE_BYTES, detectRasterImageType } from '../utils/imageContent.js';
 import { fetchSuwayomiImage, isSuwayomiImageUrl } from './suwayomi/client.js';
 import {
@@ -20,28 +27,52 @@ import {
   rethrowKnownOrWrap,
 } from '../utils/customErrors.js';
 
-const downloadImage = async (url: string) => {
+/**
+ * Fetches a cover the way the image proxy does, so a cover that shows also caches: with the
+ * source's own image headers and saved session, and one retry on a fresh connection with
+ * the source's site as Referer when the host refuses the first request.
+ */
+const downloadImage = async (url: string, sourceId?: string) => {
   // A cover on the connected Suwayomi server, usually a local address the guard refuses.
   if (isSuwayomiImageUrl(url)) {
     const { bytes, contentType } = await fetchSuwayomiImage(url);
     return { image: bytes, imageType: contentType };
   }
   await assertPublicHttpUrl(url);
-  const res = await axios.get(url, {
-    responseType: 'stream',
-    timeout: 15000,
-    headers: createImageRequestHeaders(undefined, {}, url),
-    // Validates the address every hop actually connects to, which beforeRedirect
-    // (hostname only) and a pre-flight DNS check (TOCTOU) both miss.
-    proxy: false,
-    httpAgent: guardedHttpAgent,
-    httpsAgent: guardedHttpsAgent,
-    beforeRedirect: (options) => {
-      if (isDisallowedRedirectHost(String(options.hostname))) {
-        throw new Error('Redirect target is disallowed');
-      }
-    },
-  });
+  const source = sourceId?.trim().toLowerCase() ?? '';
+  const sessionHeaders = source ? await imageSessionHeaders(source, new URL(url)) : {};
+  const requestImage = (fresh: boolean, extraHeaders: Record<string, string> = {}) =>
+    axios.get(url, {
+      responseType: 'stream',
+      timeout: 15000,
+      headers: createImageRequestHeaders(
+        source || undefined,
+        { ...extraHeaders, ...sessionHeaders },
+        url,
+      ),
+      validateStatus: () => true,
+      // Validates the address every hop actually connects to, which beforeRedirect
+      // (hostname only) and a pre-flight DNS check (TOCTOU) both miss.
+      proxy: false,
+      ...(fresh
+        ? freshGuardedAgents()
+        : { httpAgent: guardedHttpAgent, httpsAgent: guardedHttpsAgent }),
+      beforeRedirect: (options) => {
+        if (isDisallowedRedirectHost(String(options.hostname))) {
+          throw new Error('Redirect target is disallowed');
+        }
+      },
+    });
+  let res = await requestImage(false);
+  if (RETRYABLE_UPSTREAM_STATUSES.has(res.status)) {
+    (res.data as Readable).destroy();
+    await new Promise((resolve) => setTimeout(resolve, UPSTREAM_RETRY_DELAY_MS));
+    res = await requestImage(true, await sourceReferer(source));
+  }
+  if (res.status < 200 || res.status >= 300) {
+    (res.data as Readable).destroy();
+    throw new UpstreamError(`The source answered ${res.status} for the cover`);
+  }
   const stream = res.data as Readable;
 
   const chunks: Buffer[] = [];
@@ -78,7 +109,7 @@ const extensionByType: Record<string, string> = {
 const syncThumbnailUnlocked = async (
   manga_id: string,
   source_url?: string | null,
-  options?: { initiatedByUser?: boolean; force?: boolean },
+  options?: { initiatedByUser?: boolean; force?: boolean; sourceId?: string },
 ) => {
   // Only an absolute http(s) source can be fetched. Rows pointing at a local cache path
   // would otherwise be retried forever against a path that is not a URL.
@@ -93,7 +124,7 @@ const syncThumbnailUnlocked = async (
       return { updated: false };
     }
 
-    const { image, imageType } = await downloadImage(source_url);
+    const { image, imageType } = await downloadImage(source_url, options?.sourceId);
     const sha = computeSha(image);
 
     // Double-check: if cache already exists with same SHA (race condition), skip
@@ -143,7 +174,7 @@ const pruneOrphanedThumbnails = async (): Promise<number> => {
 const syncThumbnail = async (
   manga_id: string,
   source_url?: string | null,
-  options?: { initiatedByUser?: boolean; force?: boolean },
+  options?: { initiatedByUser?: boolean; force?: boolean; sourceId?: string },
 ) => {
   const previous = pendingByManga.get(manga_id);
   let release!: () => void;

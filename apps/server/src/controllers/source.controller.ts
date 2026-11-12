@@ -20,8 +20,12 @@ import type {
   SourceBrowserSessionBody,
   SourceUrlKeysBody,
 } from '@projekt-manga/schemas';
-import { createImageRequestHeaders, hasImageReferer } from '../utils/userAgent.js';
-import extensionRepository from '../repositories/extensionRepository.repository.js';
+import { createImageRequestHeaders } from '../utils/userAgent.js';
+import {
+  RETRYABLE_UPSTREAM_STATUSES,
+  UPSTREAM_RETRY_DELAY_MS,
+  sourceReferer,
+} from '../services/sourceImageRequest.service.js';
 import {
   assertPublicHttpUrl,
   isDisallowedRedirectHost,
@@ -56,8 +60,6 @@ function parseContentLength(value: unknown): number | null {
 
 /** Upstream answers worth one retry on a fresh connection (see the proxy below). */
 // Not 429: that is an explicit "slow down" with its own Retry-After, passed on below.
-const RETRYABLE_UPSTREAM_STATUSES = new Set([403, 503]);
-const UPSTREAM_RETRY_DELAY_MS = 300;
 /** Images the source answered 404/410 for, by URL → when the answer expires. A cover the
  * site deleted stays deleted; remembering that spares the site the browser's retries. */
 const missingImages = new Map<string, number>();
@@ -86,20 +88,6 @@ const UNREACHABLE_IMAGE_MESSAGE = 'The image host could not be reached';
 const unreachableImages = new Map<string, number>();
 /** Concurrent image requests allowed per upstream host. */
 const imageProxyLimiter = new HostLimiter(4);
-
-/** The installed source's own site, as a Referer for a retried image request. */
-async function sourceReferer(sourceId: string): Promise<Record<string, string>> {
-  if (!sourceId || hasImageReferer(sourceId)) return {};
-  try {
-    const installed = (await extensionRepository.getInstalledExtensions()).find(
-      (row) => row.source_key === sourceId,
-    );
-    const site = installed?.homepage || installed?.base_url;
-    return site ? { Referer: `${new URL(site).origin}/` } : {};
-  } catch {
-    return {};
-  }
-}
 
 /** A 1×1 transparent PNG: what an <img> receives when the proxy can't deliver a page. */
 const TRANSPARENT_PNG = Buffer.from(

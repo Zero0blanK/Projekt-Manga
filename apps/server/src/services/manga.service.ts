@@ -69,7 +69,7 @@ const addManga = async (manga_data: AddMangaPayload, user_id?: string) => {
       await userLibraryRepository.setInLibrary(user_id, manga.id, true);
     }
     if (manga.thumbnail_url) {
-      thumbnailQueue.enqueue(manga.id, manga.thumbnail_url);
+      thumbnailQueue.enqueue(manga.id, manga.thumbnail_url, { sourceId: manga.source });
     }
     // The response reflects this account's membership, even when the shared row is
     // intentionally kept outside the anonymous library.
