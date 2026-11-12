@@ -2,6 +2,53 @@
   "$comment": "Release notes for Settings > Changelog. Newest first — the first entry's version and date are also what the About panel reports. IMPORTANT: the first entry's version must match `version` in apps/desktop/package.json, which is what app.getVersion() returns and what the updater compares against a GitHub release; if the two drift, the About panel reports one version while the update check reasons about another (tests/changelog.test.ts guards this). Each entry: version (semver), date (YYYY-MM-DD), and changes grouped by type. Types: added | changed | fixed | removed. Add the next entry above this one when a version is actually published — not while it is still being built.",
   "releases": [
     {
+      "version": "1.2.0",
+      "date": "2026-11-12",
+      "summary": "Restores run in the background, downloads from an earlier install come back, and library covers load offline.",
+      "changes": [
+        {
+          "type": "added",
+          "text": "Downloaded chapters from an earlier install can be found and added back to your library"
+        },
+        {
+          "type": "added",
+          "text": "The cover on a title page opens larger, and can be saved, replaced with your own image, or switched back to the source cover"
+        },
+        {
+          "type": "changed",
+          "text": "Restoring a library runs in the background with a status card, so you can keep using the app while it works"
+        },
+        {
+          "type": "changed",
+          "text": "Library covers are kept after they are first shown, so they load without the source, offline too, and are not downloaded again each time"
+        },
+        {
+          "type": "changed",
+          "text": "Opening a title from a source shows its name and cover straight away while the rest of the page loads"
+        },
+        {
+          "type": "changed",
+          "text": "On the desktop app, sources behind a browser check (such as Cloudflare) are passed in the background, and an expired check is refreshed by itself"
+        },
+        {
+          "type": "fixed",
+          "text": "The unread and chapter counts on covers no longer run past the edge of the cover when Recently Updated is shown"
+        },
+        {
+          "type": "fixed",
+          "text": "A restore interrupted by a crash no longer starts over again and again"
+        },
+        {
+          "type": "fixed",
+          "text": "Reading progress from a restore, a sync or two merged copies of a title now always keeps the furthest page and every read mark"
+        },
+        {
+          "type": "fixed",
+          "text": "Downloads get the same checks as reading, and a source that fails while downloading shows it in Source health"
+        }
+      ]
+    },
+    {
       "version": "1.1.1",
       "date": "2026-11-09",
       "summary": "A much smaller app that starts faster after an update, and updates that install themselves without asking where.",
