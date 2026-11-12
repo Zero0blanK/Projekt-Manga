@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getSourceHealth } from '@projekt-manga/api-client';
+import { installedExtensionsByKey } from '@projekt-manga/types';
 import { queryClient } from '@/lib/query-client';
 import { useSources } from '@/lib/library-store';
 import { useInstalledExtensions, useSourceCatalog } from '@/lib/extensions-store';
@@ -55,7 +56,7 @@ export function DiscoverPageClient() {
   const { entries: catalogueEntries = [], repositories = [] } = useSourceCatalog();
   const suwayomi = useSuwayomiExtensions();
   const allSources = apiSources.map(toDisplaySource);
-  const installedByKey = new Map(installed.map((row) => [row.source_key, row]));
+  const installedByKey = installedExtensionsByKey(installed);
   const [privacy] = useContentPrivacy();
   const [pins, setPins] = useProfilePreference('pinnedSources', parseIdList, EMPTY_IDS);
   const [incognito, setIncognito] = useProfilePreference(

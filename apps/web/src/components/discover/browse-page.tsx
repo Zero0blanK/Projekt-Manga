@@ -30,6 +30,7 @@ import { ArrowLeft, Search, Filter, X, ChevronDown } from 'lucide-react';
 import { MangaGrid } from '@/components/manga-grid';
 import { MangaGridSkeleton } from '@/components/skeletons';
 import { useInstalledExtensions } from '@/lib/extensions-store';
+import { installedExtensionFor } from '@projekt-manga/types';
 import { useContentPrivacy, isAdultSource } from './content-privacy';
 import { sourceLanguageValues, useSourceDisplayLanguage } from '@/lib/source-display-language';
 
@@ -71,10 +72,7 @@ export function DiscoverBrowsePage({
     .filter(
       (source) =>
         !privacy.hideAdult ||
-        !isAdultSource(
-          installed.find((row) => row.source_key === source.id)?.content_rating,
-          source.isNSFW,
-        ),
+        !isAdultSource(installedExtensionFor(installed, source.id)?.content_rating, source.isNSFW),
     );
   const searchParams = useSearchParams();
   const requestedSource = searchParams.get('source');
