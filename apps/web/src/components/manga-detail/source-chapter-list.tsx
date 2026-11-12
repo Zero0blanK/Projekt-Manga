@@ -16,6 +16,7 @@ import {
 } from '@projekt-manga/api-client';
 import { toast } from '@/hooks/use-toast';
 import { toastWithUndo } from '@/lib/undo-toast';
+import { useChapterMarking } from '@/lib/chapter-marking';
 import {
   formatRelative,
   knownGroup,
@@ -144,19 +145,7 @@ export function SourceChapterList({
   // Mirrors the prop so marks apply instantly; re-seeded whenever the parent's fetch lands.
   const [readIds, setReadIds] = useState<Set<string>>(readChapterIds);
   const readIdsRef = useRef(readChapterIds);
-  const mutationVersion = useRef(0);
-  const latestMutationForChapter = useRef(new Map<string, number>());
   const generation = useRef(0);
-  useEffect(() => {
-    generation.current += 1;
-    latestMutationForChapter.current.clear();
-    setDownloading(new Set());
-    setSelected([]);
-    setBatchBusy(false);
-    return () => {
-      generation.current += 1;
-    };
-  }, [owner, sessionLoading, sourceId, mangaSlug]);
   const requestCurrent = (requestGeneration: number) =>
     !sessionLoading &&
     generation.current === requestGeneration &&
@@ -187,146 +176,84 @@ export function SourceChapterList({
     source: sourceId,
   });
 
-  const toggleRead = (c: Chapters) => {
-    const requestGeneration = generation.current;
-    if (!requestCurrent(requestGeneration)) return;
-    const wasRead = readIdsRef.current.has(c.id);
-    const next = new Set(readIdsRef.current);
-    const version = ++mutationVersion.current;
-    latestMutationForChapter.current.set(c.id, version);
-    if (wasRead) next.delete(c.id);
-    else next.add(c.id);
-    applyRead(next);
-
-    const mutate = wasRead ? markChapterAsUnread : markChapterAsRead;
-    let saved = false;
-    return mutate(mangaSlug, c.id, payloadFor(c))
-      .then(() => {
-        if (!requestCurrent(requestGeneration)) return;
-        saved = true;
-        // The single-chapter endpoints don't touch history, so record it here — carrying
-        // the title and cover, which is the only way a title with no library row can show
-        // up in History and Recents with something readable.
-        if (!wasRead) {
-          void addHistory({
-            source: sourceId,
-            manga_slug: mangaSlug,
-            source_manga_id: sourceMangaId,
-            title: mangaTitle,
-            thumbnail_url: thumbnailUrl || undefined,
-            source_chapter_key: c.id,
-            pages_read: c.page_count || 0,
-          }).catch(() => {
-            if (requestCurrent(requestGeneration))
-              toast({ description: 'Chapter marked read, but recent history could not be saved.' });
-          });
-        }
-      })
-      .catch(() => {
-        if (!requestCurrent(requestGeneration)) return;
-        // Restore only this request's chapter, and only while no newer action owns it.
-        // Restoring a whole stale Set would erase successful concurrent marks.
-        if (latestMutationForChapter.current.get(c.id) === version) {
-          const rollback = new Set(readIdsRef.current);
-          if (wasRead) rollback.add(c.id);
-          else rollback.delete(c.id);
-          applyRead(rollback);
-        }
-        toast({ description: "Couldn't update chapter — try again" });
-      })
-      .finally(() => {
-        if (!requestCurrent(requestGeneration)) return;
-        if (latestMutationForChapter.current.get(c.id) === version) {
-          latestMutationForChapter.current.delete(c.id);
-        }
-      })
-      .then(() => saved);
-  };
+  // The marking flow itself (optimistic state, what a failure puts back, the undo) is
+  // shared with the library list: lib/chapter-marking.ts. This is what differs here: read
+  // state is a set of the source's own chapter ids, and a mark also writes history.
+  const {
+    toggleRead,
+    markPrevious,
+    reset: resetMarks,
+  } = useChapterMarking<Chapters>({
+    begin: () => {
+      const requestGeneration = generation.current;
+      return requestCurrent(requestGeneration) ? () => requestCurrent(requestGeneration) : null;
+    },
+    rows: () => chapters,
+    id: (c) => c.id,
+    sourceKey: (c) => c.id,
+    chapterNumber: (c) => c.chapter_number,
+    isRead: (c) => readIdsRef.current.has(c.id),
+    setRead: (changes) => {
+      const next = new Set(readIdsRef.current);
+      for (const [id, read] of changes) {
+        if (read) next.add(id);
+        else next.delete(id);
+      }
+      applyRead(next);
+    },
+    mark: (c, read) =>
+      (read ? markChapterAsRead : markChapterAsUnread)(mangaSlug, c.id, payloadFor(c)),
+    onMarked: (c, read, still) => {
+      if (!read || !still()) return;
+      // The single-chapter endpoints don't touch history, so record it here — carrying
+      // the title and cover, which is the only way a title with no library row can show
+      // up in History and Recents with something readable.
+      void addHistory({
+        source: sourceId,
+        manga_slug: mangaSlug,
+        source_manga_id: sourceMangaId,
+        title: mangaTitle,
+        thumbnail_url: thumbnailUrl || undefined,
+        source_chapter_key: c.id,
+        pages_read: c.page_count || 0,
+      }).catch(() => {
+        if (still())
+          toast({ description: 'Chapter marked read, but recent history could not be saved.' });
+      });
+    },
+    // The bulk endpoints write their own history rows; the metadata rides along so those
+    // rows carry a title even with no manga row to join from.
+    markMany: (targets, read) =>
+      (read ? markPreviousChaptersAsRead : markPreviousChaptersAsUnread)(
+        mangaSlug,
+        targets.map(payloadFor),
+        {
+          source_manga_id: sourceMangaId,
+          title: mangaTitle,
+          thumbnail_url: thumbnailUrl || undefined,
+        },
+      ),
+    undoMany: (targets, read) => revertRead(targets, read),
+  });
 
   /** Undoes a bulk mark: only `targets`, which are the chapters it changed. */
-  const revertRead = async (targets: Chapters[], read: boolean) => {
+  async function revertRead(targets: Chapters[], read: boolean) {
     for (const target of targets) {
       if (readIdsRef.current.has(target.id) === read && !(await toggleRead(target)))
         throw new Error('Chapter state was not restored');
     }
-  };
+  }
 
-  /** Inclusive of the chapter acted on, matching "I've read up to here". */
-  const markPrevious = (c: Chapters, read: boolean) => {
-    const requestGeneration = generation.current;
-    if (!requestCurrent(requestGeneration)) return;
-    const targets = chapters.filter(
-      (other) =>
-        other.chapter_number <= c.chapter_number && readIdsRef.current.has(other.id) !== read,
-    );
-    if (targets.length === 0) {
-      toast({
-        description: read
-          ? 'Everything up to here is already read'
-          : 'Everything up to here is already unread',
-      });
-      return;
-    }
-
-    const previousReadById = new Map(
-      targets.map((target) => [target.id, readIdsRef.current.has(target.id)]),
-    );
-    const versions = new Map<string, number>();
-    const next = new Set(readIdsRef.current);
-    for (const target of targets) {
-      const version = ++mutationVersion.current;
-      versions.set(target.id, version);
-      latestMutationForChapter.current.set(target.id, version);
-      if (read) next.add(target.id);
-      else next.delete(target.id);
-    }
-    applyRead(next);
-
-    const mutate = read ? markPreviousChaptersAsRead : markPreviousChaptersAsUnread;
-    // The bulk endpoints write their own history rows; the metadata rides along so those
-    // rows carry a title even with no manga row to join from.
-    mutate(mangaSlug, targets.map(payloadFor), {
-      source_manga_id: sourceMangaId,
-      title: mangaTitle,
-      thumbnail_url: thumbnailUrl || undefined,
-    })
-      .then(() => {
-        if (!requestCurrent(requestGeneration)) return;
-        toastWithUndo(
-          `Marked ${targets.length} chapter${targets.length === 1 ? '' : 's'} as ${
-            read ? 'read' : 'unread'
-          }`,
-          () => revertRead(targets, read),
-        );
-      })
-      .catch(() => {
-        if (!requestCurrent(requestGeneration)) return;
-        const rollback = new Set(readIdsRef.current);
-        let changed = false;
-        for (const target of targets) {
-          const version = versions.get(target.id);
-          if (
-            version === undefined ||
-            latestMutationForChapter.current.get(target.id) !== version
-          ) {
-            continue;
-          }
-          if (previousReadById.get(target.id)) rollback.add(target.id);
-          else rollback.delete(target.id);
-          changed = true;
-        }
-        if (changed) applyRead(rollback);
-        toast({ description: "Couldn't mark previous chapters — try again" });
-      })
-      .finally(() => {
-        if (!requestCurrent(requestGeneration)) return;
-        for (const [chapterId, version] of versions) {
-          if (latestMutationForChapter.current.get(chapterId) === version) {
-            latestMutationForChapter.current.delete(chapterId);
-          }
-        }
-      });
-  };
+  useEffect(() => {
+    generation.current += 1;
+    resetMarks();
+    setDownloading(new Set());
+    setSelected([]);
+    setBatchBusy(false);
+    return () => {
+      generation.current += 1;
+    };
+  }, [owner, sessionLoading, sourceId, mangaSlug, resetMarks]);
 
   const download = async (fallback?: Chapters) => {
     const requestGeneration = generation.current;
