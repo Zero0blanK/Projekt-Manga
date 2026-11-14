@@ -33,12 +33,18 @@ export function SourceChallengeAutoOpen() {
     if (!canCheckSources()) return;
     const enabled = () => getSetting(AUTO_OPEN_CHALLENGE_SETTING, true) !== false;
 
-    const report = (run: Promise<SourceCheckState | null>) =>
+    // Several ways in can join the same check (start-up's probe also fails on the check, and
+    // health records it), so each check is announced once.
+    const reported = new WeakSet<Promise<SourceCheckState | null>>();
+    const report = (run: Promise<SourceCheckState | null>) => {
+      if (reported.has(run)) return;
+      reported.add(run);
       void run.then((state) => {
         if (state?.status === 'passed' || state?.status === 'failed') {
           toast({ description: state.message });
         }
       });
+    };
     const check = (sourceId: string) => {
       if (!enabled()) return;
       report(queueSourceCheck(sourceId));

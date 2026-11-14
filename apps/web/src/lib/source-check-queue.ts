@@ -45,6 +45,8 @@ interface Queued {
 const queue: Queued[] = [];
 const queued = new Map<string, Queued>();
 let working = false;
+/** The queued check now running, so a request joining it gets the same promise. */
+let current: Queued | null = null;
 /** Finding what start-up should check; updates wait for it before asking about a source. */
 let startup: Promise<void> | null = null;
 let startupFound = false;
@@ -60,12 +62,14 @@ async function work(): Promise<void> {
       // Out of the waiting list as it starts: from here the running check is what to join,
       // and a request after it ends queues a new one rather than joining a finished one.
       queued.delete(next.sourceId);
+      current = next;
       let state: SourceCheckState | null = null;
       try {
         state = await (startSourceCheck(next.sourceId, { auto: true }) ?? null);
       } catch {
         state = getSourceCheck(next.sourceId);
       }
+      current = null;
       next.resolve(state);
     }
   } finally {
@@ -80,7 +84,7 @@ async function work(): Promise<void> {
  */
 export function queueSourceCheck(sourceId: string): Promise<SourceCheckState | null> {
   const running = runningSourceCheck(sourceId);
-  if (running) return running;
+  if (running) return current?.sourceId === sourceId ? current.done : running;
   const existing = queued.get(sourceId);
   if (existing) return existing.done;
   if (!autoChecksEnabled()) return Promise.resolve(null);
@@ -243,6 +247,7 @@ export function resetSourceCheckQueue(): void {
   queue.length = 0;
   queued.clear();
   working = false;
+  current = null;
   startup = null;
   startupFound = false;
 }

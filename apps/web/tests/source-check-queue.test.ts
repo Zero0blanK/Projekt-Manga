@@ -128,4 +128,12 @@ describe('background browser checks', () => {
     await Promise.all([first, second]);
     expect(checks.started).toEqual(['a']);
   });
+
+  it('hands every request for the running check the same promise, so it is announced once', async () => {
+    const first = queueSourceCheck('a');
+    await tick();
+    expect(queueSourceCheck('a')).toBe(first);
+    pass('a');
+    await first;
+  });
 });
