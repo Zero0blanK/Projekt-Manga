@@ -321,7 +321,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     setPage(requestedPage ?? 1);
   }, [requestedTarget, requestedChapterId, requestedPage]);
 
-  // Settings > Sync & Storage > Download ahead: keep the next chapters downloaded while
+  // Settings > Downloads > Download ahead: keep the next chapters downloaded while
   // reading. Once per chapter opened, and never in incognito.
   const downloadAheadFor = useRef<number | null>(null);
   const downloadAheadRef = useRef(() => {});
@@ -350,7 +350,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
       invalidateSavedReadingProgress();
       // Reflect it locally so the header/chapter list update without a refetch.
       setChapters((prev) => prev.map((c) => (c.id === record.id ? { ...c, is_read: true } : c)));
-      // Settings > Sync & Storage > Delete after reading. Best effort, never blocks reading.
+      // Settings > Downloads > Delete after reading. Best effort, never blocks reading.
       void afterChapterRead(manga, record.chapter_number, sortedChapterNumbers, (number) =>
         chapterByNumber.get(number),
       ).catch(() => undefined);

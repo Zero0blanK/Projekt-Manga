@@ -10,7 +10,6 @@ import {
   CloseToTrayControl,
   StartupBackgroundControl,
 } from '@/components/settings/startup-background-control';
-import { SourceHealthPanel } from '@/components/settings/source-health-panel';
 import { CURRENT_RELEASE, RELEASES } from '@/lib/changelog';
 import { formatRelative } from '@/lib/manga-data';
 import { CheckCircle2, XCircle, Loader2, ExternalLink } from 'lucide-react';
@@ -149,8 +148,6 @@ export function AboutPanel() {
           </Field>
         ))}
       </Panel>
-
-      <SourceHealthPanel />
 
       <Panel title="Resources" subtitle="Links and legal">
         {RESOURCE_LINKS.map(({ label, hint, href }) => (

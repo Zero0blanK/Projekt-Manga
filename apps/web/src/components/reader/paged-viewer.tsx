@@ -334,7 +334,7 @@ export function PagedViewer({
     return box ? { x: clientX - box.left, y: clientY - box.top } : null;
   };
 
-  // Settings › Reader › Mouse wheel. Registered by hand: React's onWheel is passive, and
+  // Settings › Shortcuts › Mouse wheel. Registered by hand: React's onWheel is passive, and
   // turning the page needs preventDefault to stop the strip scrolling at the same time.
   useEffect(() => {
     const el = scrollRef.current;

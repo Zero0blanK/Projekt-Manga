@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { actions, useSetting, useNumberSetting } from '@/lib/app-store';
 import { SelectMenu } from '@/components/ui/select-menu';
+import { Skeleton } from '@/components/ui/skeleton';
 
 /** Settings > Appearance > Interface density — spacing scale for Panel/Field. */
 const DENSITY_CLASSES: Record<string, { panel: string; stack: string; field: string }> = {
@@ -334,5 +335,22 @@ export function ActionButton({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Where part of a panel waits for the server: its outline at about its final size, so the
+ * rest of the panel is usable at once and nothing jumps when it arrives.
+ */
+export function LoadingBlock({ label, rows = 2 }: { label: string; rows?: number }) {
+  return (
+    <div role="status" aria-label={label} aria-busy="true" className="space-y-2 py-1">
+      {Array.from({ length: rows }, (_, index) => (
+        <Skeleton
+          key={index}
+          className={`h-8 rounded-lg ${index === rows - 1 && rows > 1 ? 'w-2/3' : 'w-full'}`}
+        />
+      ))}
+    </div>
   );
 }

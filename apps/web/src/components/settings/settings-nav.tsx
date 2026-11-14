@@ -11,16 +11,20 @@ import {
   Info,
   ScrollText,
   Puzzle,
+  Library,
+  Download,
 } from 'lucide-react';
 
 const sections = [
   { id: 'account', label: 'Profile', icon: User },
   { id: 'appearance', label: 'Appearance', icon: Palette },
+  { id: 'library', label: 'Library', icon: Library },
   { id: 'reader', label: 'Reader', icon: BookOpen },
+  { id: 'downloads', label: 'Downloads', icon: Download },
   { id: 'extensions', label: 'Extensions', icon: Puzzle },
   { id: 'statistics', label: 'Statistics', icon: BarChart3 },
   { id: 'notifications', label: 'Notifications', icon: Bell },
-  { id: 'sync', label: 'Sync & Storage', icon: Cloud },
+  { id: 'sync', label: 'Sync & Trackers', icon: Cloud },
   { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
   { id: 'privacy', label: 'Privacy', icon: Shield },
   { id: 'about', label: 'About', icon: Info },
@@ -35,7 +39,8 @@ export const SECTION_IDS = sections.map((s) => s.id);
 export const SETTINGS_SECTIONS = sections.map(({ id, label }) => ({ id, label }));
 
 /**
- * A sidebar on desktop, a horizontal strip on phones.
+ * A sidebar on desktop, a horizontal strip on phones. The sidebar stays in view while the
+ * section scrolls, so another section is always one click away.
  *
  * Below `md` the settings grid is a single column, so a vertical list would push the panel
  * down. `md:` matches the breakpoint of the grid in app/settings/client.tsx.
@@ -66,7 +71,7 @@ export function SettingsNav({
     <nav
       ref={strip}
       aria-label="Settings sections"
-      className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mx-0 md:flex-col md:overflow-visible md:px-0 md:pb-0"
+      className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:sticky md:top-24 md:mx-0 md:max-h-[calc(100dvh-7rem)] md:flex-col md:self-start md:overflow-y-auto md:px-0 md:pb-0"
     >
       {sections.map((s) => {
         const Icon = s.icon;

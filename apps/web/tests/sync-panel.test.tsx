@@ -61,6 +61,7 @@ vi.mock('@/components/settings/field-controls', () => ({
 }));
 vi.mock('@/components/settings/download-folder-field', () => ({ DownloadFolderField: () => null }));
 vi.mock('@/components/downloads/open-folder-button', () => ({ OpenFolderButton: () => null }));
+vi.mock('@/components/settings/trackers-panel', () => ({ TrackersPanel: () => null }));
 
 import { SyncPanel } from '@/components/settings/sync-panel';
 
@@ -117,7 +118,7 @@ describe('SyncPanel desktop state', () => {
     customCategories.push('Daily', 'Quiet');
     settings.updateCategoryIntervalHours = JSON.stringify({ Daily: 3 });
     settings.updateMutedCategories = JSON.stringify(['Daily']);
-    render(<SyncPanel />);
+    render(<SyncPanel show="library" />);
 
     expect(await screen.findByRole('button', { name: 'Daily check interval' })).toHaveTextContent(
       '3 hours',

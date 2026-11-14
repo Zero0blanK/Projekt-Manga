@@ -9,7 +9,7 @@ import {
   updateNotificationChannel,
   type NotificationChannel,
 } from '@projekt-manga/api-client';
-import { ActionButton, ToggleSwitch } from '@/components/settings/field-controls';
+import { ActionButton, LoadingBlock, ToggleSwitch } from '@/components/settings/field-controls';
 import { formatRelative } from '@/lib/manga-data';
 
 type Kind = NotificationChannel['kind'];
@@ -78,7 +78,7 @@ export function AlertChannels() {
         Alerts outside the app need a server that supports them.
       </p>
     );
-  if (!channels) return null;
+  if (!channels) return <LoadingBlock label="Loading alert channels" />;
 
   const replace = (next: NotificationChannel) =>
     setChannels((current) => current?.map((c) => (c.id === next.id ? next : c)) ?? null);

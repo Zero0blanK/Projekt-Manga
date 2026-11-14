@@ -8,6 +8,7 @@ import { HIDE_LIBRARY_IN_SOURCES } from '@/lib/library-titles';
 import { AUTO_OPEN_CHALLENGE_SETTING } from '@/lib/source-browser';
 import { AddRepositoryForm } from '@/components/extensions/add-repository-form';
 import { SuwayomiServer } from '@/components/settings/suwayomi-server';
+import { SourceHealthPanel } from '@/components/settings/source-health-panel';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
@@ -201,6 +202,7 @@ export function ExtensionsPanel() {
           })
         )}
       </Panel>
+      <SourceHealthPanel />
       <Panel
         title="Suwayomi server"
         subtitle="Use the Mihon sources installed on your Suwayomi server"

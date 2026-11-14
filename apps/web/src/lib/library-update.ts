@@ -6,7 +6,7 @@ import { useAppState, useSetting, type ShelfStatus } from '@/lib/app-store';
  * find. Matches the values `Manga["status"]` can hold. */
 const FINISHED_STATUSES = new Set(['Completed', 'Cancelled']);
 
-/** Settings › Sync & Storage › Library updates. Category lists are stored as JSON
+/** Settings › Library › Library updates. Category lists are stored as JSON
  * strings, because settings hold primitives only. */
 export const UPDATE_SETTING = {
   skipCompleted: 'skipCompletedOnUpdate',

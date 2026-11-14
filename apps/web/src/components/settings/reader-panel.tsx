@@ -57,7 +57,6 @@ import { SKIP_FILTERED_CHAPTERS } from '@/lib/chapter-filter';
 import { READER_GUIDED_VIEW } from '@/lib/panel-detect';
 import { READER_ENHANCE } from '@/lib/enhance';
 import { ZoneLayoutPreview, describeZoneAction } from '@/components/reader/zone-layout-preview';
-import { KeyBindingsEditor } from '@/components/settings/key-bindings-editor';
 import { TranslationService } from '@/components/settings/translation-service';
 import {
   READER_ZONE_LAYOUT,
@@ -65,7 +64,6 @@ import {
   ZONE_LAYOUT_HINTS,
   type ZoneLayout,
 } from '@/lib/click-zones';
-import { READER_DOUBLE_CLICK_ZOOM, READER_WHEEL_ACTION, WHEEL_ACTIONS } from '@/lib/reader-keys';
 
 export function ReaderPanel() {
   const { manga } = useMangaLibrary();
@@ -239,24 +237,6 @@ export function ReaderPanel() {
             Reset click zones
           </ActionButton>
         </div>
-      </Panel>
-
-      <Panel title="Mouse and keyboard" subtitle="Desktop reading controls">
-        <Field label="Mouse wheel" hint="In the paged reader; Ctrl+wheel always zooms">
-          <Select
-            settingKey={READER_WHEEL_ACTION}
-            options={[...WHEEL_ACTIONS]}
-            defaultValue="Turn page"
-          />
-        </Field>
-        <Field
-          label="Double-click to zoom"
-          hint="Zoom in where you click; single clicks wait a moment to tell them apart"
-        >
-          <Toggle settingKey={READER_DOUBLE_CLICK_ZOOM} defaultOn />
-        </Field>
-        <Group label="Keyboard" />
-        <KeyBindingsEditor />
       </Panel>
 
       <Panel title="Chapters" subtitle="Listing chapters and moving between them">

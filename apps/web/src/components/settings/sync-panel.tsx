@@ -24,6 +24,7 @@ import {
   categoryScope,
 } from '@/lib/auto-downloads';
 import { DownloadFolderField } from '@/components/settings/download-folder-field';
+import { TrackersPanel } from '@/components/settings/trackers-panel';
 import { OpenFolderButton } from '@/components/downloads/open-folder-button';
 import { useCurrentUser } from '@/lib/session-resource';
 import { isAborted, reportError } from '@/lib/report-error';
@@ -77,7 +78,12 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(exponent === 0 ? 0 : 1)} ${units[exponent]}`;
 }
 
-export function SyncPanel() {
+/**
+ * Three settings sections share this panel's state: Downloads (storage and automatic
+ * downloads), Library (what Update Library checks) and Sync (cross-device sync and
+ * trackers). `show` picks which one renders.
+ */
+export function SyncPanel({ show = 'sync' }: { show?: 'sync' | 'downloads' | 'library' }) {
   // Library categories, for "Download new chapters" scoped to one of them.
   const categoryNames = Object.keys(useAppState((s) => s.categoryMembers)).sort();
   const [stats, setStats] = useState<DownloadStats | null>(null);
@@ -164,240 +170,261 @@ export function SyncPanel() {
 
   return (
     <div className="space-y-6">
-      <Panel title="Storage" subtitle="Where downloaded chapters live">
-        <DownloadFolderField />
-        <Field label="Open folder" hint="Reveal the download folder on this machine">
-          <OpenFolderButton path={folder} label="Open download folder" withText />
-        </Field>
-        <Field label="On disk" hint="Across every completed download">
-          <span className="text-xs tabular-nums text-muted-foreground">
-            {stats
-              ? `${stats.completed} ${stats.completed === 1 ? 'chapter' : 'chapters'} · ${formatBytes(stats.totalSize)}`
-              : '—'}
-          </span>
-        </Field>
-        <Field label="Storage limit" hint="New downloads stop at this size; nothing is deleted">
-          <div className="space-y-2">
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void saveLimit();
-              }}
-              className="flex items-center gap-2"
-            >
-              <label className="flex items-center gap-2">
-                <span className="sr-only">Storage limit in GB</span>
-                <input
-                  type="number"
-                  min={1 / 1024 ** 3}
-                  step="any"
-                  value={limitGb}
-                  disabled={!stats || savingLimit}
-                  onChange={(event) => {
-                    setLimitGb(event.target.value);
-                    setLimitNotice('');
-                  }}
-                  className="h-9 w-24 rounded-lg border border-border bg-background px-3 text-sm"
-                />
-                <span className="text-xs text-muted-foreground">GB</span>
-              </label>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={!stats || !validLimit || savingLimit || limitBytes === stats.storageLimit}
-              >
-                {savingLimit ? 'Saving…' : 'Save'}
-              </Button>
-            </form>
-            <p className="text-xs tabular-nums text-muted-foreground">
+      {show === 'downloads' && (
+        <Panel title="Storage" subtitle="Where downloaded chapters live">
+          <DownloadFolderField />
+          <Field label="Open folder" hint="Reveal the download folder on this machine">
+            <OpenFolderButton path={folder} label="Open download folder" withText />
+          </Field>
+          <Field label="On disk" hint="Across every completed download">
+            <span className="text-xs tabular-nums text-muted-foreground">
               {stats
-                ? `${formatBytes(stats.totalSize)} of ${formatBytes(stats.storageLimit)} used`
-                : 'Loading storage limit…'}
-            </p>
-            {stats && validLimit && limitBytes < stats.totalSize && (
-              <p className="text-xs text-muted-foreground">
-                Current usage exceeds this limit. New download writes will stop until space is freed
-                or the limit is raised.
-              </p>
-            )}
-            {limitNotice && (
-              <p role="status" className="text-xs text-muted-foreground">
-                {limitNotice}
-              </p>
-            )}
-          </div>
-        </Field>
-      </Panel>
-
-      <Panel title="Library updates" subtitle="What Update Library checks">
-        <Field label="Skip finished titles" hint="Skip completed and cancelled series">
-          <Toggle settingKey={UPDATE_SETTING.skipCompleted} />
-        </Field>
-        <Field label="Skip titles with unread chapters" hint="Wait until you've caught up">
-          <Toggle settingKey={UPDATE_SETTING.skipUnread} />
-        </Field>
-        <Field label="Skip titles not started" hint="Skip titles you haven't read yet">
-          <Toggle settingKey={UPDATE_SETTING.skipNotStarted} />
-        </Field>
-        <Field
-          label="Smart update"
-          hint="Scheduled updates skip titles not expected to release soon"
-        >
-          <Toggle settingKey={UPDATE_SETTING.smartUpdate} />
-        </Field>
-        <Field label="Only these categories" hint="None selected checks every category">
-          <CategoryListSetting settingKey={UPDATE_SETTING.includeCategories} />
-        </Field>
-        <Field label="Never these categories" hint="Wins over the list above">
-          <CategoryListSetting settingKey={UPDATE_SETTING.excludeCategories} />
-        </Field>
-        <Field
-          label="Check a title when you reload its page"
-          hint="Reloading a series page fetches new chapters"
-        >
-          <Toggle settingKey="checkChaptersOnReload" defaultOn />
-        </Field>
-        <Field
-          label="Refresh covers during update"
-          hint="Re-fetch artwork when a source changes it"
-        >
-          <Toggle settingKey="refreshCoversOnUpdate" />
-        </Field>
-        <Group label="Per category" />
-        <Field
-          label="Category check intervals"
-          hint="Scheduled checks for a category's titles. In several categories, the shortest wins; a source's minimum still applies"
-        >
-          <CategoryIntervalSetting />
-        </Field>
-        <Field label="Mute new-chapter alerts" hint="New chapters in these categories stay silent">
-          <CategoryListSetting settingKey={CATEGORY_UPDATE_SETTING.mutedCategories} />
-        </Field>
-      </Panel>
-
-      <Panel title="Cross-device sync" subtitle="Account sync at work">
-        {isDesktop && (
-          <Field label="Local library" hint="Kept on this device for offline reading">
-            <span role="status" className="text-xs text-muted-foreground">
-              {!desktopInit
-                ? 'Checking local library…'
-                : desktopInit.hadLocalData || desktopInit.seedStatus === 'done'
-                  ? `Available offline${desktopInit.seedStatus === 'running' ? ' · refreshing in background' : ''}`
-                  : desktopInit.seedStatus === 'failed'
-                    ? 'Local setup could not finish; the library may be empty'
-                    : 'Preparing local library…'}
+                ? `${stats.completed} ${stats.completed === 1 ? 'chapter' : 'chapters'} · ${formatBytes(stats.totalSize)}`
+                : '—'}
             </span>
           </Field>
-        )}
-        {!user ? (
-          <Field
-            label="Cross-device sync"
-            hint="Create an account in Profile to sync across devices"
-            disabled
-          >
-            <span className="text-xs text-muted-foreground">Local only</span>
-          </Field>
-        ) : isDesktop ? (
-          <>
-            <Field label="Sync this device" hint="Pause account sync on this desktop">
-              <Toggle settingKey="desktopSyncEnabled" defaultOn label="Sync this device" />
-            </Field>
-            <Field label="Automatic sync" hint="Syncs at this interval while online">
-              <Select
-                settingKey="desktopSyncInterval"
-                options={['Off', '5 minutes', '15 minutes', '30 minutes', '60 minutes']}
-                defaultValue="15 minutes"
-              />
-            </Field>
-            <Field
-              label="Sync with server"
-              hint={
-                online === false
-                  ? 'Offline; reading and downloads still work'
-                  : desktopSyncEnabled
-                    ? 'Sends local changes, then fetches the result'
-                    : 'Paused on this device'
-              }
-            >
-              <div className="flex items-center gap-3">
-                {syncState.lastSuccess && (
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    Last synced: {new Date(syncState.lastSuccess).toLocaleString()}
-                  </span>
-                )}
-                {syncState.error && (
-                  <span role="status" className="text-xs text-destructive">
-                    {online === false
-                      ? `Offline; sync will need a retry when online. ${syncState.error}`
-                      : `Server sync failed: ${syncState.error}`}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => void runDesktopSync()}
+          <Field label="Storage limit" hint="New downloads stop at this size; nothing is deleted">
+            <div className="space-y-2">
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveLimit();
+                }}
+                className="flex items-center gap-2"
+              >
+                <label className="flex items-center gap-2">
+                  <span className="sr-only">Storage limit in GB</span>
+                  <input
+                    type="number"
+                    min={1 / 1024 ** 3}
+                    step="any"
+                    value={limitGb}
+                    disabled={!stats || savingLimit}
+                    onChange={(event) => {
+                      setLimitGb(event.target.value);
+                      setLimitNotice('');
+                    }}
+                    className="h-9 w-24 rounded-lg border border-border bg-background px-3 text-sm"
+                  />
+                  <span className="text-xs text-muted-foreground">GB</span>
+                </label>
+                <Button
+                  type="submit"
+                  size="sm"
                   disabled={
-                    syncState.running || restorePending || online === false || !desktopSyncEnabled
+                    !stats || !validLimit || savingLimit || limitBytes === stats.storageLimit
                   }
-                  className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
                 >
-                  {syncState.running
-                    ? 'Syncing…'
-                    : restorePending
-                      ? 'Restoring…'
-                      : !desktopSyncEnabled
-                        ? 'Sync paused'
-                        : online === false
-                          ? 'Offline'
-                          : syncState.error
-                            ? 'Retry sync'
-                            : 'Sync now'}
-                </button>
-              </div>
-            </Field>
-          </>
-        ) : (
-          <Field label="Cross-device sync" hint="Your account is already live on every device">
-            <span className="text-xs text-muted-foreground">Always up to date</span>
+                  {savingLimit ? 'Saving…' : 'Save'}
+                </Button>
+              </form>
+              <p className="text-xs tabular-nums text-muted-foreground">
+                {stats
+                  ? `${formatBytes(stats.totalSize)} of ${formatBytes(stats.storageLimit)} used`
+                  : 'Loading storage limit…'}
+              </p>
+              {stats && validLimit && limitBytes < stats.totalSize && (
+                <p className="text-xs text-muted-foreground">
+                  Current usage exceeds this limit. New download writes will stop until space is
+                  freed or the limit is raised.
+                </p>
+              )}
+              {limitNotice && (
+                <p role="status" className="text-xs text-muted-foreground">
+                  {limitNotice}
+                </p>
+              )}
+            </div>
           </Field>
-        )}
-      </Panel>
+        </Panel>
+      )}
 
-      <Panel title="Download automation" subtitle="Downloads that happen on their own">
-        <Group label="Downloads" />
-        <Field
-          label="Download new chapters"
-          hint="Chapters a library update finds, for the titles chosen here"
-        >
-          <OptionSelect
-            settingKey={AUTO_DOWNLOAD_NEW}
-            defaultValue="off"
-            options={[
-              { value: 'off', label: 'Off' },
-              { value: 'all', label: 'All titles' },
-              ...categoryNames.map((name) => ({ value: categoryScope(name), label: name })),
-            ]}
-          />
-        </Field>
-        <Field label="Download ahead" hint="Chapters after the one you're reading">
-          <NumberSelect
-            settingKey={DOWNLOAD_AHEAD}
-            defaultValue={0}
-            options={[0, 1, 2, 3, 5]}
-            format={(value) => (value === 0 ? 'Off' : `${value} chapter${value === 1 ? '' : 's'}`)}
-          />
-        </Field>
-        <Field label="Delete after reading" hint="Bookmarked chapters are always kept">
-          <OptionSelect
-            settingKey={DELETE_AFTER_READ}
-            defaultValue="off"
-            options={[
-              { value: 'off', label: 'Off' },
-              { value: 'immediately', label: 'Right after reading' },
-              { value: 'afterNext', label: 'After the next chapter' },
-            ]}
-          />
-        </Field>
-      </Panel>
+      {show === 'library' && (
+        <Panel title="Library updates" subtitle="What Update Library checks">
+          <Field label="Skip finished titles" hint="Skip completed and cancelled series">
+            <Toggle settingKey={UPDATE_SETTING.skipCompleted} />
+          </Field>
+          <Field label="Skip titles with unread chapters" hint="Wait until you've caught up">
+            <Toggle settingKey={UPDATE_SETTING.skipUnread} />
+          </Field>
+          <Field label="Skip titles not started" hint="Skip titles you haven't read yet">
+            <Toggle settingKey={UPDATE_SETTING.skipNotStarted} />
+          </Field>
+          <Field
+            label="Smart update"
+            hint="Scheduled updates skip titles not expected to release soon"
+          >
+            <Toggle settingKey={UPDATE_SETTING.smartUpdate} />
+          </Field>
+          <Field label="Only these categories" hint="None selected checks every category">
+            <CategoryListSetting settingKey={UPDATE_SETTING.includeCategories} />
+          </Field>
+          <Field label="Never these categories" hint="Wins over the list above">
+            <CategoryListSetting settingKey={UPDATE_SETTING.excludeCategories} />
+          </Field>
+          <Field
+            label="Check a title when you reload its page"
+            hint="Reloading a series page fetches new chapters"
+          >
+            <Toggle settingKey="checkChaptersOnReload" defaultOn />
+          </Field>
+          <Field
+            label="Refresh covers during update"
+            hint="Re-fetch artwork when a source changes it"
+          >
+            <Toggle settingKey="refreshCoversOnUpdate" />
+          </Field>
+          <Group label="Per category" />
+          <Field
+            label="Category check intervals"
+            hint="Scheduled checks for a category's titles. In several categories, the shortest wins; a source's minimum still applies"
+          >
+            <CategoryIntervalSetting />
+          </Field>
+          <Field
+            label="Mute new-chapter alerts"
+            hint="New chapters in these categories stay silent"
+          >
+            <CategoryListSetting settingKey={CATEGORY_UPDATE_SETTING.mutedCategories} />
+          </Field>
+        </Panel>
+      )}
+
+      {show === 'sync' && (
+        <Panel title="Cross-device sync" subtitle="Account sync at work">
+          {isDesktop && (
+            <Field label="Local library" hint="Kept on this device for offline reading">
+              <span role="status" className="text-xs text-muted-foreground">
+                {!desktopInit
+                  ? 'Checking local library…'
+                  : desktopInit.hadLocalData || desktopInit.seedStatus === 'done'
+                    ? `Available offline${desktopInit.seedStatus === 'running' ? ' · refreshing in background' : ''}`
+                    : desktopInit.seedStatus === 'failed'
+                      ? 'Local setup could not finish; the library may be empty'
+                      : 'Preparing local library…'}
+              </span>
+            </Field>
+          )}
+          {!user ? (
+            <Field
+              label="Cross-device sync"
+              hint="Create an account in Profile to sync across devices"
+              disabled
+            >
+              <span className="text-xs text-muted-foreground">Local only</span>
+            </Field>
+          ) : isDesktop ? (
+            <>
+              <Field label="Sync this device" hint="Pause account sync on this desktop">
+                <Toggle settingKey="desktopSyncEnabled" defaultOn label="Sync this device" />
+              </Field>
+              <Field label="Automatic sync" hint="Syncs at this interval while online">
+                <Select
+                  settingKey="desktopSyncInterval"
+                  options={['Off', '5 minutes', '15 minutes', '30 minutes', '60 minutes']}
+                  defaultValue="15 minutes"
+                />
+              </Field>
+              <Field
+                label="Sync with server"
+                hint={
+                  online === false
+                    ? 'Offline; reading and downloads still work'
+                    : desktopSyncEnabled
+                      ? 'Sends local changes, then fetches the result'
+                      : 'Paused on this device'
+                }
+              >
+                <div className="flex items-center gap-3">
+                  {syncState.lastSuccess && (
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      Last synced: {new Date(syncState.lastSuccess).toLocaleString()}
+                    </span>
+                  )}
+                  {syncState.error && (
+                    <span role="status" className="text-xs text-destructive">
+                      {online === false
+                        ? `Offline; sync will need a retry when online. ${syncState.error}`
+                        : `Server sync failed: ${syncState.error}`}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void runDesktopSync()}
+                    disabled={
+                      syncState.running || restorePending || online === false || !desktopSyncEnabled
+                    }
+                    className="rounded-lg border border-border/60 px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
+                  >
+                    {syncState.running
+                      ? 'Syncing…'
+                      : restorePending
+                        ? 'Restoring…'
+                        : !desktopSyncEnabled
+                          ? 'Sync paused'
+                          : online === false
+                            ? 'Offline'
+                            : syncState.error
+                              ? 'Retry sync'
+                              : 'Sync now'}
+                  </button>
+                </div>
+              </Field>
+            </>
+          ) : (
+            <Field label="Cross-device sync" hint="Your account is already live on every device">
+              <span className="text-xs text-muted-foreground">Always up to date</span>
+            </Field>
+          )}
+        </Panel>
+      )}
+
+      {show === 'sync' && user && (
+        <Panel title="Trackers" subtitle="Sync reading progress with third-party services">
+          <TrackersPanel />
+        </Panel>
+      )}
+
+      {show === 'downloads' && (
+        <Panel title="Download automation" subtitle="Downloads that happen on their own">
+          <Group label="Downloads" />
+          <Field
+            label="Download new chapters"
+            hint="Chapters a library update finds, for the titles chosen here"
+          >
+            <OptionSelect
+              settingKey={AUTO_DOWNLOAD_NEW}
+              defaultValue="off"
+              options={[
+                { value: 'off', label: 'Off' },
+                { value: 'all', label: 'All titles' },
+                ...categoryNames.map((name) => ({ value: categoryScope(name), label: name })),
+              ]}
+            />
+          </Field>
+          <Field label="Download ahead" hint="Chapters after the one you're reading">
+            <NumberSelect
+              settingKey={DOWNLOAD_AHEAD}
+              defaultValue={0}
+              options={[0, 1, 2, 3, 5]}
+              format={(value) =>
+                value === 0 ? 'Off' : `${value} chapter${value === 1 ? '' : 's'}`
+              }
+            />
+          </Field>
+          <Field label="Delete after reading" hint="Bookmarked chapters are always kept">
+            <OptionSelect
+              settingKey={DELETE_AFTER_READ}
+              defaultValue="off"
+              options={[
+                { value: 'off', label: 'Off' },
+                { value: 'immediately', label: 'Right after reading' },
+                { value: 'afterNext', label: 'After the next chapter' },
+              ]}
+            />
+          </Field>
+        </Panel>
+      )}
     </div>
   );
 }

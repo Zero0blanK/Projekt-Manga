@@ -159,7 +159,7 @@ export const MOUSE_BUTTON_BINDINGS: ReadonlyMap<number, ReaderAction> = new Map(
   [4, 'nextPage'],
 ]);
 
-/** Settings › Reader › Mouse. What the wheel does in the paged reader; Ctrl+wheel always
+/** Settings › Shortcuts › Mouse. What the wheel does in the paged reader; Ctrl+wheel always
  * zooms. The long strip scrolls either way. */
 export const READER_WHEEL_ACTION = 'readerWheelAction';
 export const WHEEL_ACTIONS = ['Turn page', 'Zoom', 'Off'] as const;

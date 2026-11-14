@@ -9,7 +9,7 @@ import {
   testSuwayomiConnection,
   type SuwayomiSettings,
 } from '@projekt-manga/api-client';
-import { ActionButton } from '@/components/settings/field-controls';
+import { ActionButton, LoadingBlock } from '@/components/settings/field-controls';
 import { useConfirm } from '@/hooks/use-confirm';
 import { queryClient, queryKeys } from '@/lib/query-client';
 
@@ -70,7 +70,7 @@ export function SuwayomiServer() {
         Connecting a Suwayomi server needs administrator access to a server that supports it.
       </p>
     );
-  if (saved === undefined) return null;
+  if (saved === undefined) return <LoadingBlock label="Loading the Suwayomi server settings" />;
 
   const act = async (work: () => Promise<void>, fallback: string) => {
     setBusy(true);

@@ -8,11 +8,12 @@ import { ReaderPanel } from '@/components/settings/reader-panel';
 import { ExtensionsPanel } from '@/components/settings/extensions-panel';
 import { StatisticsPanel } from '@/components/settings/statistics-panel';
 import { NotificationsPanel } from '@/components/settings/notifications-panel';
-import { SyncPanel } from '@/components/settings/sync-panel';
 import { ShortcutsPanel } from '@/components/settings/shortcuts-panel';
 import { PrivacyPanel } from '@/components/settings/privacy-panel';
 import { AboutPanel } from '@/components/settings/about-panel';
 import { ChangelogPanel } from '@/components/settings/changelog-panel';
+import { SyncPanel } from '@/components/settings/sync-panel';
+import { LibraryPanel } from '@/components/settings/library-panel';
 
 function sectionFromHash(): SectionId | null {
   const id = window.location.hash.replace(/^#/, '');
@@ -135,7 +136,9 @@ export function SettingsPageClient() {
         <div ref={panel} className="min-w-0">
           {active === 'account' && <AccountPanel />}
           {active === 'appearance' && <AppearancePanel />}
+          {active === 'library' && <LibraryPanel />}
           {active === 'reader' && <ReaderPanel />}
+          {active === 'downloads' && <SyncPanel show="downloads" />}
           {active === 'extensions' && <ExtensionsPanel />}
           {active === 'statistics' && <StatisticsPanel />}
           {active === 'notifications' && <NotificationsPanel />}

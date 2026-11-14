@@ -7,11 +7,9 @@ import {
   Group,
   Toggle,
   ActionButton,
-  NumberSelect,
   Select,
 } from '@/components/settings/field-controls';
-import { useNumberSetting, useSetting } from '@/lib/app-store';
-import { useMangaLibrary } from '@/lib/library-store';
+import { useSetting } from '@/lib/app-store';
 import { showWindowNotification } from '@/lib/window-notification';
 import { toast } from '@/hooks/use-toast';
 import { AlertChannels } from '@/components/settings/alert-channels';
@@ -59,11 +57,7 @@ function useNotificationPermission() {
 export function NotificationsPanel() {
   const { permission, request } = useNotificationPermission();
   const desktopEnabled = useSetting('notifyDesktop', false) as boolean;
-  const automaticUpdates = useSetting('automaticLibraryUpdates', true) as boolean;
-  const intervalHours = useNumberSetting('automaticLibraryUpdateIntervalHours', 12);
   const quietHours = useSetting('quietHoursEnabled', false) as boolean;
-  const { manga } = useMangaLibrary();
-  const sources = [...new Set(manga.map((entry) => entry.source).filter(Boolean))].sort();
   const granted = permission === 'granted';
 
   const permissionLabel: Record<PermissionState, string> = {
@@ -153,68 +147,6 @@ export function NotificationsPanel() {
         subtitle="New-chapter alerts to your phone or chat: ntfy, Discord, Telegram or a webhook"
       >
         <AlertChannels />
-      </Panel>
-
-      <Panel
-        title="Source alerts and cadence"
-        subtitle="Choose source notifications and an optional minimum automatic check interval"
-      >
-        {sources.length === 0 ? (
-          <p className="text-xs text-muted-foreground">
-            Add a title to your library to configure source alerts.
-          </p>
-        ) : (
-          sources.map((source) => (
-            <div key={source} className="space-y-2">
-              <Field label={source} hint="Include this source in update alerts">
-                <Toggle settingKey={`notifySource:${source}`} defaultOn />
-              </Field>
-              <Field
-                label={`${source} automatic check minimum`}
-                hint="Uses the longer of this and the global interval"
-                nested
-              >
-                <NumberSelect
-                  settingKey={`automaticLibraryUpdateSourceIntervalHours:${source}`}
-                  options={[1, 6, 12, 24, 48, 72, 168]}
-                  defaultValue={1}
-                  format={(hours) => `${hours} hours`}
-                />
-              </Field>
-            </div>
-          ))
-        )}
-      </Panel>
-
-      <Panel title="Scheduled checks" subtitle="Looking for new chapters on your behalf">
-        <Group label="Automatic updates" />
-        <Field
-          label="Check for new chapters automatically"
-          hint="Runs while the app is open or in the tray"
-        >
-          <Toggle settingKey="automaticLibraryUpdates" defaultOn />
-        </Field>
-        <Field
-          label="Check interval"
-          hint="Longer intervals send fewer requests to sources"
-          nested
-          disabled={!automaticUpdates}
-        >
-          <NumberSelect
-            settingKey="automaticLibraryUpdateIntervalHours"
-            options={[6, 12, 24, 48, 72]}
-            defaultValue={12}
-            format={(hours) => `${hours} hours`}
-          />
-        </Field>
-        <Field
-          label="Current cadence"
-          hint="Takes effect after the next check"
-          nested
-          disabled={!automaticUpdates}
-        >
-          <span className="text-xs text-muted-foreground">Every {intervalHours} hours</span>
-        </Field>
       </Panel>
     </div>
   );

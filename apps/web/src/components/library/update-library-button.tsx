@@ -23,7 +23,7 @@ export function useUpdateLibrary() {
   const progress = useLibraryUpdateProgress();
   const { manga: library, refresh } = useMangaLibrary();
   const { shelf } = useLibraryState();
-  // Settings > Sync & Storage > Library updates. Smart update is for scheduled runs only:
+  // Settings > Library > Library updates. Smart update is for scheduled runs only:
   // pressing the button means "check everything now".
   const updateRules = useGlobalUpdateRules();
   const showDesktop = useSetting('notifyDesktop', false) as boolean;
