@@ -1,5 +1,5 @@
 /**
- * The counts shown on library covers (unread, downloaded, latest chapter): where they sit
+ * The counts shown on library covers (unread, downloaded, total chapters): where they sit
  * and how they look. Settings > Appearance > Cover badges.
  */
 

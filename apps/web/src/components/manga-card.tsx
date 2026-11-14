@@ -28,13 +28,13 @@ type CoverCounts = {
   unread: number;
   /** 0 when hidden: none downloaded, or turned off (off by default). */
   downloads: number;
-  /** Null when the latest-chapter badge is turned off. */
-  latest: number | null;
+  /** Chapters the title has; null when that count is turned off. */
+  total: number | null;
 };
 
 /** The counts a cover shows, as Settings > Appearance has them. */
 function useCoverCounts(manga: Manga, downloadCount: number, enabled = true): CoverCounts {
-  const latestEnabled = useSetting('showChapterBadge', true) !== false;
+  const totalEnabled = useSetting('showChapterBadge', true) !== false;
   const unreadEnabled = useSetting('showUnreadBadge', true) !== false;
   const downloadsEnabled = useSetting(DOWNLOAD_BADGE_SETTING, false) === true;
   const position = resolveBadgePosition(
@@ -48,18 +48,18 @@ function useCoverCounts(manga: Manga, downloadCount: number, enabled = true): Co
     style,
     unread: enabled && unreadEnabled && manga.inLibrary ? unread : 0,
     downloads: enabled && downloadsEnabled ? downloadCount : 0,
-    latest: enabled && latestEnabled ? manga.latestChapterNum : null,
+    total: enabled && totalEnabled ? manga.chapters : null,
   };
 }
 
 const hasCounts = (counts: CoverCounts) =>
-  counts.unread > 0 || counts.downloads > 0 || counts.latest !== null;
+  counts.unread > 0 || counts.downloads > 0 || counts.total !== null;
 
 function countsLabel(counts: CoverCounts): string {
   return [
     counts.unread > 0 && `${plural(counts.unread, 'unread chapter')}`,
     counts.downloads > 0 && `${plural(counts.downloads, 'downloaded chapter')}`,
-    counts.latest !== null && `latest chapter ${counts.latest}`,
+    counts.total !== null && `${plural(counts.total, 'chapter')} in all`,
   ]
     .filter(Boolean)
     .join(', ');
@@ -67,8 +67,8 @@ function countsLabel(counts: CoverCounts): string {
 
 /**
  * The counts in a corner of the cover. Joined (the default, as Mihon has it): one block,
- * a coloured segment per count, numbers only: downloaded, then unread, then the latest
- * chapter. Pills: a separate chip for each, with its words.
+ * a coloured segment per count, numbers only: downloaded, then unread, then the
+ * chapter count. Pills: a separate chip for each, with its words.
  */
 function CoverBadges({ counts }: { counts: CoverCounts }) {
   const label = countsLabel(counts);
@@ -97,12 +97,12 @@ function CoverBadges({ counts }: { counts: CoverCounts }) {
             {counts.unread} unread
           </span>
         )}
-        {counts.latest !== null && (
+        {counts.total !== null && (
           <span
             aria-hidden
             className={`whitespace-nowrap rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-glow ${others ? 'hidden @[14rem]:block' : ''}`}
           >
-            Ch. {counts.latest}
+            {counts.total} ch
           </span>
         )}
       </div>
@@ -126,12 +126,12 @@ function CoverBadges({ counts }: { counts: CoverCounts }) {
           {counts.unread}
         </span>
       )}
-      {counts.latest !== null && (
+      {counts.total !== null && (
         <span
           aria-hidden
           className={`${segment} bg-black/65 font-semibold text-white backdrop-blur ${others ? 'hidden @[10rem]:block' : ''}`}
         >
-          Ch. {counts.latest}
+          {counts.total} ch
         </span>
       )}
     </div>
@@ -152,7 +152,7 @@ function CoverCountsLine({ counts, onCover }: { counts: CoverCounts; onCover: bo
         <Download size={10} aria-hidden /> {counts.downloads}
       </span>
     ),
-    counts.latest !== null && <span key="latest">Ch. {counts.latest}</span>,
+    counts.total !== null && <span key="total">{counts.total} ch</span>,
   ].filter(Boolean);
   const label = countsLabel(counts);
   return (

@@ -22,8 +22,8 @@ const manga = {
   groups: null,
   source: 'fixture',
   chapters: 10,
-  latestChapter: '10',
-  latestChapterNum: 10,
+  latestChapter: '12',
+  latestChapterNum: 12,
   updatedAt: '',
   status: 'Ongoing',
   tags: [],
@@ -44,8 +44,8 @@ afterEach(() => {
 describe('cover badges', () => {
   it('joins the counts in the top left, numbers only, with the download count off by default', () => {
     render(<MangaCard manga={manga} downloaded downloadCount={3} />);
-    const badges = screen.getByRole('img', { name: '6 unread chapters, latest chapter 10' });
-    expect(badges.textContent).toBe('6Ch. 10');
+    const badges = screen.getByRole('img', { name: '6 unread chapters, 10 chapters in all' });
+    expect(badges.textContent).toBe('610 ch');
     // Not counting downloads, so the offline icon still says the title has some.
     expect(screen.getByRole('img', { name: 'Has downloaded chapters' })).toBeTruthy();
   });
@@ -54,9 +54,9 @@ describe('cover badges', () => {
     settings.values = { showDownloadBadge: true };
     render(<MangaCard manga={manga} downloaded downloadCount={3} />);
     const badges = screen.getByRole('img', {
-      name: '6 unread chapters, 3 downloaded chapters, latest chapter 10',
+      name: '6 unread chapters, 3 downloaded chapters, 10 chapters in all',
     });
-    expect(badges.textContent).toBe('36Ch. 10');
+    expect(badges.textContent).toBe('3610 ch');
     expect(screen.queryByRole('img', { name: 'Has downloaded chapters' })).toBeNull();
   });
 

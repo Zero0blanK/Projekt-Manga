@@ -277,7 +277,7 @@ export function AppearancePanel() {
         <Field label="Download count on covers" hint="Chapters downloaded for offline reading">
           <Toggle settingKey={DOWNLOAD_BADGE_SETTING} />
         </Field>
-        <Field label="Latest chapter on covers" hint="The newest chapter number">
+        <Field label="Chapter count on covers" hint="How many chapters the title has">
           <Toggle settingKey="showChapterBadge" defaultOn />
         </Field>
       </Panel>
