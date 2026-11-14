@@ -1,9 +1,11 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import {
   translateBodySchema,
+  translatePageBodySchema,
   translateReadBodySchema,
   translateSettingsBodySchema,
   type TranslateBody,
+  type TranslatePageBody,
   type TranslateReadBody,
   type TranslateSettingsBody,
 } from '@projekt-manga/schemas';
@@ -70,6 +72,22 @@ router.get(
 router.post(
   '/local/download',
   run(() => localTranslation.download()),
+);
+
+/**
+ * The text on one whole page: found by this server's text detector and read by manga-ocr,
+ * with where each translation goes. Replaces finding the bubbles on the device.
+ */
+router.post(
+  '/page',
+  validateBody(translatePageBodySchema),
+  run(async (req) => {
+    const identity = req.user?.id ?? `ip:${req.ip ?? 'unknown'}`;
+    checkReadRate(identity);
+    const { image } = req.validated as TranslatePageBody;
+    const [page] = decodeImages([image]);
+    return { regions: await localTranslation.readPage(page) };
+  }),
 );
 
 /** The Japanese in one page's speech bubbles, read by this server's manga-ocr. */

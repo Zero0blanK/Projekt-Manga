@@ -14,7 +14,15 @@ import {
 import { cn } from '@/lib/utils';
 import { measurePanels } from '@/lib/panel-detect';
 import { READER_ENHANCE, enhancedPageUrl, shouldEnhance } from '@/lib/enhance';
-import { fitFontSize, usePageTranslation } from '@/lib/page-translation';
+import {
+  READER_AUTO_TRANSLATE,
+  READER_TRANSLATE_TARGET,
+  autoTranslatePage,
+  fitFontSize,
+  translateTargetFor,
+  usePageTranslation,
+} from '@/lib/page-translation';
+import { FittedText } from '@/components/reader/fitted-text';
 import type { Manga } from '@/lib/manga-data';
 
 export function MangaPage({
@@ -80,6 +88,13 @@ export function MangaPage({
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [content, setContent] = useState<ViewRect>(FULL_VIEW);
   const translation = usePageTranslation(imageUrl);
+  const autoTranslate = useSetting(READER_AUTO_TRANSLATE, false) === true;
+  const translateInto = useSetting(READER_TRANSLATE_TARGET, 'English') as string;
+  // Settings › Reader › Translate pages automatically: as soon as the page has loaded.
+  useEffect(() => {
+    if (autoTranslate && natural && imageUrl)
+      autoTranslatePage(imageUrl, translateTargetFor(translateInto));
+  }, [autoTranslate, natural, imageUrl, translateInto]);
 
   useEffect(() => {
     setLoaded(false);
@@ -245,30 +260,30 @@ export function MangaPage({
           style={{ containerType: 'inline-size' }}
           aria-label={`Translation of page ${pageNumber}`}
         >
-          {translation.regions.map((region, index) => {
-            const size = fitFontSize(
-              region.text,
-              region.w / view.w,
-              region.h / view.h,
-              (view.h * natural.height) / (view.w * natural.width),
-            );
-            return (
-              <p
-                key={index}
-                lang={translation.target}
-                className="absolute flex items-center justify-center overflow-hidden rounded-[0.4em] bg-white/95 text-center leading-tight font-medium text-black"
-                style={{
-                  left: `${((region.x - view.x) / view.w) * 100}%`,
-                  top: `${((region.y - view.y) / view.h) * 100}%`,
-                  width: `${(region.w / view.w) * 100}%`,
-                  height: `${(region.h / view.h) * 100}%`,
-                  fontSize: `${size * 100}cqw`,
-                }}
-              >
-                {region.text}
-              </p>
-            );
-          })}
+          {translation.regions.map((region, index) => (
+            <FittedText
+              key={index}
+              text={region.text}
+              lang={translation.target}
+              // Never larger than the estimate, and never above dialogue size (about 3% of
+              // the page's width): the fit then shrinks it into the bubble.
+              maxSize={Math.min(
+                3,
+                fitFontSize(
+                  region.text,
+                  region.w / view.w,
+                  region.h / view.h,
+                  (view.h * natural.height) / (view.w * natural.width),
+                ) * 100,
+              )}
+              style={{
+                left: `${((region.x - view.x) / view.w) * 100}%`,
+                top: `${((region.y - view.y) / view.h) * 100}%`,
+                width: `${(region.w / view.w) * 100}%`,
+                height: `${(region.h / view.h) * 100}%`,
+              }}
+            />
+          ))}
         </div>
       )}
       {translation?.status === 'working' && (

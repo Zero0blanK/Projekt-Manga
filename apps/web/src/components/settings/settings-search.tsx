@@ -84,6 +84,7 @@ const groups: Array<{ section: SectionId; description: string; labels: string[] 
       'Skip duplicate chapters',
       'Enhance low-resolution pages',
       'Translate pages into',
+      'Translate pages automatically',
       'Page translation',
       'Translation API key',
       'Translate on this computer',

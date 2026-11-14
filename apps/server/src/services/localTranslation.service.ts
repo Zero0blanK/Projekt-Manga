@@ -5,7 +5,7 @@ import {
   MODEL_FILES,
   MANGA_OCR_REPO,
   MANGA_OCR_VOCAB_REPO,
-  OPUS_MT_REPO,
+  TRANSLATOR_REPO,
   TOTAL_BYTES,
   ensureModels,
   localPath,
@@ -13,14 +13,15 @@ import {
   modelsDir,
   modelsState,
 } from './translationModels.service.js';
+import { detectText, placeText } from './textDetection.service.js';
 
 /**
  * Local page translation, on this server: manga-ocr reads the Japanese in each speech
- * bubble the device cropped out, and Opus-MT translates it to English. Nothing leaves the
+ * bubble the device cropped out, and FuguMT translates it to English. Nothing leaves the
  * server. The models download on first use (translationModels.service.ts).
  *
  * manga-ocr runs on ONNX Runtime directly (a vision encoder, then a character decoder
- * stepped greedily: bubbles are short). Opus-MT runs through Transformers.js, one line at a
+ * stepped greedily: bubbles are short). FuguMT runs through Transformers.js, one line at a
  * time: batched lines are padded, and the padded ones ran on past their end. Both libraries
  * are imported on first use, so a server that never translates doesn't load them. One job
  * runs at a time: inference already uses every core.
@@ -92,7 +93,7 @@ function loadTranslator(): Promise<Translator> {
     env.allowRemoteModels = false;
     env.allowLocalModels = true;
     env.localModelPath = `${modelsDir()}/`;
-    const translate = await pipeline('translation', OPUS_MT_REPO, { dtype: 'q8' });
+    const translate = await pipeline('translation', TRANSLATOR_REPO, { dtype: 'q8' });
     return translate as unknown as Translator;
   })().catch((error) => {
     translator = null;
@@ -184,6 +185,40 @@ async function requireModels(): Promise<void> {
   throw error;
 }
 
+/**
+ * A bubble's text as the translator reads it best: manga-ocr writes ASCII punctuation in
+ * full width (！？．), which is not how the text it learned from is written.
+ */
+export function prepareForTranslation(text: string): string {
+  return text
+    .replace(/[！-～]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+    .replace(/\.{2,}|・{2,}/g, '…')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** FuguMT writes in lower case: sentences start with a capital, and "i" is "I". */
+export function tidyTranslation(text: string): string {
+  return text
+    .trim()
+    .replace(/\bi\b/g, 'I')
+    .replace(
+      /(^|[.!?…]\s+)([a-z])/g,
+      (_, start: string, letter: string) => start + letter.toUpperCase(),
+    );
+}
+
+/**
+ * A translation that is mostly repetition, or far longer than the Japanese it came from:
+ * what a sound effect or a misread scribble turns into ("ge ge e ge ge…"). Better shown as
+ * the original art than as a block of noise.
+ */
+export function isDegenerate(source: string, translation: string): boolean {
+  const words = translation.toLowerCase().match(/[a-z']+/g) ?? [];
+  if (words.length >= 8 && new Set(words).size / words.length < 0.5) return true;
+  return translation.length > source.length * 8 + 40;
+}
+
 export function decodeImages(images: readonly string[]): Buffer[] {
   return images.map((data) => {
     const bytes = Buffer.from(data, 'base64');
@@ -211,6 +246,45 @@ const localTranslation = {
   },
 
   /** The Japanese text in each bubble image, in the same order. */
+  /**
+   * The text on a whole page: found by the detector, each piece read by manga-ocr, with
+   * where its translation goes as fractions of the page.
+   */
+  async readPage(
+    image: Buffer,
+  ): Promise<Array<{ text: string; x: number; y: number; w: number; h: number }>> {
+    requireEnabled();
+    await requireModels();
+    return serially(async () => {
+      const { width, height, boxes } = await detectText(image);
+      if (!width || !height) return [];
+      const model = await loadOcr();
+      const sharp = (await import('sharp')).default;
+      const page = sharp(image, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate();
+      const regions: Array<{ text: string; x: number; y: number; w: number; h: number }> = [];
+      for (const { crop, place } of placeText(boxes, width, height)) {
+        const cropWidth = crop.x1 - crop.x0;
+        const cropHeight = crop.y1 - crop.y0;
+        if (cropWidth < 4 || cropHeight < 4) continue;
+        const piece = await page
+          .clone()
+          .extract({ left: crop.x0, top: crop.y0, width: cropWidth, height: cropHeight })
+          .png()
+          .toBuffer();
+        const text = await recognise(model, piece);
+        if (!text) continue;
+        regions.push({
+          text,
+          x: place.x0 / width,
+          y: place.y0 / height,
+          w: (place.x1 - place.x0) / width,
+          h: (place.y1 - place.y0) / height,
+        });
+      }
+      return regions;
+    });
+  },
+
   async read(images: readonly Buffer[]): Promise<string[]> {
     requireEnabled();
     await requireModels();
@@ -230,8 +304,13 @@ const localTranslation = {
       const translate = await loadTranslator();
       const out: string[] = [];
       for (const text of texts) {
-        const [result] = await translate(text, { no_repeat_ngram_size: 3, max_new_tokens: 256 });
-        out.push(result?.translation_text?.trim() ?? '');
+        const [result] = await translate(prepareForTranslation(text), {
+          no_repeat_ngram_size: 3,
+          max_new_tokens: 256,
+        });
+        const translation = tidyTranslation(result?.translation_text ?? '');
+        // Empty is dropped by the reader, which then shows the art under it unchanged.
+        out.push(isDegenerate(text, translation) ? '' : translation);
       }
       return out;
     });

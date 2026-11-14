@@ -48,6 +48,21 @@ export const translateReadBodySchema = z
   .strict();
 export type TranslateReadBody = z.infer<typeof translateReadBodySchema>;
 
+/** A whole page, downscaled on the device: the detector reads it at 640px. */
+export const TRANSLATE_PAGE_MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+
+/** One whole page, for the server to find the text on and read it (JPEG, PNG or WebP). */
+export const translatePageBodySchema = z
+  .object({
+    image: z
+      .string()
+      .min(1)
+      .max(Math.ceil(TRANSLATE_PAGE_MAX_IMAGE_BYTES / 3) * 4)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+  })
+  .strict();
+export type TranslatePageBody = z.infer<typeof translatePageBodySchema>;
+
 export const translateProviders = ['libretranslate', 'deepl'] as const;
 export const translateProviderSchema = z.enum(translateProviders);
 export type TranslateProvider = z.infer<typeof translateProviderSchema>;

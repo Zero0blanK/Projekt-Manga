@@ -2,17 +2,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const readPageText = vi.fn();
 const readPageTextWith = vi.fn();
+// The whole-page path hands the page to the server; the server is faked below.
+const readPageTextOnServer = vi.fn(
+  async (_url: string, read: (image: string) => Promise<unknown>) => read('page-base64'),
+);
 const translateTexts = vi.fn();
 const api = vi.hoisted(() => ({
   localStatus: vi.fn(async (): Promise<unknown> => ({ enabled: false })),
   download: vi.fn(async () => ({})),
   readBubbles: vi.fn(),
+  readPage: vi.fn(),
 }));
 vi.mock('@/lib/page-ocr', async (original) => ({
   ...(await original<typeof import('@/lib/page-ocr')>()),
   readPageText: (url: string) => readPageText(url),
   readPageTextWith: (url: string, read: (images: string[]) => Promise<string[]>) =>
     readPageTextWith(url, read),
+  readPageTextOnServer: (url: string, read: (image: string) => Promise<unknown>) =>
+    readPageTextOnServer(url, read),
 }));
 vi.mock('@projekt-manga/api-client', () => {
   class ApiError extends Error {
@@ -30,6 +37,7 @@ vi.mock('@projekt-manga/api-client', () => {
     getLocalTranslationStatus: () => api.localStatus(),
     downloadLocalTranslation: () => api.download(),
     readBubbleTexts: (body: unknown) => api.readBubbles(body),
+    readPageRegions: (body: unknown) => api.readPage(body),
   };
 });
 
@@ -51,6 +59,14 @@ afterEach(() => {
   api.localStatus.mockReset().mockResolvedValue({ enabled: false });
   api.download.mockClear();
   api.readBubbles.mockReset();
+  // A server from before it could find the text itself, unless a test says otherwise.
+  api.readPage.mockReset().mockImplementation(async () => {
+    const { ApiError } = await import('@projekt-manga/api-client');
+    throw new (ApiError as unknown as new (message: string, status: number) => Error)(
+      'Not found',
+      404,
+    );
+  });
 });
 
 /** A synthetic scan: paper, with hatching, ellipses and glyph-like marks painted on. */
@@ -236,5 +252,100 @@ describe('translating a page', () => {
     await translatePage('old-server.png', 'en');
     expect(readPageText).toHaveBeenCalledWith('old-server.png');
     expect(pageTranslation('old-server.png')).toMatchObject({ status: 'done' });
+  });
+});
+
+describe('translating every page', () => {
+  it('translates each page in turn and says how it went', async () => {
+    readPageText.mockImplementation(async (url: string) =>
+      url === 'blank.png' ? [] : [{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }],
+    );
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    const { translateAll } = await import('@/lib/page-translation');
+    await translateAll(['one.png', 'blank.png', 'three.png'], 'en');
+    expect(
+      ['one.png', 'blank.png', 'three.png'].map((url) => pageTranslation(url)?.status),
+    ).toEqual(['done', 'error', 'done']);
+  });
+
+  it('stops after the page in hand', async () => {
+    const { translateAll, stopTranslateAll } = await import('@/lib/page-translation');
+    readPageText.mockImplementation(async () => {
+      stopTranslateAll();
+      return [{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }];
+    });
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    await translateAll(['first.png', 'second.png'], 'en');
+    expect(pageTranslation('first.png')?.status).toBe('done');
+    expect(pageTranslation('second.png')).toBeNull();
+  });
+});
+
+describe('one reading per bubble', () => {
+  it('drops a region found again inside a larger one', async () => {
+    const { withoutOverlaps } = await import('@/lib/page-ocr');
+    const bubble = { text: 'a', x: 0.1, y: 0.1, w: 0.3, h: 0.3 };
+    const inside = { text: 'b', x: 0.15, y: 0.15, w: 0.1, h: 0.1 };
+    const elsewhere = { text: 'c', x: 0.6, y: 0.6, w: 0.2, h: 0.2 };
+    expect(
+      withoutOverlaps([inside, bubble, elsewhere])
+        .map((r) => r.text)
+        .sort(),
+    ).toEqual(['a', 'c']);
+  });
+});
+
+describe('finding the text on the server', () => {
+  it("uses the server's text detector when it has one", async () => {
+    api.localStatus.mockResolvedValue({ enabled: true, state: 'ready', size: 1, targets: ['en'] });
+    api.readPage.mockReset().mockResolvedValue({
+      regions: [{ text: '犬です', x: 0.1, y: 0.1, w: 0.2, h: 0.1 }],
+    });
+    translateTexts.mockResolvedValue({ translations: ['A dog'] });
+    await translatePage('detected.png', 'en');
+    expect(api.readPage).toHaveBeenCalledWith({ image: 'page-base64' });
+    expect(readPageTextWith).not.toHaveBeenCalled();
+    expect(readPageText).not.toHaveBeenCalled();
+    expect(pageTranslation('detected.png')).toMatchObject({ regions: [{ text: 'A dog' }] });
+  });
+});
+
+describe('translating pages as they load', () => {
+  it('translates each loaded page once, one at a time', async () => {
+    const { autoTranslatePage } = await import('@/lib/page-translation');
+    let running = 0;
+    let most = 0;
+    readPageText.mockImplementation(async () => {
+      running++;
+      most = Math.max(most, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running--;
+      return [{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }];
+    });
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    autoTranslatePage('a.png', 'en');
+    autoTranslatePage('b.png', 'en');
+    autoTranslatePage('a.png', 'en');
+    await vi.waitFor(() => expect(pageTranslation('b.png')?.status).toBe('done'));
+    expect(pageTranslation('a.png')?.status).toBe('done');
+    expect(readPageText).toHaveBeenCalledTimes(2);
+    expect(most).toBe(1);
+  });
+
+  it('leaves a page shown in the original as it is', async () => {
+    const { autoTranslatePage } = await import('@/lib/page-translation');
+    readPageText.mockResolvedValue([{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }]);
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    await translatePage('kept.png', 'en');
+    showOriginal('kept.png');
+    autoTranslatePage('kept.png', 'en');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(pageTranslation('kept.png')).toMatchObject({ shown: false });
+  });
+
+  it('is off unless turned on', async () => {
+    const { READER_AUTO_TRANSLATE } = await import('@/lib/page-translation');
+    const { getSetting } = await import('@/lib/app-store');
+    expect(getSetting(READER_AUTO_TRANSLATE, false)).toBe(false);
   });
 });

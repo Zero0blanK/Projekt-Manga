@@ -12,10 +12,16 @@ import {
   getLocalTranslationStatus,
   getTranslateStatus,
   readBubbleTexts,
+  readPageRegions,
   translateTexts,
 } from '@projekt-manga/api-client';
 import type { TranslateTarget } from '@projekt-manga/schemas';
-import { readPageText, readPageTextWith, type TextRegion } from '@/lib/page-ocr';
+import {
+  readPageText,
+  readPageTextOnServer,
+  readPageTextWith,
+  type TextRegion,
+} from '@/lib/page-ocr';
 
 export const READER_TRANSLATE_TARGET = 'readerTranslateTarget';
 
@@ -90,6 +96,8 @@ export function translationAvailable(): Promise<boolean> {
 
 /** Once the server's models are in, they stay in: asked again only until then. */
 let serverReads = false;
+/** Whether the server can also find the text on a page itself (its text detector). */
+let serverFindsText = true;
 
 /**
  * The page's Japanese text: read by the server's manga-ocr when its models are in, else by
@@ -102,6 +110,18 @@ async function readPage(url: string): Promise<TextRegion[]> {
     if (local?.enabled && local.state === 'ready') serverReads = true;
     else if (local?.enabled && (local.state === 'missing' || local.state === 'error'))
       void downloadLocalTranslation().catch(() => undefined);
+  }
+  if (serverReads && serverFindsText) {
+    try {
+      return await readPageTextOnServer(
+        url,
+        async (image) => (await readPageRegions({ image })).regions,
+      );
+    } catch (error) {
+      // A server from before it could find the text itself: find the bubbles here.
+      if (!(error instanceof ApiError && error.status === 404)) throw error;
+      serverFindsText = false;
+    }
   }
   if (serverReads) {
     try {
@@ -157,6 +177,61 @@ export async function translatePage(url: string, target: TranslateTarget): Promi
   }
 }
 
+/** Translate all: the chapter's pages, translated one after another. */
+export type TranslateAllState =
+  | { status: 'idle' }
+  | { status: 'running'; done: number; total: number }
+  | { status: 'finished'; translated: number; failed: number; total: number };
+
+let allState: TranslateAllState = { status: 'idle' };
+let allRun = 0;
+const allListeners = new Set<() => void>();
+
+function setAll(state: TranslateAllState) {
+  allState = state;
+  allListeners.forEach((listener) => listener());
+}
+
+export function useTranslateAll(): TranslateAllState {
+  return useSyncExternalStore(
+    (listener) => {
+      allListeners.add(listener);
+      return () => allListeners.delete(listener);
+    },
+    () => allState,
+    () => allState,
+  );
+}
+
+/**
+ * Translates every page in `urls`, in order, one at a time (the server reads and translates
+ * one page at a time anyway). Pages already translated into `target` are only shown again.
+ * A second call replaces a run still going; {@link stopTranslateAll} ends it after the page
+ * in hand.
+ */
+export async function translateAll(urls: readonly string[], target: TranslateTarget) {
+  const run = ++allRun;
+  const total = urls.length;
+  let translated = 0;
+  let failed = 0;
+  setAll({ status: 'running', done: 0, total });
+  for (const [index, url] of urls.entries()) {
+    if (run !== allRun) return;
+    await translatePage(url, target);
+    const result = pages.get(url);
+    if (result?.status === 'done') translated++;
+    else failed++;
+    if (run !== allRun) return;
+    setAll({ status: 'running', done: index + 1, total });
+  }
+  setAll({ status: 'finished', translated, failed, total });
+}
+
+export function stopTranslateAll() {
+  allRun++;
+  setAll({ status: 'idle' });
+}
+
 /** Shows the original page again; the translation is kept to switch back to. */
 export function showOriginal(url: string) {
   const known = pages.get(url);
@@ -178,8 +253,38 @@ export function fitFontSize(text: string, w: number, h: number, aspect: number):
 
 /** For tests. */
 export function resetPageTranslations() {
+  autoQueued.clear();
   pages.clear();
+  allRun++;
+  allState = { status: 'idle' };
   status = null;
   serverReads = false;
+  serverFindsText = true;
   listeners.forEach((listener) => listener());
+}
+
+/** Settings › Reader › Page translation › Translate pages automatically. Off unless turned on. */
+export const READER_AUTO_TRANSLATE = 'readerAutoTranslate';
+
+let autoQueue: Promise<void> = Promise.resolve();
+const autoQueued = new Set<string>();
+
+/**
+ * Translates a page that just loaded, when automatic translation is on. One page at a
+ * time, however many load at once (a long strip loads several): the server reads one page at
+ * a time anyway, and its rate limit would turn the rest away. A page translated before, or
+ * one that failed, is left as it is, so "Show original" stays shown and a page with no text
+ * isn't tried again and again.
+ */
+export function autoTranslatePage(url: string, target: TranslateTarget): void {
+  if (pages.has(url) || autoQueued.has(url)) return;
+  autoQueued.add(url);
+  autoQueue = autoQueue
+    .then(async () => {
+      if (pages.has(url)) return;
+      if (!(await translationAvailable())) return;
+      await translatePage(url, target);
+    })
+    .catch(() => undefined)
+    .finally(() => autoQueued.delete(url));
 }

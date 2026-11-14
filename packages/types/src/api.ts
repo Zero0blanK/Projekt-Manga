@@ -855,7 +855,7 @@ export interface TranslateStatus {
   source: 'ja';
 }
 
-/** Local translation's models on the server (manga-ocr and Opus-MT). */
+/** Local translation's models on the server (manga-ocr and FuguMT). */
 export type LocalTranslationStatus =
   | { enabled: false }
   | ({ enabled: true; size: number; targets: readonly string[] } & (
