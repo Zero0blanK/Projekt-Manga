@@ -13,6 +13,7 @@ import {
   modelsDir,
   modelsState,
 } from './translationModels.service.js';
+import { detectText, placeText } from './textDetection.service.js';
 
 /**
  * Local page translation, on this server: manga-ocr reads the Japanese in each speech
@@ -245,6 +246,45 @@ const localTranslation = {
   },
 
   /** The Japanese text in each bubble image, in the same order. */
+  /**
+   * The text on a whole page: found by the detector, each piece read by manga-ocr, with
+   * where its translation goes as fractions of the page.
+   */
+  async readPage(
+    image: Buffer,
+  ): Promise<Array<{ text: string; x: number; y: number; w: number; h: number }>> {
+    requireEnabled();
+    await requireModels();
+    return serially(async () => {
+      const { width, height, boxes } = await detectText(image);
+      if (!width || !height) return [];
+      const model = await loadOcr();
+      const sharp = (await import('sharp')).default;
+      const page = sharp(image, { limitInputPixels: MAX_IMAGE_PIXELS }).rotate();
+      const regions: Array<{ text: string; x: number; y: number; w: number; h: number }> = [];
+      for (const { crop, place } of placeText(boxes, width, height)) {
+        const cropWidth = crop.x1 - crop.x0;
+        const cropHeight = crop.y1 - crop.y0;
+        if (cropWidth < 4 || cropHeight < 4) continue;
+        const piece = await page
+          .clone()
+          .extract({ left: crop.x0, top: crop.y0, width: cropWidth, height: cropHeight })
+          .png()
+          .toBuffer();
+        const text = await recognise(model, piece);
+        if (!text) continue;
+        regions.push({
+          text,
+          x: place.x0 / width,
+          y: place.y0 / height,
+          w: (place.x1 - place.x0) / width,
+          h: (place.y1 - place.y0) / height,
+        });
+      }
+      return regions;
+    });
+  },
+
   async read(images: readonly Buffer[]): Promise<string[]> {
     requireEnabled();
     await requireModels();

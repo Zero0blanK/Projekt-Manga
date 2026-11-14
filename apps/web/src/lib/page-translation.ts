@@ -12,10 +12,16 @@ import {
   getLocalTranslationStatus,
   getTranslateStatus,
   readBubbleTexts,
+  readPageRegions,
   translateTexts,
 } from '@projekt-manga/api-client';
 import type { TranslateTarget } from '@projekt-manga/schemas';
-import { readPageText, readPageTextWith, type TextRegion } from '@/lib/page-ocr';
+import {
+  readPageText,
+  readPageTextOnServer,
+  readPageTextWith,
+  type TextRegion,
+} from '@/lib/page-ocr';
 
 export const READER_TRANSLATE_TARGET = 'readerTranslateTarget';
 
@@ -90,6 +96,8 @@ export function translationAvailable(): Promise<boolean> {
 
 /** Once the server's models are in, they stay in: asked again only until then. */
 let serverReads = false;
+/** Whether the server can also find the text on a page itself (its text detector). */
+let serverFindsText = true;
 
 /**
  * The page's Japanese text: read by the server's manga-ocr when its models are in, else by
@@ -102,6 +110,18 @@ async function readPage(url: string): Promise<TextRegion[]> {
     if (local?.enabled && local.state === 'ready') serverReads = true;
     else if (local?.enabled && (local.state === 'missing' || local.state === 'error'))
       void downloadLocalTranslation().catch(() => undefined);
+  }
+  if (serverReads && serverFindsText) {
+    try {
+      return await readPageTextOnServer(
+        url,
+        async (image) => (await readPageRegions({ image })).regions,
+      );
+    } catch (error) {
+      // A server from before it could find the text itself: find the bubbles here.
+      if (!(error instanceof ApiError && error.status === 404)) throw error;
+      serverFindsText = false;
+    }
   }
   if (serverReads) {
     try {
@@ -238,5 +258,6 @@ export function resetPageTranslations() {
   allState = { status: 'idle' };
   status = null;
   serverReads = false;
+  serverFindsText = true;
   listeners.forEach((listener) => listener());
 }

@@ -35,6 +35,10 @@ const TRANSLATOR_REVISION = '9b09cd7e6263223ac4a5988da1d881ef02b55be8';
 
 export const MANGA_OCR_REPO = 'onnx-community/manga-ocr-base-ONNX';
 export const MANGA_OCR_VOCAB_REPO = 'kha-white/manga-ocr-base';
+/** Speech bubbles and text on a page: RT-DETR-v2 trained on about 11k manga, webtoon, manhua
+ * and western comic pages (ogkalu, Apache-2.0). */
+export const TEXT_DETECTOR_REPO = 'ogkalu/comic-text-and-bubble-detector';
+const TEXT_DETECTOR_REVISION = '16e8a622f91fabc6b5b65c96d32d1183f8843546';
 export const TRANSLATOR_REPO = 'Kadonox/fugumt-ja-en-onnx';
 
 /** Models an earlier version downloaded and no longer uses: removed once the current ones are
@@ -62,6 +66,13 @@ export const MODEL_FILES: readonly ModelFile[] = [
     path: 'vocab.txt',
     bytes: 24072,
     sha256: '344fbb6b8bf18c57839e924e2c9365434697e0227fac00b88bb4899b78aa594d',
+  },
+  {
+    repo: TEXT_DETECTOR_REPO,
+    revision: TEXT_DETECTOR_REVISION,
+    path: 'detector-v4-s_int8.onnx',
+    bytes: 11120765,
+    sha256: '5fe9e4f576e49d4e7e8b0e029d6d3cdc252abd4694113e1cae120e62c931ea79',
   },
   ...(
     [

@@ -1,5 +1,6 @@
 import type {
   TranslateBody,
+  TranslatePageBody,
   TranslateReadBody,
   TranslateSettingsBody,
 } from '@projekt-manga/schemas';
@@ -43,3 +44,13 @@ export const downloadLocalTranslation = () =>
 /** The Japanese in one page's speech bubbles, read by the server's manga-ocr. */
 export const readBubbleTexts = (body: TranslateReadBody, signal?: AbortSignal) =>
   request<{ texts: string[] }>('/translate/read', { method: 'POST', body, signal });
+
+/**
+ * The text on one whole page, found and read by the server's models, with where each
+ * translation goes (fractions of the page).
+ */
+export const readPageRegions = (body: TranslatePageBody, signal?: AbortSignal) =>
+  request<{ regions: Array<{ text: string; x: number; y: number; w: number; h: number }> }>(
+    '/translate/page',
+    { method: 'POST', body, signal },
+  );

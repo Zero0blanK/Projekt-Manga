@@ -574,3 +574,37 @@ export function withoutOverlaps<T extends ViewRect>(regions: readonly T[]): T[] 
   }
   return kept;
 }
+
+/** The longest side a whole page is sent at: the detector reads it at 640px, and the crops
+ * manga-ocr reads come from this copy, so small print needs some room. */
+const SERVER_PAGE_SIDE = 1600;
+
+/** The page as the server's text detector takes it: JPEG, base64, at most 1600px long. */
+async function pageAsJpeg(url: string): Promise<string> {
+  const img = await loadPixels(url);
+  const scale = Math.min(1, SERVER_PAGE_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error("The page's image couldn't be read");
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(img, 0, 0, canvas.width, canvas.height);
+  // Throws on a cross-origin image the server didn't allow, as reading its pixels does.
+  return canvas.toDataURL('image/jpeg', 0.9).slice('data:image/jpeg;base64,'.length);
+}
+
+/**
+ * Reads the Japanese text on the page at `url` with the server's own models: its text
+ * detector finds every bubble and piece of free text, and manga-ocr reads them. `read`
+ * sends the page (JPEG, base64) and returns the regions, in page fractions.
+ */
+export async function readPageTextOnServer(
+  url: string,
+  read: (image: string) => Promise<TextRegion[]>,
+): Promise<TextRegion[]> {
+  const regions = (await read(await pageAsJpeg(url)))
+    .map((region) => ({ ...region, text: region.text.trim() }))
+    .filter((region) => isDialogue(region.text));
+  return inReadingOrder(withoutOverlaps(regions));
+}

@@ -37,7 +37,7 @@ const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 
 /**
  * Translation on this server: manga-ocr reads the bubbles and FuguMT translates them to
- * English, with models downloaded once (about 265 MB). Shows whether they are in, and the
+ * English, with models downloaded once (about 275 MB). Shows whether they are in, and the
  * download while it runs.
  */
 function LocalTranslation({ active }: { active: boolean }) {
@@ -91,7 +91,8 @@ function LocalTranslation({ active }: { active: boolean }) {
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        Models: manga-ocr by kha-white (Apache-2.0) and FuguMT by staka (CC BY-SA 4.0).
+        Models: comic text detector by ogkalu (Apache-2.0), manga-ocr by kha-white (Apache-2.0) and
+        FuguMT by staka (CC BY-SA 4.0).
       </p>
       {local.state === 'ready' && (
         <p className="text-xs text-muted-foreground">Models downloaded and ready.</p>

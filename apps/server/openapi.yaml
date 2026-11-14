@@ -285,13 +285,34 @@ paths:
       tags: [Reader]
       summary: Start (or join) downloading local translation's models
       description: >-
-        About 265 MB from Hugging Face, each file pinned to a revision and checked against
+        About 275 MB from Hugging Face, each file pinned to a revision and checked against
         its SHA-256, into TRANSLATION_MODELS_DIR.
       responses:
         '200':
           description: The models' state, as GET /translate/local
         '503':
           description: Local translation is turned off on this server
+
+  /translate/page:
+    post:
+      tags: [Reader]
+      summary: Find and read the Japanese on one whole page with this server's models
+      description: >-
+        Body `{ image: string }`: the page, JPEG/PNG/WebP, base64, at most 3 MB. A text
+        detector finds the speech bubbles and free text, manga-ocr reads each, and the
+        result says where each translation goes (fractions of the page). At most 30 pages a
+        minute per caller.
+      responses:
+        '200':
+          description: '{ regions: [{ text, x, y, w, h }] }'
+        '400':
+          description: Not an image
+        '429':
+          description: Too many pages in the last minute
+        '503':
+          description: >-
+            The models are still downloading (code TRANSLATION_MODELS_DOWNLOADING), or local
+            translation is turned off
 
   /translate/read:
     post:
