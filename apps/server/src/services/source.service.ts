@@ -102,6 +102,8 @@ const fetchMangaUpdates = async (
   changedChapters: number;
   thumbnail_url: string;
   failed: boolean;
+  /** Why it failed, when it did: CHALLENGE_REQUIRED sends the app to pass the check. */
+  errorCode?: SourceErrorCode | 'UNCLASSIFIED';
 }> => {
   await verifiedSource.requireSource(source_id);
   // Resolves the library row (if any) so log entries can carry a real manga_id/title
@@ -180,6 +182,7 @@ const fetchMangaUpdates = async (
     changedChapters,
     thumbnail_url,
     failed,
+    ...(failed ? { errorCode: updateErrorCode } : {}),
   };
 };
 

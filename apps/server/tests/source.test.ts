@@ -234,6 +234,17 @@ describe('POST /api/source/:source_id/manga/:manga_slug/updates', () => {
     expect(response.body.data).toMatchObject({ newChapters: 0, failed: true });
     expect(logError).toHaveBeenCalledWith('fake-source', undefined, 'm1', expect.any(Error));
   });
+
+  it('says when the failure was a browser check, so the app can pass it and try again', async () => {
+    prismaMock.manga.findFirst.mockResolvedValue(null);
+    fakeSource.fetchMangaUpdates.mockRejectedValueOnce(
+      Object.assign(new Error('Cloudflare check'), { code: 'CHALLENGE_REQUIRED' }),
+    );
+
+    const response = await request(app).post('/api/source/fake-source/manga/m1/updates').send({});
+
+    expect(response.body.data).toMatchObject({ failed: true, errorCode: 'CHALLENGE_REQUIRED' });
+  });
 });
 
 const LIBRARY_TITLE = { id: 'lib-1', title: 'Manga 1', source: 'fake-source', slug: 'm1' };

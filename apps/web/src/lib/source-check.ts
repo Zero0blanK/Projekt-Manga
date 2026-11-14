@@ -73,6 +73,11 @@ export function onSourceCheckPassed(sourceId: string, listener: () => void): () 
   return () => set.delete(listener);
 }
 
+/** The check running for this source, to wait for; null when none is. */
+export function runningSourceCheck(sourceId: string): Promise<SourceCheckState> | null {
+  return running.get(sourceId) ?? null;
+}
+
 /** Whether a check could run here at all: only the desktop app can open the window. */
 export function canCheckSources(): boolean {
   return sourceBrowserBridge() !== undefined;
