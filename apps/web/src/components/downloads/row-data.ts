@@ -201,13 +201,16 @@ export function useDownloadQueueCount(): number {
   return data.filter((r) => r.status !== 'done' && r.status !== 'failed').length;
 }
 
-/** Titles with at least one finished download, so something of them reads offline. */
-export function useDownloadedTitleIds(): ReadonlySet<string> {
+/** Downloaded (finished) chapters per title, for the count on library covers. */
+export function useDownloadCounts(): ReadonlyMap<string, number> {
   const { data } = useRawRows();
-  return useMemo(
-    () => new Set(data.filter((r) => r.status === 'done').map((r) => r.mangaId)),
-    [data],
-  );
+  return useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of data) {
+      if (row.status === 'done') counts.set(row.mangaId, (counts.get(row.mangaId) ?? 0) + 1);
+    }
+    return counts;
+  }, [data]);
 }
 
 /**
