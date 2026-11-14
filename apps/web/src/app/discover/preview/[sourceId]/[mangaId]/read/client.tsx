@@ -451,6 +451,7 @@ export function SourceReaderClient({
           page={page}
           mangaTitle={manga.title}
           chapter={chapter}
+          loadPageUrls={() => fetchPages(chapter)}
         >
           {effectiveLayout === 'Long strip' ? (
             <LongStripViewer

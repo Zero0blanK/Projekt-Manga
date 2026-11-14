@@ -207,6 +207,17 @@ export function tidyTranslation(text: string): string {
     );
 }
 
+/**
+ * A translation that is mostly repetition, or far longer than the Japanese it came from:
+ * what a sound effect or a misread scribble turns into ("ge ge e ge ge…"). Better shown as
+ * the original art than as a block of noise.
+ */
+export function isDegenerate(source: string, translation: string): boolean {
+  const words = translation.toLowerCase().match(/[a-z']+/g) ?? [];
+  if (words.length >= 8 && new Set(words).size / words.length < 0.5) return true;
+  return translation.length > source.length * 8 + 40;
+}
+
 export function decodeImages(images: readonly string[]): Buffer[] {
   return images.map((data) => {
     const bytes = Buffer.from(data, 'base64');
@@ -257,7 +268,9 @@ const localTranslation = {
           no_repeat_ngram_size: 3,
           max_new_tokens: 256,
         });
-        out.push(tidyTranslation(result?.translation_text ?? ''));
+        const translation = tidyTranslation(result?.translation_text ?? '');
+        // Empty is dropped by the reader, which then shows the art under it unchanged.
+        out.push(isDegenerate(text, translation) ? '' : translation);
       }
       return out;
     });

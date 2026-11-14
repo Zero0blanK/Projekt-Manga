@@ -532,7 +532,7 @@ export async function readPageText(url: string): Promise<TextRegion[]> {
     if (!isDialogue(text)) continue;
     regions.push({ text, ...crop.region });
   }
-  return inReadingOrder(regions);
+  return inReadingOrder(withoutOverlaps(regions));
 }
 
 /**
@@ -552,5 +552,25 @@ export async function readPageTextWith(
     const text = (texts[index] ?? '').trim();
     if (isDialogue(text)) regions.push({ text, ...crop.region });
   });
-  return inReadingOrder(regions);
+  return inReadingOrder(withoutOverlaps(regions));
+}
+
+/**
+ * One reading per bubble: the same text can be found twice, as a bubble and as loose text
+ * around it, and two overlays on one spot show one through the other. A region mostly
+ * inside a larger one is dropped.
+ */
+export function withoutOverlaps<T extends ViewRect>(regions: readonly T[]): T[] {
+  const area = (r: ViewRect) => r.w * r.h;
+  const bySize = [...regions].sort((a, b) => area(b) - area(a));
+  const kept: T[] = [];
+  for (const region of bySize) {
+    const covered = kept.some((other) => {
+      const w = Math.min(region.x + region.w, other.x + other.w) - Math.max(region.x, other.x);
+      const h = Math.min(region.y + region.h, other.y + other.h) - Math.max(region.y, other.y);
+      return w > 0 && h > 0 && (w * h) / area(region) > 0.5;
+    });
+    if (!covered) kept.push(region);
+  }
+  return kept;
 }

@@ -264,3 +264,17 @@ describe('translating every page', () => {
     expect(pageTranslation('second.png')).toBeNull();
   });
 });
+
+describe('one reading per bubble', () => {
+  it('drops a region found again inside a larger one', async () => {
+    const { withoutOverlaps } = await import('@/lib/page-ocr');
+    const bubble = { text: 'a', x: 0.1, y: 0.1, w: 0.3, h: 0.3 };
+    const inside = { text: 'b', x: 0.15, y: 0.15, w: 0.1, h: 0.1 };
+    const elsewhere = { text: 'c', x: 0.6, y: 0.6, w: 0.2, h: 0.2 };
+    expect(
+      withoutOverlaps([inside, bubble, elsewhere])
+        .map((r) => r.text)
+        .sort(),
+    ).toEqual(['a', 'c']);
+  });
+});

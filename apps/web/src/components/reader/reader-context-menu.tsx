@@ -40,6 +40,7 @@ export function ReaderContextMenu({
   mangaTitle,
   chapter,
   onSetCover,
+  loadPageUrls,
 }: {
   children: ReactNode;
   pageUrls: readonly string[];
@@ -49,6 +50,9 @@ export function ReaderContextMenu({
   chapter?: number;
   /** Offered when the title can take a custom cover (one in the library). */
   onSetCover?: (imageUrl: string) => void;
+  /** The chapter's page URLs when `pageUrls` is empty: the long strip loads its pages
+   * itself, chapter by chapter. */
+  loadPageUrls?: () => Promise<string[]>;
 }) {
   // The page under the cursor, by its own image URL: the long strip also shows pages of
   // the chapters around this one, which `pageUrls` doesn't cover.
@@ -73,7 +77,9 @@ export function ReaderContextMenu({
   };
   const all = useTranslateAll();
   const translateEveryPage = async () => {
-    const urls = pageUrls.filter(Boolean);
+    const urls = (pageUrls.length > 0 ? pageUrls : ((await loadPageUrls?.()) ?? [])).filter(
+      Boolean,
+    );
     if (urls.length === 0) return;
     if (!(await translationAvailable())) {
       toast({
@@ -150,7 +156,7 @@ export function ReaderContextMenu({
             </ContextMenuItem>
           ) : (
             <ContextMenuItem
-              disabled={pageUrls.length === 0}
+              disabled={pageUrls.length === 0 && !loadPageUrls}
               onSelect={() => void translateEveryPage()}
             >
               <Languages className="mr-2 h-4 w-4" /> Translate all pages

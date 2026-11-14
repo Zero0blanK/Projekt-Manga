@@ -714,6 +714,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
           page={page}
           mangaTitle={manga.title}
           chapter={chapter}
+          loadPageUrls={() => fetchPages(chapter)}
           onSetCover={(url) => void setPageAsCover(manga.id, url)}
         >
           {effectiveLayout === 'Long strip' ? (
