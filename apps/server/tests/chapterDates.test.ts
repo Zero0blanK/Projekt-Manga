@@ -71,6 +71,19 @@ describe('dates stuck to the end of a chapter name', () => {
     expect(separateChapterDates(chapters, NOW)).toBe(chapters);
   });
 
+  it('reads a long run of digits or letters quickly', () => {
+    const started = performance.now();
+    for (const name of [
+      `Chapter ${'9'.repeat(50_000)}`,
+      `Chapter 9${'aa'.repeat(25_000)} ago`,
+      `${'9'.repeat(50_000)}/1/2026x`,
+      `${' '.repeat(50_000)}x`,
+    ]) {
+      chapterDateSplits(name, NOW);
+    }
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it("is part of reading a source's chapter list", () => {
     const [parsed] = sourceChapterListSchema.parse([
       { id: 'c-99', name: 'Chapter 99Sep 30, 2026', chapter_number: 99 },

@@ -99,21 +99,32 @@ const roughly = (ms: number, unit: Unit) => {
 };
 
 /** What is left of a name once its date is gone: no trailing separators or spaces. */
-const tidy = (prefix: string) => prefix.replace(/[\s\-–—|·•,:]+$/u, '');
+const SEPARATORS = new Set([' ', '-', '–', '—', '|', '·', '•', ',', ':']);
+const tidy = (prefix: string) => {
+  let end = prefix.length;
+  while (end > 0 && SEPARATORS.has(prefix[end - 1])) end--;
+  return prefix.slice(0, end);
+};
+
+/*
+ * The patterns below aren't anchored at the start, so each repeat is bounded: an unbounded
+ * one is retried from every position of a long run of digits or letters (a slow name could
+ * stall the parse). A chapter number and a date amount together are never 10 digits.
+ */
 
 /**
  * Every way to split a date off the end of `name`, most likely first. Several only when
  * the date starts with digits run into the chapter number's.
  */
 export function chapterDateSplits(name: string, now = Date.now()): ChapterDateSplit[] {
-  const text = name.replace(/\s/g, ' ').trim();
+  const text = name.replace(/\s+/g, ' ').trim();
   const splits: ChapterDateSplit[] = [];
   const add = (prefix: string, date: string, needsNumber = false) => {
     const left = tidy(prefix);
     if (!date || !left) return;
     // A word on its own ("today", "last week") could be the title's; only taken from right
     // after the chapter's number.
-    if (needsNumber && !/\d\s*$/.test(prefix)) return;
+    if (needsNumber && !/\d$/.test(prefix.trimEnd())) return;
     splits.push({ name: left, date });
   };
   /** Each split of run-together leading digits: the date's share, shortest first. */
@@ -126,7 +137,7 @@ export function chapterDateSplits(name: string, now = Date.now()): ChapterDateSp
   };
 
   // "2 weeks ago", "an hour ago", "3d ago"
-  let match = /(\d+|an?|one)\s*([a-z]+?)s?\s+ago$/i.exec(text);
+  let match = /(\d{1,9}|an?|one) ?([a-z]{1,6}?)s? ago$/i.exec(text);
   const unit = match && UNIT_ALIASES[match[2].toLowerCase()];
   if (match && unit) {
     const before = text.slice(0, match.index);
@@ -147,7 +158,7 @@ export function chapterDateSplits(name: string, now = Date.now()): ChapterDateSp
   }
 
   // "Oct 14, 2026", "October 14 2026"
-  match = new RegExp(`${MONTH_NAME}\\s*(\\d{1,2})(?:st|nd|rd|th)?,?\\s*(\\d{4})$`, 'i').exec(text);
+  match = new RegExp(`${MONTH_NAME} ?(\\d{1,2})(?:st|nd|rd|th)?,? ?(\\d{4})$`, 'i').exec(text);
   if (match) {
     add(
       text.slice(0, match.index),
@@ -157,7 +168,7 @@ export function chapterDateSplits(name: string, now = Date.now()): ChapterDateSp
   }
 
   // "14 Oct 2026", "14 October, 2026"
-  match = new RegExp(`(\\d+)\\s*${MONTH_NAME},?\\s*(\\d{4})$`, 'i').exec(text);
+  match = new RegExp(`(\\d{1,9}) ?${MONTH_NAME},? ?(\\d{4})$`, 'i').exec(text);
   if (match) {
     const [, digits, month, year] = match;
     leading(text.slice(0, match.index), digits, 31, (day) =>
@@ -177,7 +188,7 @@ export function chapterDateSplits(name: string, now = Date.now()): ChapterDateSp
   }
 
   // "10/14/2026" (or day first, when the first part can't be a month)
-  match = /(\d+)\/(\d{1,2})\/(\d{4})$/.exec(text);
+  match = /(\d{1,9})\/(\d{1,2})\/(\d{4})$/.exec(text);
   if (match) {
     const [, digits, second, year] = match;
     leading(text.slice(0, match.index), digits, 31, (first) =>
