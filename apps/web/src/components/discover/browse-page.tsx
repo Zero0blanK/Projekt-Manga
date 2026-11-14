@@ -176,7 +176,6 @@ export function DiscoverBrowsePage({
     const selection = genreFilterValues(availableFilters, pendingGenre);
     if (selection) {
       setFilterValues(selection);
-      setShowFilters(true);
     } else if (capabilities?.search) {
       setQuery(pendingGenre);
       setQueryDraft(pendingGenre);
