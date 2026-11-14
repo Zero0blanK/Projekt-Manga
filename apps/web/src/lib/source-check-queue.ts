@@ -1,6 +1,12 @@
 'use client';
 
-import { getSourceBrowserSession, getSourceHealth, getSources } from '@projekt-manga/api-client';
+import {
+  ApiError,
+  getSourceBrowserSession,
+  getSourceHealth,
+  getSourceMangaPage,
+  getSources,
+} from '@projekt-manga/api-client';
 import { getSetting } from '@/lib/app-store';
 import { AUTO_OPEN_CHALLENGE_SETTING, CHALLENGE_REQUIRED } from '@/lib/source-browser';
 import {
@@ -160,11 +166,28 @@ export function clearanceRunningOut(
 }
 
 /**
- * The sources start-up should pass the check for: ones whose saved Cloudflare clearance has
- * run out or soon will (a source only gets one by having needed it), and ones this server
- * has seen asking for the check since it started.
+ * Whether the source turns the app away with its check now: one small catalogue request.
+ * Only for sources that have needed a check before, and one at a time.
  */
-export async function sourcesNeedingCheck(): Promise<string[]> {
+export async function asksForCheck(sourceId: string): Promise<boolean> {
+  try {
+    await getSourceMangaPage(sourceId, { category: 'popular', limit: 1 });
+    return false;
+  } catch (error) {
+    return error instanceof ApiError && error.code === CHALLENGE_REQUIRED;
+  }
+}
+
+/**
+ * The sources start-up should pass the check for: ones whose saved Cloudflare clearance has
+ * run out or soon will, and ones this server has seen asking for the check since it
+ * started. A source with a saved session that looks current is asked once whether it
+ * still lets the app in: the clearance's expiry date is the site's guess, and Cloudflare
+ * stops honouring it early when, say, the network's address has changed.
+ */
+export async function sourcesNeedingCheck(
+  probe: (sourceId: string) => Promise<boolean> = asksForCheck,
+): Promise<string[]> {
   const [sources, health] = await Promise.all([getSources(), getSourceHealth().catch(() => [])]);
   const challenged = new Set(
     health
@@ -182,11 +205,19 @@ export async function sourcesNeedingCheck(): Promise<string[]> {
       ),
     ),
   );
-  const expiring = sessions
-    .filter((entry) => entry !== null && clearanceRunningOut(entry[1].cookies))
-    .map((entry) => entry![0]);
+  const saved = sessions.filter(
+    (entry): entry is NonNullable<typeof entry> => entry !== null && entry[1].cookies.length > 0,
+  );
+  const expiring = saved
+    .filter(([, session]) => clearanceRunningOut(session.cookies))
+    .map(([id]) => id);
   const installed = new Set(extensions.map((source) => source.id));
-  return [...new Set([...expiring, ...[...challenged].filter((id) => installed.has(id))])];
+  const known = new Set([...expiring, ...[...challenged].filter((id) => installed.has(id))]);
+  const turnedAway: string[] = [];
+  for (const [id] of saved) {
+    if (!known.has(id) && (await probe(id))) turnedAway.push(id);
+  }
+  return [...known, ...turnedAway];
 }
 
 /** Queues start-up's checks, once per app start. */

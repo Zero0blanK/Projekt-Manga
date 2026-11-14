@@ -8,6 +8,22 @@ const checks = vi.hoisted(() => ({
   running: new Map<string, Promise<State>>(),
 }));
 
+const api = vi.hoisted(() => ({
+  sessions: {} as Record<string, { cookies: { name: string; expires: number | null }[] }>,
+}));
+vi.mock('@projekt-manga/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@projekt-manga/api-client')>()),
+  getSources: async () => [
+    { id: 'expired', provider: 'extension' },
+    { id: 'current', provider: 'extension' },
+    { id: 'blocked', provider: 'extension' },
+    { id: 'never', provider: 'extension' },
+    { id: 'suwa', provider: 'suwayomi' },
+  ],
+  getSourceHealth: async () => [],
+  getSourceBrowserSession: async (id: string) =>
+    api.sessions[id] ?? { cookies: [] as { name: string; expires: number | null }[] },
+}));
 vi.mock('@/lib/app-store', () => ({ getSetting: () => true }));
 vi.mock('@/lib/source-check', () => ({
   canCheckSources: () => true,
@@ -33,6 +49,7 @@ const {
   passCheckForUpdate,
   queueSourceCheck,
   resetSourceCheckQueue,
+  sourcesNeedingCheck,
 } = await import('@/lib/source-check-queue');
 
 const pass = (id: string) => checks.finish.get(id)!({ status: 'passed', at: 0, message: '' });
@@ -55,6 +72,19 @@ describe('background browser checks', () => {
       false,
     );
     expect(clearanceRunningOut([{ name: 'session', expires: inMinutes(-5) }], now)).toBe(false);
+  });
+
+  it('finds at start-up the sources whose clearance ran out or no longer lets the app in', async () => {
+    const seconds = (ms: number) => Math.floor(ms / 1000);
+    api.sessions = {
+      expired: { cookies: [{ name: 'cf_clearance', expires: seconds(Date.now() - 60_000) }] },
+      current: { cookies: [{ name: 'cf_clearance', expires: seconds(Date.now() + 86_400_000) }] },
+      blocked: { cookies: [{ name: 'cf_clearance', expires: seconds(Date.now() + 86_400_000) }] },
+    };
+    const probe = vi.fn(async (id: string) => id === 'blocked');
+    await expect(sourcesNeedingCheck(probe)).resolves.toEqual(['expired', 'blocked']);
+    // Asked only of sources that have needed a check, and not of one already known.
+    expect(probe.mock.calls.map(([id]) => id)).toEqual(['current', 'blocked']);
   });
 
   it('passes the checks start-up finds one at a time', async () => {
