@@ -39,7 +39,7 @@
     "puppeteer": "^25.17.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "socks-proxy-agent": "^8.0.5",
+    "socks-proxy-agent": "^10.1.0",
     "tldts": "^7.4.22",
     "zod": "^4.6.7"
   },
