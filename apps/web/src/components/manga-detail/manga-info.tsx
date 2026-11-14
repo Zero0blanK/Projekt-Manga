@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { Star } from 'lucide-react';
 import { artistLine, authorLine, formatRelative, groupLine, type Manga } from '@/lib/manga-data';
 
@@ -66,17 +67,33 @@ export function MangaStats({ manga }: { manga: Manga }) {
   );
 }
 
-export function GenrePills({ tags }: { tags: string[] }) {
+/** Where a genre pill leads: the title's source, browsing that genre. */
+export function genreHref(source: string, genre: string): string {
+  return `/discover/popular?${new URLSearchParams({ source, genre })}`;
+}
+
+/** The title's genres; each opens its source's titles in that genre, when it has a source. */
+export function GenrePills({ tags, source }: { tags: string[]; source?: string }) {
+  const pill =
+    'rounded-full border border-border/60 bg-surface/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground';
   return (
     <div className="mt-4 flex flex-wrap items-center gap-1.5">
-      {tags.map((tag) => (
-        <span
-          key={tag}
-          className="rounded-full border border-border/60 bg-surface/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-        >
-          {tag}
-        </span>
-      ))}
+      {tags.map((tag) =>
+        source ? (
+          <Link
+            key={tag}
+            href={genreHref(source, tag)}
+            title={`More ${tag} titles`}
+            className={`${pill} transition hover:border-primary/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
+          >
+            {tag}
+          </Link>
+        ) : (
+          <span key={tag} className={pill}>
+            {tag}
+          </span>
+        ),
+      )}
     </div>
   );
 }

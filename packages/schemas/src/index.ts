@@ -7,6 +7,7 @@ export * from './history.js';
 export * from './download.js';
 export * from './source.js';
 export * from './sourceOutput.js';
+export * from './chapterDates.js';
 export * from './cache.js';
 export * from './library.js';
 export * from './updateLog.js';

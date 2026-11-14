@@ -62,7 +62,7 @@ export function MangaDetailLayout({
 
           <div className="col-span-2 min-w-0 md:col-span-1 md:col-start-2">
             <MangaStats manga={manga} />
-            <GenrePills tags={manga.tags} />
+            <GenrePills tags={manga.tags} source={manga.source || undefined} />
             <MangaSynopsis synopsis={manga.synopsis} />
             <div className="mt-6 flex flex-wrap items-center gap-2">{actions}</div>
           </div>
