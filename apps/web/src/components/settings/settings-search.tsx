@@ -11,9 +11,11 @@ const groups: Array<{ section: SectionId; description: string; labels: string[] 
   },
   {
     section: 'appearance',
-    description: 'Theme, accent, covers, interface scale and accessibility',
+    description: 'Interface style, theme, accent, covers, interface scale and accessibility',
     labels: [
+      'Interface style',
       'Theme',
+      'Glass effects',
       'Accent color',
       'Interface scale',
       'Interface density',
