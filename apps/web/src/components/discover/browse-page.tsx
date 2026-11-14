@@ -3,7 +3,7 @@
 import { useLatest } from '@/lib/use-latest';
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import type { FilterValue } from '@projekt-manga/types';
 import {
   useSources,
@@ -19,7 +19,7 @@ import { ApiError } from '@projekt-manga/api-client';
 import { FilterPanel } from '@/components/discover/filter-panel';
 import { SourceChallengeNotice } from '@/components/discover/source-challenge-notice';
 import { isChallengeRequired } from '@/lib/source-browser';
-import { countActiveFilters, type FilterValues } from '@/lib/filter-values';
+import { countActiveFilters, genreFilterValues, type FilterValues } from '@/lib/filter-values';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -76,6 +76,11 @@ export function DiscoverBrowsePage({
     );
   const searchParams = useSearchParams();
   const requestedSource = searchParams.get('source');
+  // A genre pill on a title's page: that source's titles in the genre. Held until the
+  // source's filters arrive, so a default list isn't fetched only to be replaced.
+  const requestedGenre = searchParams.get('genre')?.trim() || null;
+  const [pendingGenre, setPendingGenre] = useState<string | null>(requestedGenre);
+  const router = useRouter();
 
   // Restored after mount, never during render: sessionStorage is unavailable on the
   // server, so reading it inline makes the first client render disagree with the SSR
@@ -94,12 +99,17 @@ export function DiscoverBrowsePage({
   const lastSourceId = useRef<string | null>(sourceId);
 
   // Restoring belongs to arriving at this page, not to the category or source changing.
-  const restoreFor = useLatest({ category, requestedSource });
+  const restoreFor = useLatest({ category, requestedSource, requestedGenre });
   useEffect(() => {
-    const { category, requestedSource } = restoreFor.current;
+    const { category, requestedSource, requestedGenre } = restoreFor.current;
     const snapshot = readBrowseSnapshot(browseKey, category, requestedSource);
-    // An explicit ?source= is a deliberate navigation and outranks a stale snapshot.
-    if (snapshot && (!requestedSource || snapshot.sourceId === requestedSource)) {
+    // An explicit ?source= is a deliberate navigation and outranks a stale snapshot, and
+    // so does a genre asked for.
+    if (
+      snapshot &&
+      !requestedGenre &&
+      (!requestedSource || snapshot.sourceId === requestedSource)
+    ) {
       setUsableRestore(snapshot);
       lastSourceId.current = snapshot.sourceId;
       if (snapshot.sourceId) setSourceId(snapshot.sourceId);
@@ -138,6 +148,7 @@ export function DiscoverBrowsePage({
   const {
     filters: availableFilters,
     error: filtersError,
+    loading: filtersLoading,
     retry: retryFilters,
   } = useSourceFilters(capabilities?.filters ? (active?.id ?? null) : null);
 
@@ -152,6 +163,30 @@ export function DiscoverBrowsePage({
     setFilterValues({});
     setSortValue('');
   }, [active?.id]);
+
+  // Once the asked-for source's filters are known: select the genre in them, or else
+  // search for it (many sources match genres in a search too). The genre then leaves the
+  // URL, so coming Back here restores the list as left rather than starting it again.
+  const filtersSettled =
+    capabilities !== null &&
+    capabilities !== undefined &&
+    (!capabilities.filters || !filtersLoading);
+  useEffect(() => {
+    if (!pendingGenre || !active || !filtersSettled) return;
+    const selection = genreFilterValues(availableFilters, pendingGenre);
+    if (selection) {
+      setFilterValues(selection);
+      setShowFilters(true);
+    } else if (capabilities?.search) {
+      setQuery(pendingGenre);
+      setQueryDraft(pendingGenre);
+    }
+    setPendingGenre(null);
+    const search = new URLSearchParams(searchParams.toString());
+    search.delete('genre');
+    const rest = search.toString();
+    router.replace(rest ? `?${rest}` : '?', { scroll: false });
+  }, [pendingGenre, active, filtersSettled, availableFilters, capabilities, router, searchParams]);
 
   const sortField = availableFilters.find((f) => f.value === SORT_FILTER_KEY);
   const sortOptions = (sortField?.options ?? []).filter((o) => o.value);
@@ -210,6 +245,7 @@ export function DiscoverBrowsePage({
     // Held back until the snapshot has been checked, so a default-state fetch can't start
     // and then be thrown away (or worse, win the race against the restore).
     restoreChecked &&
+      !pendingGenre &&
       capabilities &&
       (query ? capabilities.search : category !== 'latest' || capabilities.latest)
       ? (active?.id ?? null)

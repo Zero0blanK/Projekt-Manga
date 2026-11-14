@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { sourceCursorSchema } from './source.js';
+import { separateChapterDates } from './chapterDates.js';
 
 /**
  * What an installed source is allowed to hand back.
@@ -99,7 +100,11 @@ export const sourceMangaDetailsSchema = sourceMangaSchema
     // Raw source text. `toMangaStatus()` in apps/server normalises it at the point it is
     // stored, so anything unrecognised becomes UNKNOWN rather than being rejected here.
     status: z.string().optional().default(''),
-    chapters: z.array(sourceChapterSchema).optional().default([]),
+    chapters: z
+      .array(sourceChapterSchema)
+      .optional()
+      .default([])
+      .transform((chapters) => separateChapterDates(chapters)),
   })
   .passthrough();
 
@@ -135,7 +140,9 @@ export const sourceCataloguePageSchema = z
       context.addIssue({ code: 'custom', message: 'A terminal page cannot have a cursor' });
     }
   });
-export const sourceChapterListSchema = z.array(sourceChapterSchema);
+export const sourceChapterListSchema = z
+  .array(sourceChapterSchema)
+  .transform((chapters) => separateChapterDates(chapters));
 export const sourceMangaFilterListSchema = z.array(sourceMangaFilterSchema);
 
 export const sourceChapterPagesSchema = z

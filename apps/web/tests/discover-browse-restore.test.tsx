@@ -17,6 +17,8 @@ const {
   saveBrowseSnapshot,
   useSourceBrowsePaged,
   getRequestedSource,
+  getRequestedGenre,
+  filterState,
   capabilityState,
 } = vi.hoisted(() => ({
   capabilityState: { search: true, filters: true, latest: true },
@@ -24,12 +26,20 @@ const {
   saveBrowseSnapshot: vi.fn(),
   useSourceBrowsePaged: vi.fn(),
   getRequestedSource: vi.fn<() => string | null>(),
+  getRequestedGenre: vi.fn<() => string | null>(),
+  filterState: { filters: [] as unknown[] },
 }));
 
 vi.mock('next/navigation', () => ({
-  useSearchParams: () =>
-    new URLSearchParams(getRequestedSource() ? `source=${getRequestedSource()}` : ''),
+  useSearchParams: () => {
+    const params = new URLSearchParams();
+    if (getRequestedSource()) params.set('source', getRequestedSource()!);
+    if (getRequestedGenre()) params.set('genre', getRequestedGenre()!);
+    return params;
+  },
+  useRouter: () => router,
 }));
+const router = { replace: vi.fn(), push: vi.fn() };
 vi.mock('@/lib/browse-state', () => ({
   readBrowseSnapshot,
   saveBrowseSnapshot,
@@ -42,7 +52,7 @@ vi.mock('@/lib/library-store', () => ({
       { id: 'source-b', name: 'B', lang: 'en', base_url: 'https://b.example', isNSFW: false },
     ],
   }),
-  useSourceFilters: () => ({ filters: [] }),
+  useSourceFilters: () => ({ filters: filterState.filters }),
   useSourceCapabilities: () => ({ capabilities: capabilityState }),
   useSourceBrowsePaged,
 }));
@@ -72,6 +82,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   Object.assign(capabilityState, { search: true, filters: true, latest: true });
   getRequestedSource.mockReturnValue(null);
+  getRequestedGenre.mockReturnValue(null);
+  filterState.filters = [];
   readBrowseSnapshot.mockReturnValue(null);
   useSourceBrowsePaged.mockReturnValue({
     items: [],
@@ -220,5 +232,50 @@ describe('Discover browse state', () => {
         'saved query',
       );
     });
+  });
+
+  it("opens a genre from a title's page in the source's genre filter, not a stale list", async () => {
+    getRequestedSource.mockReturnValue('source-b');
+    getRequestedGenre.mockReturnValue('Action');
+    filterState.filters = [
+      {
+        label: 'Genres',
+        value: 'genres',
+        type: 'tri-state',
+        options: [{ label: 'Action', value: 'act' }],
+      },
+    ];
+    readBrowseSnapshot.mockReturnValue({
+      sourceId: 'source-b',
+      category: 'popular',
+      query: '',
+      sortValue: '',
+      filterValues: {},
+      items: [{ id: 'old', title: 'Old list', source: 'source-b' }],
+      hasMore: false,
+      scrollY: 0,
+      savedAt: Date.now(),
+    });
+    render(page());
+    await waitFor(() =>
+      expect(useSourceBrowsePaged.mock.calls.at(-1)?.slice(0, 3)).toEqual([
+        'source-b',
+        'popular',
+        { genres: { include: ['act'] } },
+      ]),
+    );
+    // Nothing was fetched for the source before the genre was in.
+    const fetchedSources = useSourceBrowsePaged.mock.calls.map((call) => call[0]);
+    expect(fetchedSources.indexOf('source-b')).toBe(
+      useSourceBrowsePaged.mock.calls.findIndex((call) => JSON.stringify(call[2]).includes('act')),
+    );
+    expect(router.replace).toHaveBeenCalledWith('?source=source-b', { scroll: false });
+  });
+
+  it('searches for a genre the source has no filter for', async () => {
+    getRequestedSource.mockReturnValue('source-a');
+    getRequestedGenre.mockReturnValue('Murim');
+    render(page());
+    await waitFor(() => expect(useSourceBrowsePaged.mock.calls.at(-1)?.[5]).toBe('Murim'));
   });
 });
