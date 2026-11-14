@@ -88,6 +88,24 @@ describe('passing a source check in the background', () => {
     expect(openBrowser).toHaveBeenCalledWith('manhuaus', { closeWhenPassed: true });
   });
 
+  it('announces a check once when a remount joins it from another way in', async () => {
+    const { toast } = await import('@/hooks/use-toast');
+    vi.mocked(toast).mockClear();
+    let finish: (value: typeof passed) => void = () => undefined;
+    openBrowser.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const first = render(<SourceChallengeAutoOpen />);
+    fail('/source/manhuaus/catalogue');
+    await waitFor(() => expect(openBrowser).toHaveBeenCalledTimes(1));
+    // Development mounts twice: the second mount's listener meets the same check.
+    first.unmount();
+    render(<SourceChallengeAutoOpen />);
+    fail('/source/manhuaus/catalogue');
+    finish(passed);
+    await waitFor(() => expect(getSourceCheck('manhuaus').status).toBe('passed'));
+    await act(async () => undefined);
+    expect(toast).toHaveBeenCalledTimes(1);
+  });
+
   it('checks again when the clearance runs out later, not just once per run', async () => {
     render(<SourceChallengeAutoOpen />);
     fail('/source/manhuaus/catalogue');

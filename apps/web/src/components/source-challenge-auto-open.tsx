@@ -15,6 +15,11 @@ import { checkSourcesOnStartup, queueSourceCheck } from '@/lib/source-check-queu
 /** How often source health is read for checks met in the background. */
 const HEALTH_POLL_MS = 60_000;
 
+/** Checks already announced. Several ways in can join the same check (start-up's probe
+ * also fails on the check, and health records it), so each is announced once. Kept outside
+ * the component: start-up's check outlives a remount, and the remount's listeners join it. */
+const reported = new WeakSet<Promise<SourceCheckState | null>>();
+
 /**
  * On the desktop app, passes a source's browser check (Cloudflare) in the background as
  * soon as the source asks for one, instead of waiting for the reader to press "Open in
@@ -33,9 +38,6 @@ export function SourceChallengeAutoOpen() {
     if (!canCheckSources()) return;
     const enabled = () => getSetting(AUTO_OPEN_CHALLENGE_SETTING, true) !== false;
 
-    // Several ways in can join the same check (start-up's probe also fails on the check, and
-    // health records it), so each check is announced once.
-    const reported = new WeakSet<Promise<SourceCheckState | null>>();
     const report = (run: Promise<SourceCheckState | null>) => {
       if (reported.has(run)) return;
       reported.add(run);
