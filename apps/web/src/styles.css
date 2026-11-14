@@ -674,187 +674,295 @@ html[data-skip-splash] .splash-root {
 }
 
 /* ---------------------------------------------------------------------------------------
-   Interface style: Minimal (Settings > Appearance > Interface style)
+   Interface style: Frost (Settings > Appearance > Interface style)
 
-   A quieter, denser look in the spirit of the Moku reader: neutral near-black layers a
-   small step apart, hairline borders, small corners, DM Sans with DM Mono for labels,
-   flat surfaces and quick motion. Classic is everything above this block. Each theme has
-   a Minimal variant; the accent still comes from Settings (Minimal defaults to sage).
+   Frosted-glass surfaces over near-black (or paper) layers, hairline borders, small
+   corners, DM Sans with DM Mono labels, dense type and quick motion. Classic is everything
+   above this block; Frost keeps the app's own layout and only changes how it looks.
+
+   The palettes, glass, type, radius, motion and skeleton values below are adapted from the
+   Moku reader's stylesheets (src/app.css and src/lib/styles/themes.css), Copyright the
+   Moku project contributors, licensed under the Apache License, Version 2.0:
+   https://www.apache.org/licenses/LICENSE-2.0 (a copy is in licenses/moku-LICENSE).
+   Changes: the tokens are mapped onto this app's theme variables, and applied to its own
+   components here.
    --------------------------------------------------------------------------------------- */
-/* Defined for every style, so Settings can preview Minimal from Classic too. */
+
+/* Defined for every style, so Settings can preview Frost from Classic too. */
 :root {
-  --font-minimal-sans: 'DM Sans Variable', 'DM Sans';
-  --font-minimal-mono: 'DM Mono';
+  --font-frost-sans: 'DM Sans Variable', 'DM Sans';
+  --font-frost-mono: 'DM Mono', 'Fira Mono';
 }
 
-:root[data-ui='minimal'] {
-  --radius: 0.4375rem;
-  --font-sans: var(--font-minimal-sans), ui-sans-serif, system-ui, sans-serif;
-  --default-transition-duration: 140ms;
+/* Original (the default palette). */
+:root[data-ui='frost'] {
+  color-scheme: dark;
+  --fr-void: #080808;
+  --fr-base: #0c0c0c;
+  --fr-surface: #101010;
+  --fr-raised: #151515;
+  --fr-overlay: #1a1a1a;
+  --fr-subtle: #202020;
+  --fr-border-dim: #1c1c1c;
+  --fr-border: #242424;
+  --fr-border-strong: #2e2e2e;
+  --fr-border-focus: #4a5c4a;
+  --fr-text: #f0efec;
+  --fr-text-secondary: #c8c6c0;
+  --fr-text-muted: #8a8880;
+  --fr-text-faint: #4e4d4a;
+  --fr-accent: #6b8f6b;
+  --fr-accent-dim: #2a3d2a;
+  --fr-accent-fg: #a8c4a8;
+  --fr-on-accent: #0c0c0c;
+  --fr-error: #c47a7a;
+  --fr-frost-bg: rgba(16, 16, 16, 0.72);
+  --fr-frost-border: rgba(46, 46, 46, 0.55);
+  --fr-frost-blur: blur(20px) saturate(180%);
+  --fr-frost-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 8px 28px rgba(0, 0, 0, 0.55);
+
+  /* The app's tokens, from the palette above. */
+  --radius: 7px;
+  --font-sans: var(--font-frost-sans), ui-sans-serif, system-ui, sans-serif;
+  --background: var(--fr-base);
+  --foreground: var(--fr-text);
+  --surface: var(--fr-surface);
+  --surface-elevated: var(--fr-raised);
+  --card: var(--fr-surface);
+  --card-foreground: var(--fr-text);
+  --popover: var(--fr-raised);
+  --popover-foreground: var(--fr-text);
+  --primary: var(--fr-accent);
+  --primary-foreground: var(--fr-on-accent);
+  --secondary: var(--fr-raised);
+  --secondary-foreground: var(--fr-text-secondary);
+  --muted: var(--fr-raised);
+  --muted-foreground: var(--fr-text-muted);
+  --accent: var(--fr-overlay);
+  --accent-foreground: var(--fr-text);
+  --destructive: var(--fr-error);
+  --destructive-foreground: var(--fr-text);
+  --border: var(--fr-border);
+  --input: var(--fr-border-strong);
+  --ring: var(--fr-border-focus);
+  --sidebar: var(--fr-void);
+  --sidebar-foreground: var(--fr-text);
+  --sidebar-primary: var(--fr-accent);
+  --sidebar-primary-foreground: var(--fr-on-accent);
+  --sidebar-accent: var(--fr-overlay);
+  --sidebar-accent-foreground: var(--fr-text);
+  --sidebar-border: var(--fr-border-dim);
+  --sidebar-ring: var(--fr-border-focus);
+  --scrollbar-thumb: transparent;
+  --gradient-primary: linear-gradient(135deg, var(--primary), var(--fr-accent-dim));
+  --gradient-surface: linear-gradient(180deg, var(--fr-surface), var(--fr-base));
+  --gradient-hero: var(--fr-surface);
+  --shadow-cover: 0 8px 28px rgba(0, 0, 0, 0.5);
   --shadow-glow: 0 0 0 0 transparent;
+  --default-transition-duration: 0.14s;
+  --default-transition-timing-function: ease;
 }
 
-:root[data-ui='minimal'][data-theme='dark'] {
-  --background: oklch(0.155 0.002 100);
-  --foreground: oklch(0.95 0.006 90);
-  --surface: oklch(0.18 0.002 100);
-  --surface-elevated: oklch(0.205 0.003 100);
-  --card: oklch(0.18 0.002 100);
-  --card-foreground: oklch(0.95 0.006 90);
-  --popover: oklch(0.2 0.003 100);
-  --popover-foreground: oklch(0.95 0.006 90);
-  --secondary: oklch(0.225 0.003 100);
-  --secondary-foreground: oklch(0.93 0.006 90);
-  --muted: oklch(0.205 0.003 100);
-  --muted-foreground: oklch(0.66 0.008 90);
-  --accent: oklch(0.235 0.004 100);
-  --accent-foreground: oklch(0.95 0.006 90);
-  --border: oklch(1 0 0 / 7%);
-  --input: oklch(1 0 0 / 9%);
-  --sidebar: oklch(0.135 0.002 100);
-  --sidebar-accent: oklch(0.21 0.003 100);
-  --sidebar-border: oklch(1 0 0 / 6%);
-  --gradient-surface: linear-gradient(180deg, oklch(0.18 0.002 100), oklch(0.155 0.002 100));
-  --gradient-hero:
-    radial-gradient(
-      90% 70% at 15% 0%,
-      color-mix(in oklch, var(--primary) 14%, transparent),
-      transparent 65%
-    ),
-    oklch(0.165 0.002 100);
-  --shadow-cover: 0 12px 26px -16px oklch(0 0 0 / 0.75), 0 4px 10px -6px oklch(0 0 0 / 0.5);
+:root[data-ui='frost'][data-frost='dark'] {
+  --fr-void: #000000;
+  --fr-base: #080808;
+  --fr-surface: #0d0d0d;
+  --fr-raised: #111111;
+  --fr-overlay: #171717;
+  --fr-subtle: #1e1e1e;
+  --fr-border-dim: #252525;
+  --fr-border: #303030;
+  --fr-border-strong: #3e3e3e;
+  --fr-border-focus: #5a7a5a;
+  --fr-text: #ffffff;
+  --fr-text-secondary: #e8e6e0;
+  --fr-text-muted: #b0aea8;
+  --fr-text-faint: #6e6c68;
+  --fr-accent: #7aaa7a;
+  --fr-accent-dim: #2e4a2e;
+  --fr-accent-fg: #bcd8bc;
+  --fr-on-accent: #000000;
+  --fr-frost-bg: rgba(14, 14, 14, 0.72);
+  --fr-frost-border: rgba(58, 58, 58, 0.55);
+  --fr-frost-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 8px 28px rgba(0, 0, 0, 0.55);
 }
 
-:root[data-ui='minimal'][data-theme='dim'] {
-  --background: oklch(0.225 0.003 100);
-  --foreground: oklch(0.95 0.006 90);
-  --surface: oklch(0.25 0.003 100);
-  --surface-elevated: oklch(0.275 0.004 100);
-  --card: oklch(0.25 0.003 100);
-  --card-foreground: oklch(0.95 0.006 90);
-  --popover: oklch(0.27 0.004 100);
-  --popover-foreground: oklch(0.95 0.006 90);
-  --secondary: oklch(0.295 0.004 100);
-  --secondary-foreground: oklch(0.93 0.006 90);
-  --muted: oklch(0.275 0.004 100);
-  --muted-foreground: oklch(0.7 0.008 90);
-  --accent: oklch(0.305 0.005 100);
-  --accent-foreground: oklch(0.95 0.006 90);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 10%);
-  --sidebar: oklch(0.205 0.003 100);
-  --sidebar-accent: oklch(0.28 0.004 100);
-  --gradient-surface: linear-gradient(180deg, oklch(0.25 0.003 100), oklch(0.225 0.003 100));
-  --gradient-hero:
-    radial-gradient(
-      90% 70% at 15% 0%,
-      color-mix(in oklch, var(--primary) 14%, transparent),
-      transparent 65%
-    ),
-    oklch(0.235 0.003 100);
-  --shadow-cover: 0 12px 26px -16px oklch(0 0 0 / 0.6), 0 4px 10px -6px oklch(0 0 0 / 0.4);
+:root[data-ui='frost'][data-frost='midnight'] {
+  --fr-void: #050810;
+  --fr-base: #080c18;
+  --fr-surface: #0c1020;
+  --fr-raised: #101428;
+  --fr-overlay: #151a30;
+  --fr-subtle: #1a2038;
+  --fr-border-dim: #1a2035;
+  --fr-border: #222840;
+  --fr-border-strong: #2c3450;
+  --fr-border-focus: #4a5c8a;
+  --fr-text: #eeeef8;
+  --fr-text-secondary: #c0c4d8;
+  --fr-text-muted: #808498;
+  --fr-text-faint: #404860;
+  --fr-accent: #6a7ab8;
+  --fr-accent-dim: #252d50;
+  --fr-accent-fg: #a8b4e8;
+  --fr-on-accent: #050810;
+  --fr-frost-bg: rgba(16, 20, 40, 0.72);
+  --fr-frost-border: rgba(44, 52, 80, 0.55);
+  --fr-frost-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 8px 28px rgba(0, 0, 6, 0.55);
 }
 
-:root[data-ui='minimal'][data-theme='midnight'] {
-  --background: oklch(0 0 0);
-  --foreground: oklch(0.97 0.004 90);
-  --surface: oklch(0.12 0.001 100);
-  --surface-elevated: oklch(0.15 0.002 100);
-  --card: oklch(0.12 0.001 100);
-  --card-foreground: oklch(0.97 0.004 90);
-  --popover: oklch(0.14 0.002 100);
-  --popover-foreground: oklch(0.97 0.004 90);
-  --secondary: oklch(0.17 0.002 100);
-  --secondary-foreground: oklch(0.95 0.004 90);
-  --muted: oklch(0.15 0.002 100);
-  --muted-foreground: oklch(0.7 0.006 90);
-  --accent: oklch(0.18 0.003 100);
-  --accent-foreground: oklch(0.97 0.004 90);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 11%);
-  --sidebar: oklch(0 0 0);
-  --sidebar-accent: oklch(0.15 0.002 100);
-  --gradient-surface: linear-gradient(180deg, oklch(0.12 0.001 100), oklch(0 0 0));
-  --gradient-hero:
-    radial-gradient(
-      90% 70% at 15% 0%,
-      color-mix(in oklch, var(--primary) 12%, transparent),
-      transparent 65%
-    ),
-    oklch(0.04 0 0);
-  --shadow-cover: 0 12px 26px -16px oklch(0 0 0 / 0.9);
+:root[data-ui='frost'][data-frost='warm'] {
+  --fr-void: #0c0a06;
+  --fr-base: #100e08;
+  --fr-surface: #16130c;
+  --fr-raised: #1c1810;
+  --fr-overlay: #221e14;
+  --fr-subtle: #28241a;
+  --fr-border-dim: #201c10;
+  --fr-border: #2c2818;
+  --fr-border-strong: #3a3420;
+  --fr-border-focus: #6a5a30;
+  --fr-text: #f5f0e0;
+  --fr-text-secondary: #d8d0b0;
+  --fr-text-muted: #988c60;
+  --fr-text-faint: #584e30;
+  --fr-accent: #c0902a;
+  --fr-accent-dim: #3a2c10;
+  --fr-accent-fg: #e0b860;
+  --fr-on-accent: #0c0a06;
+  --fr-frost-bg: rgba(28, 24, 16, 0.72);
+  --fr-frost-border: rgba(58, 52, 32, 0.55);
+  --fr-frost-shadow: 0 1px 0 rgba(255, 240, 210, 0.05) inset, 0 8px 28px rgba(0, 0, 0, 0.55);
 }
 
-:root[data-ui='minimal'][data-theme='light'] {
-  --background: oklch(0.935 0.007 85);
-  --foreground: oklch(0.18 0.006 85);
-  --surface: oklch(0.955 0.006 85);
-  --surface-elevated: oklch(0.975 0.005 85);
-  --card: oklch(0.965 0.006 85);
-  --card-foreground: oklch(0.18 0.006 85);
-  --popover: oklch(0.985 0.004 85);
-  --popover-foreground: oklch(0.18 0.006 85);
-  --secondary: oklch(0.905 0.008 85);
-  --secondary-foreground: oklch(0.2 0.006 85);
-  --muted: oklch(0.915 0.008 85);
-  --muted-foreground: oklch(0.44 0.01 85);
-  --accent: oklch(0.895 0.009 85);
-  --accent-foreground: oklch(0.18 0.006 85);
-  --border: oklch(0.3 0.01 85 / 16%);
-  --input: oklch(0.3 0.01 85 / 20%);
-  --sidebar: oklch(0.92 0.008 85);
-  --sidebar-accent: oklch(0.895 0.009 85);
-  --sidebar-border: oklch(0.3 0.01 85 / 14%);
-  --gradient-surface: linear-gradient(180deg, oklch(0.965 0.006 85), oklch(0.935 0.007 85));
-  --gradient-hero:
-    radial-gradient(
-      90% 70% at 15% 0%,
-      color-mix(in oklch, var(--primary) 16%, transparent),
-      transparent 65%
-    ),
-    oklch(0.94 0.007 85);
-  --shadow-cover:
-    0 12px 26px -16px oklch(0.35 0.02 70 / 0.35), 0 4px 10px -6px oklch(0.35 0.02 70 / 0.2);
+:root[data-ui='frost'][data-frost='light'] {
+  color-scheme: light;
+  --fr-void: #d8d4ce;
+  --fr-base: #e2deda;
+  --fr-surface: #ece8e2;
+  --fr-raised: #f5f2ec;
+  --fr-overlay: #ffffff;
+  --fr-subtle: #e4e0d8;
+  --fr-border-dim: #c4c0b8;
+  --fr-border: #b0aca4;
+  --fr-border-strong: #989490;
+  --fr-border-focus: #3a5a3a;
+  --fr-text: #080806;
+  --fr-text-secondary: #181612;
+  --fr-text-muted: #38342e;
+  --fr-text-faint: #706c64;
+  --fr-accent: #3f9142;
+  --fr-accent-dim: #a8d0a8;
+  --fr-accent-fg: #2f8a34;
+  --fr-on-accent: #ffffff;
+  --fr-error: #8a1a1a;
+  --fr-frost-bg: rgba(246, 243, 237, 0.78);
+  --fr-frost-border: rgba(150, 146, 138, 0.5);
+  --fr-frost-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 8px 28px rgba(70, 66, 58, 0.18);
+  --shadow-cover: 0 8px 28px rgba(70, 66, 58, 0.18);
 }
 
-:root[data-ui='minimal'][data-theme='paper'] {
-  --background: oklch(0.915 0.026 82);
-  --foreground: oklch(0.27 0.03 62);
-  --surface: oklch(0.935 0.024 84);
-  --surface-elevated: oklch(0.955 0.02 84);
-  --card: oklch(0.935 0.024 84);
-  --card-foreground: oklch(0.27 0.03 62);
-  --popover: oklch(0.955 0.02 84);
-  --popover-foreground: oklch(0.27 0.03 62);
-  --muted-foreground: oklch(0.47 0.03 62);
-  --border: oklch(0.35 0.03 62 / 16%);
-  --input: oklch(0.35 0.03 62 / 20%);
-  --gradient-hero:
-    radial-gradient(
-      90% 70% at 15% 0%,
-      color-mix(in oklch, var(--primary) 14%, transparent),
-      transparent 65%
-    ),
-    oklch(0.92 0.026 82);
-  --shadow-cover: 0 12px 26px -16px oklch(0.35 0.04 60 / 0.35);
+/* Glass off (Settings > Appearance > Glass effects): solid surfaces and plain borders. */
+:root[data-ui='frost'].frost-off {
+  --fr-frost-bg: var(--fr-surface);
+  --fr-frost-border: var(--fr-border);
+  --fr-frost-blur: none;
+}
+
+/* The page sits on the deepest layer, as Frost's base. */
+:root[data-ui='frost'] body {
+  background: var(--fr-void);
+  font-size: 1rem;
+  line-height: 1.6;
+  text-rendering: optimizeLegibility;
+}
+
+/* Frosted glass on the surfaces that float over the page: cards and panels, menus and
+   popovers, dialogs and sheets, and the navigation bar. Not on pills, buttons and links,
+   which stay as they are. */
+:root[data-ui='frost']
+  :is(
+    .bg-card,
+    [class*='bg-card/'],
+    .bg-popover,
+    [class*='bg-popover/'],
+    .bg-surface,
+    [class*='bg-surface/'],
+    [role='dialog'],
+    [role='alertdialog'],
+    [role='menu'],
+    [role='listbox']
+  ):not(button, a, .rounded-full) {
+  background-color: var(--fr-frost-bg);
+  border-color: var(--fr-frost-border);
+  -webkit-backdrop-filter: var(--fr-frost-blur);
+  backdrop-filter: var(--fr-frost-blur);
+  box-shadow: var(--fr-frost-shadow);
 }
 
 /* Type: titles in DM Sans rather than the serif, and the small uppercase labels (section
-   headings, chips, metadata) in DM Mono, as Moku sets its interface chrome. */
-:root[data-ui='minimal'] .text-display {
-  font-family: var(--font-minimal-sans), ui-sans-serif, system-ui, sans-serif;
+   headings, chips, metadata) in DM Mono. */
+:root[data-ui='frost'] .text-display {
+  font-family: var(--font-frost-sans), ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
 }
-:root[data-ui='minimal'] .uppercase {
-  font-family: var(--font-minimal-mono), ui-monospace, monospace;
-  letter-spacing: 0.08em;
+:root[data-ui='frost'] .uppercase {
+  font-family: var(--font-frost-mono), ui-monospace, monospace;
+  letter-spacing: 0.1em;
 }
 /* Settings draws Classic's preview card in Classic's type, whichever style is on. */
-:root[data-ui='minimal'] .ui-classic-preview .uppercase {
+:root[data-ui='frost'] .ui-classic-preview .uppercase {
   font-family: inherit;
   letter-spacing: 0.05em;
 }
-:root[data-ui='minimal'] body {
-  letter-spacing: -0.005em;
+
+/* Thin scrollbars that stay out of sight. */
+:root[data-ui='frost'] * {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+:root[data-ui='frost'] *::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+:root[data-ui='frost'] *::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 99px;
+}
+
+/* Loading placeholders shimmer instead of pulsing. */
+@keyframes frost-shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+:root[data-ui='frost'] [data-slot='skeleton'] {
+  background: linear-gradient(
+    90deg,
+    var(--fr-raised) 25%,
+    var(--fr-overlay) 50%,
+    var(--fr-raised) 75%
+  );
+  background-size: 200% 100%;
+  animation: frost-shimmer 1.4s ease infinite;
+  border-radius: 3px;
+}
+
+/* Menus, popovers and dialogs open with a short fade and rise. */
+@keyframes frost-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+:root[data-ui='frost'] :is([role='menu'], [role='listbox'])[data-state='open'] {
+  animation: frost-fade-up 0.18s ease both;
 }

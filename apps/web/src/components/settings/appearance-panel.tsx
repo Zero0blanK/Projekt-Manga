@@ -3,15 +3,18 @@
 import { actions, useSetting } from '@/lib/app-store';
 import {
   ACCENTS,
+  DEFAULT_FROST_THEME,
   DEFAULT_THEME,
   DEFAULT_UI_SCALE,
   DEFAULT_UI_STYLE,
+  FROST_THEMES,
   THEMES,
   UI_SCALES,
   UI_STYLES,
-  effectiveAccent,
+  resolveFrostTheme,
   resolveTheme,
   resolveUiStyle,
+  shownAccent,
 } from '@/lib/theme';
 import { Panel, Field, Group, Select, Toggle } from '@/components/settings/field-controls';
 import { Check } from 'lucide-react';
@@ -23,7 +26,7 @@ function ThemeCard({
   selected,
   onSelect,
 }: {
-  option: (typeof THEMES)[number];
+  option: Omit<(typeof THEMES)[number], 'id'> & { id: string };
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -82,7 +85,7 @@ function UiStyleCard({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const minimal = option.id === 'minimal';
+  const frost = option.id === 'frost';
   return (
     <button
       type="button"
@@ -93,17 +96,17 @@ function UiStyleCard({
       }`}
     >
       <div
-        className={`relative flex h-20 items-center gap-2.5 bg-muted/40 px-3 ${minimal ? '' : 'ui-classic-preview'}`}
+        className={`relative flex h-20 items-center gap-2.5 bg-muted/40 px-3 ${frost ? '' : 'ui-classic-preview'}`}
         aria-hidden
       >
         <div
-          className={`h-12 w-8 shrink-0 bg-primary/70 ${minimal ? 'rounded-[3px]' : 'rounded-lg'}`}
+          className={`h-12 w-8 shrink-0 bg-primary/70 ${frost ? 'rounded-[3px]' : 'rounded-lg'}`}
         />
         <div className="min-w-0 flex-1 space-y-1.5">
           <div
             className={`truncate text-sm text-foreground ${
-              minimal
-                ? 'font-[family-name:var(--font-minimal-sans)] font-semibold tracking-tight'
+              frost
+                ? 'font-[family-name:var(--font-frost-sans)] font-semibold tracking-tight'
                 : 'font-[family-name:var(--font-display)]'
             }`}
           >
@@ -111,8 +114,8 @@ function UiStyleCard({
           </div>
           <div
             className={`truncate text-[10px] uppercase text-muted-foreground ${
-              minimal
-                ? 'font-[family-name:var(--font-minimal-mono)] tracking-[0.08em]'
+              frost
+                ? 'font-[family-name:var(--font-frost-mono)] tracking-[0.08em]'
                 : 'tracking-wider'
             }`}
           >
@@ -139,7 +142,9 @@ export function AppearancePanel() {
   // Stored values are lowercase ids; lowercasing also normalizes legacy capitalised values ("Dark").
   const storedTheme = String(useSetting('theme', DEFAULT_THEME)).toLowerCase();
   const uiStyle = resolveUiStyle(useSetting('uiStyle', DEFAULT_UI_STYLE));
-  const accent = effectiveAccent(useSetting('accent', ''), uiStyle);
+  const frost = uiStyle === 'frost';
+  const storedFrostTheme = String(useSetting('frostTheme', DEFAULT_FROST_THEME)).toLowerCase();
+  const accent = shownAccent(useSetting('accent', ''), uiStyle, storedFrostTheme);
   const customAccent = !ACCENTS.some((a) => a.value.toLowerCase() === accent.toLowerCase());
 
   return (
@@ -148,7 +153,7 @@ export function AppearancePanel() {
         <div>
           <div className="text-sm font-medium text-foreground">Interface style</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            Works with every theme and accent below.
+            Each style has its own themes below; your accent works with both.
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3">
             {UI_STYLES.map((style) => (
@@ -165,21 +170,41 @@ export function AppearancePanel() {
         <div>
           <div className="text-sm font-medium text-foreground">Theme</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {storedTheme === 'auto'
-              ? `Following your system — currently ${resolveTheme('auto')}.`
+            {(frost ? storedFrostTheme : storedTheme) === 'auto'
+              ? `Following your system — currently ${
+                  frost ? resolveFrostTheme('auto') : resolveTheme('auto')
+                }.`
               : 'Applied instantly, and before the page paints on your next visit.'}
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {THEMES.map((t) => (
-              <ThemeCard
-                key={t.id}
-                option={t}
-                selected={storedTheme === t.id}
-                onSelect={() => actions.setSetting('theme', t.id)}
-              />
-            ))}
+            {frost
+              ? FROST_THEMES.map((t) => (
+                  <ThemeCard
+                    key={t.id}
+                    option={t}
+                    selected={storedFrostTheme === t.id}
+                    onSelect={() => actions.setSetting('frostTheme', t.id)}
+                  />
+                ))
+              : THEMES.map((t) => (
+                  <ThemeCard
+                    key={t.id}
+                    option={t}
+                    selected={storedTheme === t.id}
+                    onSelect={() => actions.setSetting('theme', t.id)}
+                  />
+                ))}
           </div>
         </div>
+
+        {frost && (
+          <Field
+            label="Glass effects"
+            hint="Frosted, see-through cards, menus and navigation. Off gives solid surfaces"
+          >
+            <Toggle settingKey="frostGlass" defaultOn />
+          </Field>
+        )}
 
         <Field label="Accent color" hint="Buttons, links, focus rings, and progress bars">
           <div className="flex flex-col items-end gap-2.5">
