@@ -13,7 +13,13 @@ import { useDesktopApiStarting, useDesktopInitReady, useDocumentReady } from '@/
 import { queryClient, queryKeys } from '@/lib/query-client';
 import { useWarmStartupStaticData } from '@/lib/startup-static-data';
 import { useSetting } from '@/lib/app-store';
-import { applyAppearance, DEFAULT_ACCENT, DEFAULT_THEME, DEFAULT_UI_SCALE } from '@/lib/theme';
+import {
+  applyAppearance,
+  DEFAULT_FROST_THEME,
+  DEFAULT_THEME,
+  DEFAULT_UI_SCALE,
+  DEFAULT_UI_STYLE,
+} from '@/lib/theme';
 import {
   setPreviousLocation,
   markNavigatedInApp,
@@ -100,21 +106,38 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [pathname]);
 
   const theme = useSetting('theme', DEFAULT_THEME) as string;
-  const accent = useSetting('accent', DEFAULT_ACCENT) as string;
+  // Empty until one is picked: the interface style then supplies its own default.
+  const accent = useSetting('accent', '') as string;
   const uiScale = useSetting('uiScale', DEFAULT_UI_SCALE) as string;
   const reduceMotion = useSetting('reduceMotion', false) as boolean;
+  const uiStyle = useSetting('uiStyle', DEFAULT_UI_STYLE) as string;
+  const frostTheme = useSetting('frostTheme', DEFAULT_FROST_THEME) as string;
+  const frostGlass = useSetting('frostGlass', true) as boolean;
 
   // Settings > Appearance. The same values are already on <html> from the blocking init
   // script in the layout; this re-applies them when they change at runtime, and keeps
   // "Auto" in sync if the OS preference flips while the app is open.
   useEffect(() => {
-    const apply = () => applyAppearance({ theme, accent, uiScale, reduceMotion });
+    const apply = () =>
+      applyAppearance({
+        theme,
+        accent: accent || undefined,
+        uiScale,
+        reduceMotion,
+        uiStyle,
+        frostTheme,
+        frostGlass,
+      });
     apply();
-    if (String(theme).toLowerCase() !== 'auto') return;
+    const followsSystem =
+      uiStyle === 'frost'
+        ? String(frostTheme).toLowerCase() === 'auto'
+        : String(theme).toLowerCase() === 'auto';
+    if (!followsSystem) return;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
-  }, [theme, accent, uiScale, reduceMotion]);
+  }, [theme, accent, uiScale, reduceMotion, uiStyle, frostTheme, frostGlass]);
 
   // Global shortcuts: "g" then l/d/h/s jumps between sections.
   useEffect(() => {

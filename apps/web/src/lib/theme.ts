@@ -77,7 +77,118 @@ export const ACCENTS: Array<{ value: string; label: string }> = [
   { value: '#5ad1d1', label: 'Teal' },
   { value: '#7fffb5', label: 'Mint' },
   { value: '#c9d16a', label: 'Citron' },
+  { value: '#6b8f6b', label: 'Sage' },
 ];
+
+/**
+ * The interface style. Classic is the app's own look. Frost is a quieter, denser one:
+ * frosted-glass surfaces, near-black (or paper) layers, DM Sans with DM Mono labels, small
+ * corners and quick motion, on this app's own layout. Its tokens are in `styles.css` under
+ * `data-ui="frost"` (with the credit for where they come from), and its own palettes are
+ * picked by `data-frost` on `<html>`.
+ */
+export type UiStyle = 'classic' | 'frost';
+
+export const UI_STYLES: Array<{ id: UiStyle; label: string; hint: string }> = [
+  { id: 'classic', label: 'Classic', hint: 'The look you know: rounded, warm, roomy' },
+  { id: 'frost', label: 'Frost', hint: 'Frosted glass, compact and quiet' },
+];
+
+export const DEFAULT_UI_STYLE: UiStyle = 'classic';
+
+export function resolveUiStyle(value: unknown): UiStyle {
+  return value === 'frost' ? 'frost' : DEFAULT_UI_STYLE;
+}
+
+/** Frost's own palettes. Each has its own accent. */
+export type FrostThemeId = 'original' | 'dark' | 'midnight' | 'warm' | 'light' | 'auto';
+
+export type FrostThemeOption = Omit<ThemeOption, 'id'> & { id: FrostThemeId };
+
+export const FROST_THEMES: FrostThemeOption[] = [
+  {
+    id: 'original',
+    label: 'Original',
+    hint: 'Near-black, sage accent',
+    preview: { background: '#0c0c0c', surface: '#151515', foreground: '#f0efec' },
+  },
+  {
+    id: 'dark',
+    label: 'Dark',
+    hint: 'True black, brighter text',
+    preview: { background: '#000000', surface: '#111111', foreground: '#ffffff' },
+  },
+  {
+    id: 'midnight',
+    label: 'Midnight',
+    hint: 'Deep navy, indigo accent',
+    preview: { background: '#080c18', surface: '#101428', foreground: '#eeeef8' },
+  },
+  {
+    id: 'warm',
+    label: 'Warm',
+    hint: 'Brown and amber',
+    preview: { background: '#100e08', surface: '#1c1810', foreground: '#f5f0e0' },
+  },
+  {
+    id: 'light',
+    label: 'Light',
+    hint: 'Warm paper',
+    preview: { background: '#e2deda', surface: '#f5f2ec', foreground: '#080806' },
+  },
+  {
+    id: 'auto',
+    label: 'Auto',
+    hint: 'Original or Light, as your system',
+    preview: { background: '#0c0c0c', surface: '#f5f2ec', foreground: '#8a8880' },
+  },
+];
+
+export const DEFAULT_FROST_THEME: FrostThemeId = 'original';
+
+export function resolveFrostTheme(theme: unknown): Exclude<FrostThemeId, 'auto'> {
+  const id = String(theme || DEFAULT_FROST_THEME).toLowerCase();
+  if (id === 'auto') {
+    return typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'original'
+      : 'light';
+  }
+  return (FROST_THEMES.some((t) => t.id === id) ? id : DEFAULT_FROST_THEME) as Exclude<
+    FrostThemeId,
+    'auto'
+  >;
+}
+
+/** Each Frost palette's own accent: what the swatches show as selected until one is picked. */
+export const FROST_ACCENTS: Record<Exclude<FrostThemeId, 'auto'>, string> = {
+  original: '#6b8f6b',
+  dark: '#7aaa7a',
+  midnight: '#6a7ab8',
+  warm: '#c0902a',
+  light: '#3f9142',
+};
+
+/** Frost sets its body in 13px where Classic's is 14px: the same scale, a size smaller. */
+const FROST_TYPE_SCALE = 13 / 14;
+
+/**
+ * The accent picked, or none: Classic then uses its default, and Frost its palette's own
+ * accent from `styles.css`.
+ */
+export function effectiveAccent(accent: unknown, uiStyle: unknown): string | null {
+  if (isValidAccent(accent)) return accent;
+  return resolveUiStyle(uiStyle) === 'frost' ? null : DEFAULT_ACCENT;
+}
+
+/** The accent the swatches show as current. */
+export function shownAccent(accent: unknown, uiStyle: unknown, frostTheme: unknown): string {
+  return (
+    effectiveAccent(accent, uiStyle) ??
+    FROST_ACCENTS[resolveFrostTheme(frostTheme)] ??
+    DEFAULT_ACCENT
+  );
+}
 
 export const UI_SCALES = ['90%', '100%', '110%', '125%'] as const;
 export const DEFAULT_UI_SCALE = '100%';
@@ -129,25 +240,39 @@ export function resolveTheme(theme: string): Exclude<ThemeId, 'auto'> {
 
 export type AppearanceSettings = {
   theme: string;
-  accent: string;
+  /** The accent picked, or undefined for the interface style's default. */
+  accent: string | undefined;
   uiScale: string;
   reduceMotion: boolean;
+  uiStyle?: string;
+  /** Frost's palette (Frost style only). */
+  frostTheme?: string;
+  /** Frost's glass; false gives solid surfaces. */
+  frostGlass?: boolean;
 };
 
 /** Applies appearance to `<html>`. Mirrored by THEME_INIT_SCRIPT — keep the two in step. */
 export function applyAppearance(settings: AppearanceSettings) {
   const root = document.documentElement;
-  const resolved = resolveTheme(settings.theme);
+  const style = resolveUiStyle(settings.uiStyle);
+  const frost = style === 'frost' ? resolveFrostTheme(settings.frostTheme) : null;
+  // Frost keeps data-theme on the nearest Classic one, which is what dark/light checks read.
+  const resolved = frost ? (frost === 'light' ? 'light' : 'dark') : resolveTheme(settings.theme);
 
   root.setAttribute('data-theme', resolved);
+  root.setAttribute('data-ui', style);
+  if (frost) root.setAttribute('data-frost', frost);
+  else root.removeAttribute('data-frost');
+  root.classList.toggle('frost-off', frost !== null && settings.frostGlass === false);
   root.classList.toggle('dark', !LIGHT_THEMES.includes(resolved));
 
-  if (isValidAccent(settings.accent)) {
-    const fg = accentForeground(settings.accent);
-    root.style.setProperty('--primary', settings.accent);
+  const accent = effectiveAccent(settings.accent, settings.uiStyle);
+  if (isValidAccent(accent)) {
+    const fg = accentForeground(accent);
+    root.style.setProperty('--primary', accent);
     root.style.setProperty('--primary-foreground', fg);
-    root.style.setProperty('--ring', settings.accent);
-    root.style.setProperty('--sidebar-primary', settings.accent);
+    root.style.setProperty('--ring', accent);
+    root.style.setProperty('--sidebar-primary', accent);
     root.style.setProperty('--sidebar-primary-foreground', fg);
   } else {
     for (const prop of [
@@ -161,7 +286,9 @@ export function applyAppearance(settings: AppearanceSettings) {
     }
   }
 
-  root.style.fontSize = /^\d{2,3}%$/.test(settings.uiScale) ? settings.uiScale : '';
+  const scale = /^\d{2,3}%$/.test(settings.uiScale) ? parseInt(settings.uiScale, 10) : 100;
+  const size = frost ? scale * FROST_TYPE_SCALE : scale;
+  root.style.fontSize = size === 100 ? '' : `${Number(size.toFixed(3))}%`;
   root.classList.toggle('reduce-motion', settings.reduceMotion === true);
 }
 
@@ -176,9 +303,20 @@ var s=(JSON.parse(localStorage.getItem(${JSON.stringify(APP_STATE_STORAGE_KEY)})
 var L=${JSON.stringify(LIGHT_THEMES)},r=document.documentElement;
 var t=String(s.theme||${JSON.stringify(DEFAULT_THEME)}).toLowerCase();
 if(t==="auto"){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}
+var u=s.uiStyle==="frost"?"frost":"classic";
+if(u==="frost"){
+var M=${JSON.stringify(FROST_THEMES.map((theme) => theme.id))};
+var m=String(s.frostTheme||${JSON.stringify(DEFAULT_FROST_THEME)}).toLowerCase();
+if(m==="auto"){m=window.matchMedia("(prefers-color-scheme: dark)").matches?"original":"light";}
+if(M.indexOf(m)===-1){m=${JSON.stringify(DEFAULT_FROST_THEME)};}
+r.setAttribute("data-frost",m);t=m==="light"?"light":"dark";
+if(s.frostGlass===false){r.classList.add("frost-off");}
+}
 r.setAttribute("data-theme",t);
+r.setAttribute("data-ui",u);
 r.classList.toggle("dark",L.indexOf(t)===-1);
 var a=s.accent;
+if(!(typeof a==="string"&&/^#[0-9a-f]{6}$/i.test(a))&&u==="classic"){a=${JSON.stringify(DEFAULT_ACCENT)};}
 if(typeof a==="string"&&/^#[0-9a-f]{6}$/i.test(a)){
 var n=parseInt(a.slice(1),16);
 var c=[(n>>16)&255,(n>>8)&255,n&255].map(function(v){v=v/255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});
@@ -186,6 +324,8 @@ var f=(0.2126*c[0]+0.7152*c[1]+0.0722*c[2])>${ACCENT_LUMINANCE_PIVOT}?${JSON.str
 r.style.setProperty("--primary",a);r.style.setProperty("--primary-foreground",f);
 r.style.setProperty("--ring",a);r.style.setProperty("--sidebar-primary",a);r.style.setProperty("--sidebar-primary-foreground",f);
 }
-if(typeof s.uiScale==="string"&&/^[0-9]{2,3}%$/.test(s.uiScale)){r.style.fontSize=s.uiScale;}
+var z=typeof s.uiScale==="string"&&/^[0-9]{2,3}%$/.test(s.uiScale)?parseInt(s.uiScale,10):100;
+if(u==="frost"){z=z*${FROST_TYPE_SCALE};}
+if(z!==100){r.style.fontSize=Number(z.toFixed(3))+"%";}
 if(s.reduceMotion===true){r.classList.add("reduce-motion");}
 }catch(e){}})();`;

@@ -410,7 +410,7 @@ export function ReaderPanel() {
 
       <Panel
         title="Page translation"
-        subtitle="Your own DeepL or LibreTranslate service for Translate page"
+        subtitle="How Translate page reads and translates speech bubbles"
       >
         <TranslationService />
       </Panel>

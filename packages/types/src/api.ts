@@ -845,13 +845,25 @@ export interface TrackerSyncResult {
 /** Whether pages can be translated for this reader, and with which service. */
 export interface TranslateStatus {
   enabled: boolean;
-  provider: TranslateProvider | null;
-  /** Whose service answers: the reader's own saved one, or the host's. Older servers omit it. */
-  origin?: 'account' | 'server' | null;
+  /** 'local': this server's own models (English only). */
+  provider: TranslateProvider | 'local' | null;
+  /** Whose service answers: the reader's own saved one, the host's, or this server's own
+   * models. Older servers omit it. */
+  origin?: 'account' | 'server' | 'local' | null;
   /** Whether the host set a service of its own. Older servers omit it. */
   server_configured?: boolean;
   source: 'ja';
 }
+
+/** Local translation's models on the server (manga-ocr and Opus-MT). */
+export type LocalTranslationStatus =
+  | { enabled: false }
+  | ({ enabled: true; size: number; targets: readonly string[] } & (
+      | { state: 'missing' }
+      | { state: 'downloading'; downloaded: number; total: number }
+      | { state: 'ready' }
+      | { state: 'error'; message: string }
+    ));
 
 /** The reader's own translation service. The API key is never sent back: only `has_key`. */
 export interface TranslateSettings {

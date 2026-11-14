@@ -17,6 +17,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource/dm-mono": "^5.3.0",
     "@hookform/resolvers": "^7.0.2",
     "@projekt-manga/api-client": "*",
     "@projekt-manga/schemas": "*",

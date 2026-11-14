@@ -44,7 +44,7 @@ const libre = (body: Sent) => ({
 });
 
 describe('page translation', () => {
-  it('reports that translation is off until the host sets it up', async () => {
+  it('reports that translation is off with no service and local translation turned off', async () => {
     const status = await request(app).get('/api/translate/status');
     expect(status.body.data).toEqual({
       enabled: false,

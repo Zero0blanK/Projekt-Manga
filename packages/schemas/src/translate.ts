@@ -25,6 +25,29 @@ export const translateBodySchema = z
   .strict();
 export type TranslateBody = z.infer<typeof translateBodySchema>;
 
+/** A bubble image is cropped and downscaled on the device; the model reads it at 224px. */
+export const TRANSLATE_READ_MAX_IMAGE_BYTES = 256 * 1024;
+
+/**
+ * One page's speech bubbles, cropped on the device, for the server to read the Japanese in
+ * (local translation's manga-ocr). PNG, JPEG or WebP, base64.
+ */
+export const translateReadBodySchema = z
+  .object({
+    images: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(Math.ceil(TRANSLATE_READ_MAX_IMAGE_BYTES / 3) * 4)
+          .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+      )
+      .min(1)
+      .max(60),
+  })
+  .strict();
+export type TranslateReadBody = z.infer<typeof translateReadBodySchema>;
+
 export const translateProviders = ['libretranslate', 'deepl'] as const;
 export const translateProviderSchema = z.enum(translateProviders);
 export type TranslateProvider = z.infer<typeof translateProviderSchema>;

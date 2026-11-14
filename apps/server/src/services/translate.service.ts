@@ -3,6 +3,8 @@ import { AppError, ServiceUnavailableError, UpstreamError } from '../utils/custo
 import { guardedFetch } from '../utils/guardedFetch.js';
 import { UnsafeUrlError, assertPublicHttpUrl } from '../utils/ssrfGuard.js';
 import translationSettings from './translationSetting.service.js';
+import localTranslation from './localTranslation.service.js';
+import { localTranslationEnabled } from './translationModels.service.js';
 
 /**
  * Reader › Translate page. The device reads the Japanese text off the page (OCR in the
@@ -16,6 +18,9 @@ import translationSettings from './translationSetting.service.js';
  * TRANSLATE_ALLOW_PRIVATE_HOSTS=true (the desktop app does, since its reader is its host).
  * Redirects are refused so the key never follows one, and errors name the service's
  * status only.
+ *
+ * With neither, English is translated on this server itself (localTranslation.service.ts),
+ * unless the host turned that off with LOCAL_TRANSLATION=off.
  */
 
 const TIMEOUT_MS = 20_000;
@@ -35,12 +40,15 @@ const DEEPL_TARGETS: Partial<Record<TranslateTarget, string>> = {
 type Provider = 'libretranslate' | 'deepl';
 
 interface Config {
-  provider: Provider;
+  provider: Provider | 'local';
   url: string;
   key?: string;
-  /** Where it came from: the reader's own settings, or the host's environment. */
-  origin: 'account' | 'server';
+  /** Where it came from: the reader's own settings, the host's environment, or this server's
+   * own models. */
+  origin: 'account' | 'server' | 'local';
 }
+
+const LOCAL: Config = { provider: 'local', url: 'local', origin: 'local' };
 
 function complete(
   provider: Provider | undefined,
@@ -70,7 +78,7 @@ function serverConfig(): Config | null {
 async function config(user_id: string | null): Promise<Config | null> {
   const saved = await translationSettings.resolve(user_id);
   const own = saved && complete(saved.provider, saved.url ?? undefined, saved.key, 'account');
-  return own ?? serverConfig();
+  return own ?? serverConfig() ?? (localTranslationEnabled() ? LOCAL : null);
 }
 
 /** Sends to a reader-supplied address only with the public-address checks. */
@@ -125,6 +133,11 @@ function remember(key: string, value: string) {
   if (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
 }
 
+/** Reading bubbles (local OCR) is limited like translating, counted on its own. */
+export function checkReadRate(identity: string) {
+  checkRate(`read:${identity}`);
+}
+
 /** For tests: forget the rate limit and the cached translations. */
 export function resetTranslateState() {
   recent.clear();
@@ -138,6 +151,13 @@ function endpoint(base: string, path: string): URL {
 }
 
 async function call(service: Config, texts: string[], target: TranslateTarget): Promise<string[]> {
+  if (service.provider === 'local') {
+    if (target !== 'en')
+      throw new ServiceUnavailableError(
+        'Translation on this computer is English only. For other languages, add DeepL or LibreTranslate in Settings › Reader › Page translation',
+      );
+    return localTranslation.translate(texts);
+  }
   const deepl = service.provider === 'deepl';
   const url = endpoint(service.url, deepl ? '/v2/translate' : '/translate');
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };

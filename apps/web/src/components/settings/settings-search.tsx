@@ -84,6 +84,7 @@ const groups: Array<{ section: SectionId; description: string; labels: string[] 
       'Translate pages into',
       'Page translation',
       'Translation API key',
+      'Translate on this computer',
       'Crop borders',
       'Split wide pages',
       'Show page number',

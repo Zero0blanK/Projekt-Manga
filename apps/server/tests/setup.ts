@@ -10,6 +10,9 @@ vi.mock('../src/configs/prisma.config.js', () => ({ default: prismaMock }));
 
 beforeEach(() => {
   resetPrismaMock(prismaMock);
+  // Never a real model download (about 230 MB from Hugging Face): local translation is off
+  // unless a test turns it on with its own fake models (localTranslation.test.ts).
+  process.env.LOCAL_TRANSLATION = 'off';
   // Never the reader's own Suwayomi connection beside their database: no test may reach a
   // real server. suwayomi.test.ts points this at its own temp file.
   setSuwayomiSettingsFileForTests(path.join(os.tmpdir(), 'pm-no-suwayomi', 'suwayomi.json'));

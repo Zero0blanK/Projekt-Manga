@@ -12,6 +12,9 @@ vi.mock('@projekt-manga/api-client', () => ({
   getTranslateStatus: (...args: unknown[]) => getTranslateStatus(...args),
   saveTranslateSettings: (...args: unknown[]) => saveTranslateSettings(...args),
   removeTranslateSettings: (...args: unknown[]) => removeTranslateSettings(...args),
+  // A server from before local translation: the card stays hidden.
+  getLocalTranslationStatus: vi.fn(async () => ({ enabled: false })),
+  downloadLocalTranslation: vi.fn(),
 }));
 vi.mock('@/lib/page-translation', () => ({ forgetTranslationStatus: vi.fn() }));
 
