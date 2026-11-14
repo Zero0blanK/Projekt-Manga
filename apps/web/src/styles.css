@@ -688,7 +688,7 @@ html[data-skip-splash] .splash-root {
    components here.
    --------------------------------------------------------------------------------------- */
 
-/* Defined for every style, so Settings can preview Frost from Classic too. */
+/* Frost's fonts. */
 :root {
   --font-frost-sans: 'DM Sans Variable', 'DM Sans';
   --font-frost-mono: 'DM Mono', 'Fira Mono';
@@ -910,11 +910,6 @@ html[data-skip-splash] .splash-root {
 :root[data-ui='frost'] .uppercase {
   font-family: var(--font-frost-mono), ui-monospace, monospace;
   letter-spacing: 0.1em;
-}
-/* Settings draws Classic's preview card in Classic's type, whichever style is on. */
-:root[data-ui='frost'] .ui-classic-preview .uppercase {
-  font-family: inherit;
-  letter-spacing: 0.05em;
 }
 
 /* Thin scrollbars that stay out of sight. */

@@ -74,8 +74,7 @@ function ThemeCard({
   );
 }
 
-/** A sketch of each interface style's shape (corner size, title type, label type), drawn in
- * the current colours so it reads as a style rather than another theme. */
+/** An interface style: its name and what it looks like, in words. */
 function UiStyleCard({
   option,
   selected,
@@ -85,55 +84,24 @@ function UiStyleCard({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const frost = option.id === 'frost';
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`overflow-hidden rounded-xl border text-left transition ${
+      className={`relative rounded-xl border px-3 py-2.5 text-left transition ${
         selected ? 'border-primary ring-1 ring-primary/40' : 'border-border/60 hover:border-border'
       }`}
     >
-      <div
-        className={`relative flex h-20 items-center gap-2.5 bg-muted/40 px-3 ${frost ? '' : 'ui-classic-preview'}`}
-        aria-hidden
-      >
-        <div
-          className={`h-12 w-8 shrink-0 bg-primary/70 ${frost ? 'rounded-[3px]' : 'rounded-lg'}`}
-        />
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <div
-            className={`truncate text-sm text-foreground ${
-              frost
-                ? 'font-[family-name:var(--font-frost-sans)] font-semibold tracking-tight'
-                : 'font-[family-name:var(--font-display)]'
-            }`}
-          >
-            Title
-          </div>
-          <div
-            className={`truncate text-[10px] uppercase text-muted-foreground ${
-              frost
-                ? 'font-[family-name:var(--font-frost-mono)] tracking-[0.08em]'
-                : 'tracking-wider'
-            }`}
-          >
-            Chapter 12
-          </div>
-        </div>
-        {selected && (
-          <span className="absolute right-1.5 top-1.5 grid h-4 w-4 place-items-center rounded-full bg-primary text-primary-foreground">
-            <Check className="h-2.5 w-2.5" />
-          </span>
-        )}
+      <div className={`text-sm font-medium ${selected ? 'text-primary' : 'text-foreground'}`}>
+        {option.label}
       </div>
-      <div className="border-t border-border/50 bg-background/60 px-2.5 py-1.5">
-        <div className={`text-xs font-medium ${selected ? 'text-primary' : 'text-foreground'}`}>
-          {option.label}
-        </div>
-        <div className="text-xs text-muted-foreground">{option.hint}</div>
-      </div>
+      <div className="mt-0.5 pr-5 text-xs text-muted-foreground">{option.hint}</div>
+      {selected && (
+        <span className="absolute right-2 top-2 grid h-4 w-4 place-items-center rounded-full bg-primary text-primary-foreground">
+          <Check className="h-2.5 w-2.5" />
+        </span>
+      )}
     </button>
   );
 }
