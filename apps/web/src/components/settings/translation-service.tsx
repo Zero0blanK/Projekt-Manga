@@ -36,8 +36,8 @@ const INPUT =
 const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 
 /**
- * Translation on this server: manga-ocr reads the bubbles and Opus-MT translates them to
- * English, with models downloaded once (about 230 MB). Shows whether they are in, and the
+ * Translation on this server: manga-ocr reads the bubbles and FuguMT translates them to
+ * English, with models downloaded once (about 265 MB). Shows whether they are in, and the
  * download while it runs.
  */
 function LocalTranslation({ active }: { active: boolean }) {
@@ -81,7 +81,7 @@ function LocalTranslation({ active }: { active: boolean }) {
         <div>
           <div className="text-sm font-medium text-foreground">Translate on this computer</div>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            manga-ocr reads the speech bubbles and Opus-MT translates them into English, on this
+            manga-ocr reads the speech bubbles and FuguMT translates them into English, on this
             server. No account or key, and nothing goes to another service.
             {active ? ' In use for English.' : ''}
           </p>
@@ -90,6 +90,9 @@ function LocalTranslation({ active }: { active: boolean }) {
           <ActionButton onClick={download}>Download ({megabytes(local.size)})</ActionButton>
         )}
       </div>
+      <p className="text-xs text-muted-foreground">
+        Models: manga-ocr by kha-white (Apache-2.0) and FuguMT by staka (CC BY-SA 4.0).
+      </p>
       {local.state === 'ready' && (
         <p className="text-xs text-muted-foreground">Models downloaded and ready.</p>
       )}

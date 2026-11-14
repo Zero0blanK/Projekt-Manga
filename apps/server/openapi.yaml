@@ -271,7 +271,7 @@ paths:
   /translate/local:
     get:
       tags: [Reader]
-      summary: Local translation's models (manga-ocr and Opus-MT) on this server
+      summary: Local translation's models (manga-ocr and FuguMT) on this server
       description: >-
         `{ enabled: false }` when the host set LOCAL_TRANSLATION=off. Otherwise `{ enabled:
         true, state: missing | downloading | ready | error, size, targets: [en] }`, with
@@ -285,7 +285,7 @@ paths:
       tags: [Reader]
       summary: Start (or join) downloading local translation's models
       description: >-
-        About 230 MB from Hugging Face, each file pinned to a revision and checked against
+        About 265 MB from Hugging Face, each file pinned to a revision and checked against
         its SHA-256, into TRANSLATION_MODELS_DIR.
       responses:
         '200':

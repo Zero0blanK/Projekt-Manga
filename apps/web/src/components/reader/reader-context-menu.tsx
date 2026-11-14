@@ -19,10 +19,13 @@ import {
   READER_TRANSLATE_TARGET,
   pageTranslation,
   showOriginal,
+  stopTranslateAll,
+  translateAll,
   translatePage,
   translateTargetFor,
   translationAvailable,
   usePageTranslation,
+  useTranslateAll,
 } from '@/lib/page-translation';
 
 /**
@@ -68,83 +71,134 @@ export function ReaderContextMenu({
     const result = pageTranslation(imageUrl);
     if (result?.status === 'error') toast({ variant: 'destructive', description: result.message });
   };
+  const all = useTranslateAll();
+  const translateEveryPage = async () => {
+    const urls = pageUrls.filter(Boolean);
+    if (urls.length === 0) return;
+    if (!(await translationAvailable())) {
+      toast({
+        variant: 'destructive',
+        description: "Translation isn't set up on this server (see TRANSLATE_PROVIDER).",
+      });
+      return;
+    }
+    await translateAll(urls, translateTargetFor(targetLanguage));
+  };
   return (
-    <ContextMenu modal={false}>
-      <ContextMenuTrigger asChild>
-        <div
-          className="contents"
-          onContextMenu={(event) => {
-            const clicked = (event.target as Element).closest<HTMLElement>('[data-page]');
-            const number = Number(clicked?.dataset.page);
-            setTarget(
-              Number.isInteger(number) && number > 0
-                ? {
-                    page: number,
-                    // The page's own URL, not an enhanced copy's blob: URL.
-                    url:
-                      clicked?.dataset.imageUrl ??
-                      clicked?.querySelector('img')?.getAttribute('src') ??
-                      undefined,
-                  }
-                : { page },
-            );
-          }}
-        >
-          {children}
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent className="w-52">
-        <ContextMenuItem disabled={!imageUrl} onSelect={() => void actions.save()}>
-          <Download className="mr-2 h-4 w-4" /> Save page {target.page}
-        </ContextMenuItem>
-        <ContextMenuItem disabled={!imageUrl} onSelect={() => void actions.copy()}>
-          <Copy className="mr-2 h-4 w-4" /> Copy image
-        </ContextMenuItem>
-        {actions.canShare && (
-          <ContextMenuItem disabled={!imageUrl} onSelect={() => void actions.share()}>
-            <Share2 className="mr-2 h-4 w-4" /> Share
-          </ContextMenuItem>
-        )}
-        {onSetCover && (
-          <ContextMenuItem disabled={!imageUrl} onSelect={() => imageUrl && onSetCover(imageUrl)}>
-            <ImageUp className="mr-2 h-4 w-4" /> Set as cover
-          </ContextMenuItem>
-        )}
-        {translation?.status === 'done' && translation.shown ? (
-          <ContextMenuItem onSelect={() => imageUrl && showOriginal(imageUrl)}>
-            <Languages className="mr-2 h-4 w-4" /> Show original
-          </ContextMenuItem>
-        ) : (
-          <ContextMenuItem
-            disabled={!imageUrl || translation?.status === 'working'}
-            onSelect={() => void translate()}
+    <>
+      <ContextMenu modal={false}>
+        <ContextMenuTrigger asChild>
+          <div
+            className="contents"
+            onContextMenu={(event) => {
+              const clicked = (event.target as Element).closest<HTMLElement>('[data-page]');
+              const number = Number(clicked?.dataset.page);
+              setTarget(
+                Number.isInteger(number) && number > 0
+                  ? {
+                      page: number,
+                      // The page's own URL, not an enhanced copy's blob: URL.
+                      url:
+                        clicked?.dataset.imageUrl ??
+                        clicked?.querySelector('img')?.getAttribute('src') ??
+                        undefined,
+                    }
+                  : { page },
+              );
+            }}
           >
-            <Languages className="mr-2 h-4 w-4" />
-            {translation?.status === 'working'
-              ? 'Translating…'
-              : translation?.status === 'done'
-                ? 'Show translation'
-                : 'Translate page'}
+            {children}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-52">
+          <ContextMenuItem disabled={!imageUrl} onSelect={() => void actions.save()}>
+            <Download className="mr-2 h-4 w-4" /> Save page {target.page}
           </ContextMenuItem>
-        )}
-        {translation?.status === 'error' && (
-          <p role="status" className="px-2 pb-1 text-xs text-muted-foreground">
-            {translation.message}
-          </p>
-        )}
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={toggleFullscreen}>
-          <Expand className="mr-2 h-4 w-4" /> Fullscreen
-        </ContextMenuItem>
-        {alwaysOnTop.available && (
-          <ContextMenuCheckboxItem checked={alwaysOnTop.onTop} onSelect={alwaysOnTop.toggle}>
-            Keep window on top
-          </ContextMenuCheckboxItem>
-        )}
-        <ContextMenuItem onSelect={openReaderShortcuts}>
-          <Keyboard className="mr-2 h-4 w-4" /> Keyboard shortcuts
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+          <ContextMenuItem disabled={!imageUrl} onSelect={() => void actions.copy()}>
+            <Copy className="mr-2 h-4 w-4" /> Copy image
+          </ContextMenuItem>
+          {actions.canShare && (
+            <ContextMenuItem disabled={!imageUrl} onSelect={() => void actions.share()}>
+              <Share2 className="mr-2 h-4 w-4" /> Share
+            </ContextMenuItem>
+          )}
+          {onSetCover && (
+            <ContextMenuItem disabled={!imageUrl} onSelect={() => imageUrl && onSetCover(imageUrl)}>
+              <ImageUp className="mr-2 h-4 w-4" /> Set as cover
+            </ContextMenuItem>
+          )}
+          {translation?.status === 'done' && translation.shown ? (
+            <ContextMenuItem onSelect={() => imageUrl && showOriginal(imageUrl)}>
+              <Languages className="mr-2 h-4 w-4" /> Show original
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem
+              disabled={!imageUrl || translation?.status === 'working'}
+              onSelect={() => void translate()}
+            >
+              <Languages className="mr-2 h-4 w-4" />
+              {translation?.status === 'working'
+                ? 'Translating…'
+                : translation?.status === 'done'
+                  ? 'Show translation'
+                  : 'Translate page'}
+            </ContextMenuItem>
+          )}
+          {all.status === 'running' ? (
+            <ContextMenuItem onSelect={stopTranslateAll}>
+              <Languages className="mr-2 h-4 w-4" /> Stop translating ({all.done}/{all.total})
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem
+              disabled={pageUrls.length === 0}
+              onSelect={() => void translateEveryPage()}
+            >
+              <Languages className="mr-2 h-4 w-4" /> Translate all pages
+            </ContextMenuItem>
+          )}
+          {translation?.status === 'error' && (
+            <p role="status" className="px-2 pb-1 text-xs text-muted-foreground">
+              {translation.message}
+            </p>
+          )}
+          <ContextMenuSeparator />
+          <ContextMenuItem onSelect={toggleFullscreen}>
+            <Expand className="mr-2 h-4 w-4" /> Fullscreen
+          </ContextMenuItem>
+          {alwaysOnTop.available && (
+            <ContextMenuCheckboxItem checked={alwaysOnTop.onTop} onSelect={alwaysOnTop.toggle}>
+              Keep window on top
+            </ContextMenuCheckboxItem>
+          )}
+          <ContextMenuItem onSelect={openReaderShortcuts}>
+            <Keyboard className="mr-2 h-4 w-4" /> Keyboard shortcuts
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+      <TranslateAllStatus />
+    </>
+  );
+}
+
+/** Translate all's progress, with a way to stop it, and how it went once it's done. */
+function TranslateAllStatus() {
+  const all = useTranslateAll();
+  if (all.status === 'idle') return null;
+  return (
+    <div
+      role="status"
+      className="fixed bottom-16 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full bg-black/85 px-4 py-1.5 text-xs text-white shadow-lg"
+    >
+      <span>
+        {all.status === 'running'
+          ? `Translating pages: ${all.done} of ${all.total}`
+          : all.failed === 0
+            ? `Translated all ${all.total} pages`
+            : `Translated ${all.translated} of ${all.total} pages; ${all.failed} had no text or failed`}
+      </span>
+      <button type="button" onClick={stopTranslateAll} className="font-medium underline">
+        {all.status === 'running' ? 'Stop' : 'Close'}
+      </button>
+    </div>
   );
 }

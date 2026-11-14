@@ -6,7 +6,9 @@ import request from 'supertest';
 import app from '../src/app.js';
 import localTranslation, {
   detokenise,
+  prepareForTranslation,
   tidyRecognisedText,
+  tidyTranslation,
 } from '../src/services/localTranslation.service.js';
 import {
   MODEL_FILES,
@@ -128,5 +130,20 @@ describe('local translation', () => {
       .post('/api/translate/read')
       .send({ images: [PNG] });
     expect(res.status).toBe(503);
+  });
+});
+
+describe('around the translator', () => {
+  it("gives it manga-ocr's text with ordinary punctuation", () => {
+    expect(prepareForTranslation('ちょっと待って！')).toBe('ちょっと待って!');
+    expect(prepareForTranslation('え．．．？')).toBe('え…?');
+    expect(prepareForTranslation('おー赤神  これから')).toBe('おー赤神 これから');
+  });
+
+  it('capitalises what it writes in lower case', () => {
+    expect(tidyTranslation("wait a minute! you can't run. i see")).toBe(
+      "Wait a minute! You can't run. I see",
+    );
+    expect(tidyTranslation('Thank you.')).toBe('Thank you.');
   });
 });

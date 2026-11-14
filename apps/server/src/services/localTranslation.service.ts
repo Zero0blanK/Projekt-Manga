@@ -5,7 +5,7 @@ import {
   MODEL_FILES,
   MANGA_OCR_REPO,
   MANGA_OCR_VOCAB_REPO,
-  OPUS_MT_REPO,
+  TRANSLATOR_REPO,
   TOTAL_BYTES,
   ensureModels,
   localPath,
@@ -16,11 +16,11 @@ import {
 
 /**
  * Local page translation, on this server: manga-ocr reads the Japanese in each speech
- * bubble the device cropped out, and Opus-MT translates it to English. Nothing leaves the
+ * bubble the device cropped out, and FuguMT translates it to English. Nothing leaves the
  * server. The models download on first use (translationModels.service.ts).
  *
  * manga-ocr runs on ONNX Runtime directly (a vision encoder, then a character decoder
- * stepped greedily: bubbles are short). Opus-MT runs through Transformers.js, one line at a
+ * stepped greedily: bubbles are short). FuguMT runs through Transformers.js, one line at a
  * time: batched lines are padded, and the padded ones ran on past their end. Both libraries
  * are imported on first use, so a server that never translates doesn't load them. One job
  * runs at a time: inference already uses every core.
@@ -92,7 +92,7 @@ function loadTranslator(): Promise<Translator> {
     env.allowRemoteModels = false;
     env.allowLocalModels = true;
     env.localModelPath = `${modelsDir()}/`;
-    const translate = await pipeline('translation', OPUS_MT_REPO, { dtype: 'q8' });
+    const translate = await pipeline('translation', TRANSLATOR_REPO, { dtype: 'q8' });
     return translate as unknown as Translator;
   })().catch((error) => {
     translator = null;
@@ -184,6 +184,29 @@ async function requireModels(): Promise<void> {
   throw error;
 }
 
+/**
+ * A bubble's text as the translator reads it best: manga-ocr writes ASCII punctuation in
+ * full width (！？．), which is not how the text it learned from is written.
+ */
+export function prepareForTranslation(text: string): string {
+  return text
+    .replace(/[！-～]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+    .replace(/\.{2,}|・{2,}/g, '…')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** FuguMT writes in lower case: sentences start with a capital, and "i" is "I". */
+export function tidyTranslation(text: string): string {
+  return text
+    .trim()
+    .replace(/\bi\b/g, 'I')
+    .replace(
+      /(^|[.!?…]\s+)([a-z])/g,
+      (_, start: string, letter: string) => start + letter.toUpperCase(),
+    );
+}
+
 export function decodeImages(images: readonly string[]): Buffer[] {
   return images.map((data) => {
     const bytes = Buffer.from(data, 'base64');
@@ -230,8 +253,11 @@ const localTranslation = {
       const translate = await loadTranslator();
       const out: string[] = [];
       for (const text of texts) {
-        const [result] = await translate(text, { no_repeat_ngram_size: 3, max_new_tokens: 256 });
-        out.push(result?.translation_text?.trim() ?? '');
+        const [result] = await translate(prepareForTranslation(text), {
+          no_repeat_ngram_size: 3,
+          max_new_tokens: 256,
+        });
+        out.push(tidyTranslation(result?.translation_text ?? ''));
       }
       return out;
     });

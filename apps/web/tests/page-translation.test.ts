@@ -238,3 +238,29 @@ describe('translating a page', () => {
     expect(pageTranslation('old-server.png')).toMatchObject({ status: 'done' });
   });
 });
+
+describe('translating every page', () => {
+  it('translates each page in turn and says how it went', async () => {
+    readPageText.mockImplementation(async (url: string) =>
+      url === 'blank.png' ? [] : [{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }],
+    );
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    const { translateAll } = await import('@/lib/page-translation');
+    await translateAll(['one.png', 'blank.png', 'three.png'], 'en');
+    expect(
+      ['one.png', 'blank.png', 'three.png'].map((url) => pageTranslation(url)?.status),
+    ).toEqual(['done', 'error', 'done']);
+  });
+
+  it('stops after the page in hand', async () => {
+    const { translateAll, stopTranslateAll } = await import('@/lib/page-translation');
+    readPageText.mockImplementation(async () => {
+      stopTranslateAll();
+      return [{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }];
+    });
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    await translateAll(['first.png', 'second.png'], 'en');
+    expect(pageTranslation('first.png')?.status).toBe('done');
+    expect(pageTranslation('second.png')).toBeNull();
+  });
+});

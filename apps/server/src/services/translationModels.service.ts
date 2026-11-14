@@ -10,7 +10,8 @@ import { pipeline } from 'node:stream/promises';
  *
  * - manga-ocr (kha-white, Apache-2.0), Japanese text recognition made for manga speech
  *   bubbles: the quantized ONNX export from onnx-community, and the original vocabulary.
- * - Opus-MT Japanese→English (Helsinki-NLP, via Xenova's ONNX export for Transformers.js).
+ * - FuguMT Japanese→English (staka/fugumt-ja-en, CC-BY-SA-4.0, a Marian model trained on
+ *   far more Japanese than Opus-MT), via Kadonox's ONNX export for Transformers.js.
  *
  * Every file is pinned to a revision and checked against its SHA-256 before it is used, so
  * the server only ever runs the exact files listed here, whatever the host serves later.
@@ -30,11 +31,15 @@ interface ModelFile {
 
 const MANGA_OCR_REVISION = 'f9023406bb2f6b17df67bc4a327c56ecd20611f0';
 const MANGA_OCR_VOCAB_REVISION = 'aa6573bd10b0d446cbf622e29c3e084914df9741';
-const OPUS_MT_REVISION = '1a906cfaaf7c8f4193f67f5885c082aa6dbd9d16';
+const TRANSLATOR_REVISION = '9b09cd7e6263223ac4a5988da1d881ef02b55be8';
 
 export const MANGA_OCR_REPO = 'onnx-community/manga-ocr-base-ONNX';
 export const MANGA_OCR_VOCAB_REPO = 'kha-white/manga-ocr-base';
-export const OPUS_MT_REPO = 'Xenova/opus-mt-ja-en';
+export const TRANSLATOR_REPO = 'Kadonox/fugumt-ja-en-onnx';
+
+/** Models an earlier version downloaded and no longer uses: removed once the current ones are
+ * in, so an update doesn't leave them taking up the disk. */
+export const RETIRED_REPOS = ['Xenova/opus-mt-ja-en'];
 
 export const MODEL_FILES: readonly ModelFile[] = [
   {
@@ -60,16 +65,16 @@ export const MODEL_FILES: readonly ModelFile[] = [
   },
   ...(
     [
-      ['config.json', 1376, 'd35476f1d3858883feec67e5a63ddc387452a70fda9c8e26db99c71aa2ad6a34'],
+      ['config.json', 1045, '24e201e35f20db82adcd87924d59398bf986560a46532d01fb2ae19cf606f17f'],
       [
         'generation_config.json',
-        293,
-        'ed1bc2193210ca2a6dc9c144ea789936fed8a27113e01010d8e591f45f238912',
+        289,
+        '23a8b82900404c37f3f85170507dbc929dc3a6be1ba24fe340d9336d1cf841da',
       ],
       [
         'tokenizer.json',
-        5991485,
-        '770ff2855437cf44f1f110550c5a9dca773253a167aeac36076b2073d259aa3b',
+        3169716,
+        'e0bb9bef12bb06c118b2bcf7e6ec5975a0dfa3d89191df6cc331767b1643af78',
       ],
       [
         'tokenizer_config.json',
@@ -78,18 +83,18 @@ export const MODEL_FILES: readonly ModelFile[] = [
       ],
       [
         'onnx/encoder_model_quantized.onnx',
-        50705822,
-        '345262b16bcdda1468b0f3380c112b7ce79f731176b4b1d21f6edd5b2ae0d25c',
+        35979078,
+        'caea82d93435b76cd01edcb9dfb6dbfce82bde435bdc739a198a298014884b06',
       ],
       [
         'onnx/decoder_model_merged_quantized.onnx',
-        58001744,
-        'b304d0014e4e1575437b6af95467b6cb54405d923732d8359113bd6dbbee93c0',
+        108678224,
+        'faf90e39de2b027461f09297f7edc83734c24c00bcfb1482c7ec1ca77e84a989',
       ],
     ] as const
   ).map(([file, bytes, sha256]) => ({
-    repo: OPUS_MT_REPO,
-    revision: OPUS_MT_REVISION,
+    repo: TRANSLATOR_REPO,
+    revision: TRANSLATOR_REVISION,
     path: file,
     bytes,
     sha256,
@@ -181,6 +186,16 @@ async function downloadAll(): Promise<void> {
     });
   }
   verified = true;
+  await removeRetiredModels();
+}
+
+/** Best effort: a leftover folder only costs disk space. */
+async function removeRetiredModels(): Promise<void> {
+  for (const repo of RETIRED_REPOS) {
+    await fs
+      .rm(path.join(modelsDir(), ...repo.split('/')), { recursive: true, force: true })
+      .catch(() => undefined);
+  }
 }
 
 /** Starts the download if it isn't running or done; resolves when the models are ready. */
@@ -203,6 +218,7 @@ export async function modelsState(): Promise<ModelsState> {
   const present = await Promise.all(MODEL_FILES.map(hasFile));
   if (present.every(Boolean)) {
     verified = true;
+    void removeRetiredModels();
     return { state: 'ready' };
   }
   if (lastError) return { state: 'error', message: lastError };
