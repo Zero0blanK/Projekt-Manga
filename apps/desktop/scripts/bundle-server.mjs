@@ -44,6 +44,10 @@ export const EXTERNAL = {
   libsql: 'Native binary (.node), loaded by platform package name.',
   sharp: 'Native binary, and optional: the server degrades without it.',
   bcrypt: 'Native binary (.node).',
+  // Local page translation (services/localTranslation.service.ts), loaded on first use.
+  'onnxruntime-node': 'Native binary (.node and its DLLs), loaded by platform folder.',
+  '@huggingface/transformers':
+    'Loads onnxruntime-node and sharp at run time; stage-installer.mjs prunes what it ships.',
   // swagger-ui-express itself is bundled, so it shares the bundle's express: external, its
   // peer dependency on express would install a second copy of express and all its packages.
   'swagger-ui-dist': 'Serves its assets from its own folder (absolute-path.js uses __dirname).',

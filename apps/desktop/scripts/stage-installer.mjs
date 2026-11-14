@@ -264,6 +264,41 @@ console.log('[stage] server: installing production dependencies');
 run(npm, ['install', '--omit=dev', '--no-audit', '--no-fund'], serverOut);
 
 /**
+ * Local page translation's runtime, cut down to what this installer runs.
+ *
+ * onnxruntime-node ships its binaries for every platform (about 290 MB); only this one's
+ * stays. onnxruntime-web (about 140 MB) is a dependency of @huggingface/transformers, but
+ * its Node build already carries what it uses and never loads the package. The models
+ * themselves are not shipped: the server downloads them on first use.
+ */
+{
+  const modules = path.join(serverOut, 'node_modules');
+  const bins = path.join(modules, 'onnxruntime-node', 'bin', 'napi-v6');
+  if (fs.existsSync(bins)) {
+    for (const platform of fs.readdirSync(bins)) {
+      const platformDir = path.join(bins, platform);
+      if (platform !== process.platform) {
+        removeWithRetry(platformDir);
+        continue;
+      }
+      for (const arch of fs.readdirSync(platformDir))
+        if (arch !== process.arch) removeWithRetry(path.join(platformDir, arch));
+    }
+    if (!fs.existsSync(path.join(bins, process.platform, process.arch))) {
+      throw new Error(
+        `[stage] server: onnxruntime-node has no binary for ${process.platform}/${process.arch}`,
+      );
+    }
+  }
+  for (const unused of [
+    path.join(modules, 'onnxruntime-web'),
+    path.join(modules, '@huggingface', 'transformers', 'node_modules', 'onnxruntime-web'),
+  ])
+    if (fs.existsSync(unused)) removeWithRetry(unused);
+  console.log(`[stage] server: translation runtime kept for ${process.platform}/${process.arch}`);
+}
+
+/**
  * The generated Prisma client, copied from the server build.
  *
  * `@prisma/client` loads the client generated for this schema from node_modules/.prisma,
