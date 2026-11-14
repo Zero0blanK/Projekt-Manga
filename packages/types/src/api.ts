@@ -670,6 +670,8 @@ export interface FetchMangaUpdatesResult {
   thumbnail_url: string;
   /** Older servers omit this field; only true identifies a failed source check. */
   failed?: boolean;
+  /** Why the check failed, e.g. CHALLENGE_REQUIRED. Older servers omit it. */
+  errorCode?: string;
 }
 
 export interface CheckLibraryUpdatesResult {

@@ -10,6 +10,12 @@ vi.mock('@projekt-manga/api-client', () => ({
   triggerCacheSync: (...args: unknown[]) => triggerCacheSync(...args),
   getAllMangaLinks: (...args: unknown[]) => getAllMangaLinks(...args),
 }));
+const beforeCheckingSource = vi.fn((): Promise<unknown> | null => null);
+const passCheckForUpdate = vi.fn(async () => false);
+vi.mock('@/lib/source-check-queue', () => ({
+  beforeCheckingSource: (...args: unknown[]) => beforeCheckingSource(...(args as [])),
+  passCheckForUpdate: (...args: unknown[]) => passCheckForUpdate(...(args as [])),
+}));
 vi.mock('@/lib/notifications-store', () => ({
   invalidateRecentChapters: () => invalidateRecentChapters(),
 }));
@@ -182,6 +188,41 @@ describe('runLibraryUpdate', () => {
     expect(requestSignal?.aborted).toBe(true);
     expect(fetchSourceMangaUpdates).toHaveBeenCalledTimes(1);
     expect(isLibraryUpdateRunning()).toBe(false);
+  });
+
+  it("waits for a source's queued browser check before checking its titles", async () => {
+    let release: () => void = () => {};
+    beforeCheckingSource.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    fetchSourceMangaUpdates.mockResolvedValue({ newChapters: 0, failed: false });
+    const run = runLibraryUpdate(manga, { refreshCovers: false });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fetchSourceMangaUpdates).not.toHaveBeenCalled();
+    release();
+    await run;
+    expect(fetchSourceMangaUpdates).toHaveBeenCalledTimes(2);
+  });
+
+  it('passes a check met mid-update and tries the title again, instead of leaving it stale', async () => {
+    fetchSourceMangaUpdates
+      .mockResolvedValueOnce({ newChapters: 0, failed: true, errorCode: 'CHALLENGE_REQUIRED' })
+      .mockResolvedValue({ newChapters: 3, failed: false });
+    passCheckForUpdate.mockResolvedValueOnce(true);
+    const result = await runLibraryUpdate([manga[0]], { refreshCovers: false });
+    expect(passCheckForUpdate).toHaveBeenCalledWith('source-a', expect.any(AbortSignal));
+    expect(result).toMatchObject({ found: 3, failed: [] });
+  });
+
+  it('counts the title as failed when the check could not be passed', async () => {
+    fetchSourceMangaUpdates.mockResolvedValue({
+      newChapters: 0,
+      failed: true,
+      errorCode: 'CHALLENGE_REQUIRED',
+    });
+    const result = await runLibraryUpdate([manga[0]], { refreshCovers: false });
+    expect(fetchSourceMangaUpdates).toHaveBeenCalledTimes(1);
+    expect(result.failed).toEqual(['One']);
   });
 
   it('notifies the scheduler when each source is first dispatched', async () => {

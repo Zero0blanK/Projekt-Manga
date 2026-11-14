@@ -9,6 +9,8 @@ import {
 } from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
 import { invalidateRecentChapters } from '@/lib/notifications-store';
+import { CHALLENGE_REQUIRED } from '@/lib/source-browser';
+import { beforeCheckingSource, passCheckForUpdate } from '@/lib/source-check-queue';
 
 export type LibraryUpdateProgress = {
   done: number;
@@ -156,8 +158,29 @@ async function performLibraryUpdate(
       if (!startedSources.has(entry.source)) {
         startedSources.add(entry.source);
         options.onSourceStart?.(entry.source);
+        // A browser check queued for this source (start-up renews clearances that ran
+        // out) is passed first, so its titles aren't checked into the wall.
+        const waiting = beforeCheckingSource(entry.source, signal);
+        if (waiting) {
+          await waiting;
+          if (signal.aborted) {
+            cancelled = true;
+            break;
+          }
+        }
       }
-      const result = await fetchSourceMangaUpdates(entry.source, entry.slug, entry.id, signal);
+      let result = await fetchSourceMangaUpdates(entry.source, entry.slug, entry.id, signal);
+      // Met the check anyway (a clearance that lapsed mid-run): pass it, then try again
+      // once, instead of leaving the title stale until the next update.
+      if (
+        result.failed &&
+        result.errorCode === CHALLENGE_REQUIRED &&
+        !signal.aborted &&
+        (await passCheckForUpdate(entry.source, signal)) &&
+        !signal.aborted
+      ) {
+        result = await fetchSourceMangaUpdates(entry.source, entry.slug, entry.id, signal);
+      }
       if (signal.aborted) {
         cancelled = true;
         break;
