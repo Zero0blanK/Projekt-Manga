@@ -22,6 +22,7 @@ vi.mock('@/lib/extensions-store', () => ({
     ],
   }),
 }));
+vi.mock('@/components/settings/source-health-panel', () => ({ SourceHealthPanel: () => null }));
 vi.mock('@/components/settings/field-controls', () => ({
   Panel: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
   Field: ({ label, children }: { label: string; children: React.ReactNode }) => (
@@ -31,6 +32,10 @@ vi.mock('@/components/settings/field-controls', () => ({
     </div>
   ),
   Toggle: () => <button type="button" role="switch" aria-checked={false} />,
+  ActionButton: ({ children }: { children: React.ReactNode }) => (
+    <button type="button">{children}</button>
+  ),
+  LoadingBlock: () => null,
 }));
 
 const { ExtensionsPanel } = await import('@/components/settings/extensions-panel');

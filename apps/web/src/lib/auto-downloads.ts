@@ -8,7 +8,7 @@ import { getAppState, getSetting } from '@/lib/app-store';
 import { fetchDownloads } from '@/lib/shared-queries';
 
 /**
- * Settings keys for automatic downloads (Settings → Sync & Storage → Downloads).
+ * Settings keys for automatic downloads (Settings → Downloads).
  *
  * `autoDownloadNew`: 'off', 'all', or `category:<name>` — which titles get the chapters a
  * library update finds downloaded. Stored as one string because settings are primitives.

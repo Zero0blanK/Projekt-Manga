@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { getAllMangaLinks, type HistoryEntry } from '@projekt-manga/api-client';
 import type { Manga } from '@/lib/manga-data';
 import { useMangaLibrary, useLibraryState } from '@/lib/library-store';
-import { useAppState } from '@/lib/app-store';
+import { useAppState, useSetting } from '@/lib/app-store';
+import { SHOW_RECENTLY_UPDATED } from '@/lib/library-layout';
 import { filters, shelfOf as resolveShelf } from '@/components/library/constants';
 import { FilterPills } from '@/components/library/filter-pills';
 import { ViewToggle } from '@/components/library/view-toggle';
@@ -39,6 +40,7 @@ const unreadOf = (m: Manga) => Math.max(0, m.chapters - Math.round((m.progress ?
 
 export function LibraryPageClient() {
   const router = useRouter();
+  const showRecentlyUpdated = useSetting(SHOW_RECENTLY_UPDATED, false) === true;
   const [filter, setFilter] = useState<string>('all');
   const { user, loading: sessionLoading } = useCurrentUser();
   const owner = user?.id ?? 'anonymous';
@@ -343,7 +345,8 @@ export function LibraryPageClient() {
         </div>
       </div>
 
-      <RecentlyUpdatedRail />
+      {/* Settings › Library › Show Recently Updated; off unless turned on. */}
+      {showRecentlyUpdated && <RecentlyUpdatedRail />}
     </div>
   );
 }

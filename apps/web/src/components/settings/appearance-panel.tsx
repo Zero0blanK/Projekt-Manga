@@ -161,6 +161,9 @@ export function AppearancePanel() {
         <Field label="Show chapter badge on covers" hint="The latest chapter number chip">
           <Toggle settingKey="showChapterBadge" defaultOn />
         </Field>
+        <Field label="Show unread count" hint="Unread chapter count on covers">
+          <Toggle settingKey="showUnreadBadge" defaultOn />
+        </Field>
       </Panel>
 
       <Panel title="Motion" subtitle="Animation and transitions">

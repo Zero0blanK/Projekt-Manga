@@ -266,8 +266,8 @@ export function StatisticsPanel() {
             value={inGlobalUpdate}
             note={
               inGlobalUpdate < mangaLibrary.length
-                ? 'Some titles are skipped by the rules in Sync & Storage'
-                : 'Every library entry; set skip rules in Sync & Storage'
+                ? 'Some titles are skipped by the rules in Settings › Library'
+                : 'Every library entry; set skip rules in Settings › Library'
             }
           />
           <StatRow label="Started" value={startedCount} note="Opened but not finished" />

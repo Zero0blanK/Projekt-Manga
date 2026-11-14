@@ -43,7 +43,7 @@ describe('Settings navigation', () => {
   it('keeps tab labels on one line so the strip scrolls instead of wrapping', () => {
     render(<SettingsNav active="account" onChange={vi.fn()} />);
 
-    const tab = screen.getByRole('button', { name: /Sync & Storage/ });
+    const tab = screen.getByRole('button', { name: /Sync & Trackers/ });
     expect(tab.className).toContain('whitespace-nowrap');
     expect(tab.className).toContain('shrink-0');
   });

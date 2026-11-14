@@ -10,19 +10,10 @@ import {
   type LoginBody,
 } from '@projekt-manga/schemas';
 import { ApiError } from '@projekt-manga/api-client';
-import { SHELF_OPTIONS, useSetting } from '@/lib/app-store';
+import { useSetting } from '@/lib/app-store';
 import { useMangaLibrary } from '@/lib/library-store';
 import { useCurrentUser, sessionActions } from '@/lib/session-resource';
-import { TrackersPanel } from '@/components/settings/trackers-panel';
-import {
-  Panel,
-  Field,
-  Group,
-  OptionSelect,
-  Toggle,
-  TextInput,
-  ActionButton,
-} from '@/components/settings/field-controls';
+import { Panel, Field, TextInput, ActionButton } from '@/components/settings/field-controls';
 import {
   Form,
   FormControl,
@@ -35,8 +26,6 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
-
-const SHELF_CHOICES = [{ value: 'none', label: 'None' }, ...SHELF_OPTIONS];
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback;
@@ -376,23 +365,6 @@ export function AccountPanel() {
         {/* TODO: wire up once translated strings exist; there is nothing to switch to. */}
         <Field label="Interface language" hint="Only English strings ship today" disabled>
           <span className="text-xs text-muted-foreground">English</span>
-        </Field>
-      </Panel>
-
-      {user && (
-        <Panel title="Trackers" subtitle="Sync reading progress with third-party services">
-          <TrackersPanel />
-        </Panel>
-      )}
-
-      <Panel title="Library" subtitle="Defaults for titles you add">
-        <Field label="Default shelf" hint="Where titles added from Discover go">
-          <OptionSelect settingKey="defaultShelf" options={SHELF_CHOICES} defaultValue="none" />
-        </Field>
-
-        <Group label="Covers" />
-        <Field label="Show unread count" hint="Unread chapter count on covers">
-          <Toggle settingKey="showUnreadBadge" defaultOn />
         </Field>
       </Panel>
     </div>

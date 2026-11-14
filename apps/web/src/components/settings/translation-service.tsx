@@ -9,7 +9,7 @@ import {
   type TranslateSettings,
   type TranslateStatus,
 } from '@projekt-manga/api-client';
-import { ActionButton } from '@/components/settings/field-controls';
+import { ActionButton, LoadingBlock } from '@/components/settings/field-controls';
 import { forgetTranslationStatus } from '@/lib/page-translation';
 
 type Provider = TranslateSettings['provider'];
@@ -80,7 +80,7 @@ export function TranslationService() {
         Saving a translation service needs a server that supports it.
       </p>
     );
-  if (saved === undefined) return null;
+  if (saved === undefined) return <LoadingBlock label="Loading the translation service" rows={3} />;
 
   const act = async (work: () => Promise<void>, fallback: string) => {
     setBusy(true);

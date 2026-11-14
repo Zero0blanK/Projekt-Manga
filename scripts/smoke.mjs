@@ -1775,7 +1775,7 @@ try {
     );
     console.log('Desktop app lock smoke passed: lock window, refused IPC and PIN unlock.');
     await page.goto(`${webUrl}/settings`);
-    await page.getByRole('button', { name: 'Sync & Storage' }).click();
+    await page.getByRole('button', { name: 'Sync & Trackers' }).click();
     await page.getByText('Local library', { exact: true }).waitFor({ timeout: 10_000 });
     await page.getByText('Available offline', { exact: false }).waitFor({ timeout: 10_000 });
     await page.getByRole('button', { name: 'Profile', exact: true }).click();
@@ -1820,7 +1820,7 @@ try {
       'An account must not read the anonymous archive',
     );
     await page.goto(`${webUrl}/settings`);
-    const syncSettingsTab = page.getByRole('button', { name: 'Sync & Storage' });
+    const syncSettingsTab = page.getByRole('button', { name: 'Sync & Trackers' });
     try {
       await syncSettingsTab.waitFor({ state: 'visible', timeout: 10_000 });
     } catch (error) {
@@ -1845,7 +1845,7 @@ try {
     assert.equal(await deviceSyncToggle.getAttribute('aria-checked'), 'false');
     assert.equal(await page.getByRole('button', { name: 'Sync paused' }).isDisabled(), true);
     await page.reload();
-    await page.getByRole('button', { name: 'Sync & Storage' }).click();
+    await page.getByRole('button', { name: 'Sync & Trackers' }).click();
     const persistedSyncToggle = page.getByRole('switch', { name: 'Sync this device' });
     await persistedSyncToggle.waitFor({ timeout: 10_000 });
     assert.equal(await persistedSyncToggle.getAttribute('aria-checked'), 'false');

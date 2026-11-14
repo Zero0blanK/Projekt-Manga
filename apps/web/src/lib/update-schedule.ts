@@ -1,4 +1,4 @@
-/** Settings › Sync & Storage › Library updates, per category. Both are JSON strings,
+/** Settings › Library › Library updates, per category. Both are JSON strings,
  * because settings hold primitives only. */
 export const CATEGORY_UPDATE_SETTING = {
   /** `{ [category]: hours }` — how often titles in that category are checked. */

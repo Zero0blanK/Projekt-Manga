@@ -1,9 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Panel } from '@/components/settings/field-controls';
+import { Field, Group, Panel, Select, Toggle } from '@/components/settings/field-controls';
+import { KeyBindingsEditor } from '@/components/settings/key-bindings-editor';
 import { useSetting } from '@/lib/app-store';
-import { READER_ACTIONS, READER_KEY_BINDINGS, keyLabel, parseKeyBindings } from '@/lib/reader-keys';
+import {
+  READER_ACTIONS,
+  READER_DOUBLE_CLICK_ZOOM,
+  READER_KEY_BINDINGS,
+  READER_WHEEL_ACTION,
+  WHEEL_ACTIONS,
+  keyLabel,
+  parseKeyBindings,
+} from '@/lib/reader-keys';
 
 /**
  * Every shortcut the app actually binds. Grouped by where it works, since a reader-only
@@ -56,7 +65,7 @@ function useReaderGroup() {
   const bindings = parseKeyBindings(useSetting(READER_KEY_BINDINGS, ''));
   return {
     title: 'Reader',
-    note: 'Change these in Settings › Reader › Mouse and keyboard',
+    note: 'Change these under Mouse and keyboard, above',
     rows: READER_ACTIONS.flatMap(({ id, label }) =>
       bindings[id].map((key): [string, string[]] => [label, [keyLabel(key)]]),
     ),
@@ -89,6 +98,25 @@ export function ShortcutsPanel() {
 
   return (
     <div className="space-y-6">
+      {/* The reader's mouse and keyboard controls, with the key bindings to change. */}
+      <Panel title="Mouse and keyboard" subtitle="Desktop reading controls">
+        <Field label="Mouse wheel" hint="In the paged reader; Ctrl+wheel always zooms">
+          <Select
+            settingKey={READER_WHEEL_ACTION}
+            options={[...WHEEL_ACTIONS]}
+            defaultValue="Turn page"
+          />
+        </Field>
+        <Field
+          label="Double-click to zoom"
+          hint="Zoom in where you click; single clicks wait a moment to tell them apart"
+        >
+          <Toggle settingKey={READER_DOUBLE_CLICK_ZOOM} defaultOn />
+        </Field>
+        <Group label="Keyboard" />
+        <KeyBindingsEditor />
+      </Panel>
+
       {[...GROUPS, readerGroup].map((group) => (
         <Panel key={group.title} title={group.title} subtitle={group.note ?? 'Fly through the app'}>
           <div className="divide-y divide-border/50">

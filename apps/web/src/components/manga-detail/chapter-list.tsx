@@ -493,7 +493,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
     onMarked: (r, read, still) => {
       invalidateSavedReadingProgress();
       if (!read) return;
-      // Settings > Sync & Storage > Delete after reading. Best effort.
+      // Settings > Downloads > Delete after reading. Best effort.
       const numbers = [...new Set(records.map((row) => row.chapter_number))].sort((a, b) => a - b);
       void afterChapterRead(manga, r.chapter_number, numbers, (number) =>
         records.find((row) => row.chapter_number === number),
