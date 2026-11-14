@@ -7,30 +7,203 @@ import { Cover } from '@/components/cover';
 import { useSetting } from '@/lib/app-store';
 import { BookOpen, Download } from 'lucide-react';
 import { useHoldToSelect } from '@/hooks/use-hold-to-select';
+import {
+  COVER_BADGE_POSITION_SETTING,
+  COVER_BADGE_STYLE_SETTING,
+  DEFAULT_COVER_BADGE_POSITION,
+  DEFAULT_COVER_BADGE_STYLE,
+  DOWNLOAD_BADGE_SETTING,
+  coverCorner,
+  plural,
+  resolveBadgePosition,
+  resolveBadgeStyle,
+  type CoverBadgePosition,
+  type CoverBadgeStyle,
+} from '@/lib/cover-badges';
+
+type CoverCounts = {
+  position: CoverBadgePosition;
+  style: CoverBadgeStyle;
+  /** 0 when hidden: none unread, turned off, or not in the library. */
+  unread: number;
+  /** 0 when hidden: none downloaded, or turned off (off by default). */
+  downloads: number;
+  /** Null when the latest-chapter badge is turned off. */
+  latest: number | null;
+};
+
+/** The counts a cover shows, as Settings > Appearance has them. */
+function useCoverCounts(manga: Manga, downloadCount: number, enabled = true): CoverCounts {
+  const latestEnabled = useSetting('showChapterBadge', true) !== false;
+  const unreadEnabled = useSetting('showUnreadBadge', true) !== false;
+  const downloadsEnabled = useSetting(DOWNLOAD_BADGE_SETTING, false) === true;
+  const position = resolveBadgePosition(
+    useSetting(COVER_BADGE_POSITION_SETTING, DEFAULT_COVER_BADGE_POSITION),
+  );
+  const style = resolveBadgeStyle(useSetting(COVER_BADGE_STYLE_SETTING, DEFAULT_COVER_BADGE_STYLE));
+  // progress is a read/total ratio, so the remainder is what's left unread.
+  const unread = Math.max(0, manga.chapters - Math.round((manga.progress ?? 0) * manga.chapters));
+  return {
+    position,
+    style,
+    unread: enabled && unreadEnabled && manga.inLibrary ? unread : 0,
+    downloads: enabled && downloadsEnabled ? downloadCount : 0,
+    latest: enabled && latestEnabled ? manga.latestChapterNum : null,
+  };
+}
+
+const hasCounts = (counts: CoverCounts) =>
+  counts.unread > 0 || counts.downloads > 0 || counts.latest !== null;
+
+function countsLabel(counts: CoverCounts): string {
+  return [
+    counts.unread > 0 && `${plural(counts.unread, 'unread chapter')}`,
+    counts.downloads > 0 && `${plural(counts.downloads, 'downloaded chapter')}`,
+    counts.latest !== null && `latest chapter ${counts.latest}`,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+/**
+ * The counts in a corner of the cover. Joined (the default, as Mihon has it): one block,
+ * a coloured segment per count, numbers only: downloaded, then unread, then the latest
+ * chapter. Pills: a separate chip for each, with its words.
+ */
+function CoverBadges({ counts }: { counts: CoverCounts }) {
+  const label = countsLabel(counts);
+  const others = counts.unread > 0 || counts.downloads > 0;
+  if (counts.style === 'pills') {
+    return (
+      <div
+        role="img"
+        aria-label={label}
+        title={label}
+        className="flex shrink-0 flex-wrap items-center gap-1.5"
+      >
+        {counts.downloads > 0 && (
+          <span
+            aria-hidden
+            className={`items-center gap-1 whitespace-nowrap rounded-full bg-foreground px-2 py-0.5 text-[10px] font-semibold text-background ${counts.unread > 0 ? 'hidden @[12rem]:flex' : 'flex'}`}
+          >
+            <Download size={10} /> {counts.downloads}
+          </span>
+        )}
+        {counts.unread > 0 && (
+          <span
+            aria-hidden
+            className="whitespace-nowrap rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur"
+          >
+            {counts.unread} unread
+          </span>
+        )}
+        {counts.latest !== null && (
+          <span
+            aria-hidden
+            className={`whitespace-nowrap rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-glow ${others ? 'hidden @[14rem]:block' : ''}`}
+          >
+            Ch. {counts.latest}
+          </span>
+        )}
+      </div>
+    );
+  }
+  const segment = 'px-1.5 py-1 tabular-nums';
+  return (
+    <div
+      role="img"
+      aria-label={label}
+      title={label}
+      className="flex shrink-0 overflow-hidden rounded-md text-[10px] font-bold leading-none shadow-md"
+    >
+      {counts.downloads > 0 && (
+        <span aria-hidden className={`${segment} bg-foreground text-background`}>
+          {counts.downloads}
+        </span>
+      )}
+      {counts.unread > 0 && (
+        <span aria-hidden className={`${segment} bg-primary text-primary-foreground`}>
+          {counts.unread}
+        </span>
+      )}
+      {counts.latest !== null && (
+        <span
+          aria-hidden
+          className={`${segment} bg-black/65 font-semibold text-white backdrop-blur ${others ? 'hidden @[10rem]:block' : ''}`}
+        >
+          Ch. {counts.latest}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The counts as a line of text, for "Under the title". */
+function CoverCountsLine({ counts, onCover }: { counts: CoverCounts; onCover: boolean }) {
+  if (!hasCounts(counts)) return null;
+  const parts = [
+    counts.unread > 0 && (
+      <span key="unread" className={onCover ? 'text-white' : 'text-primary'}>
+        {counts.unread} unread
+      </span>
+    ),
+    counts.downloads > 0 && (
+      <span key="downloads" className="inline-flex items-center gap-0.5">
+        <Download size={10} aria-hidden /> {counts.downloads}
+      </span>
+    ),
+    counts.latest !== null && <span key="latest">Ch. {counts.latest}</span>,
+  ].filter(Boolean);
+  const label = countsLabel(counts);
+  return (
+    <p
+      aria-label={label}
+      title={label}
+      className={`mt-0.5 flex items-center gap-1.5 truncate text-[11px] font-medium ${onCover ? 'text-white/75' : 'text-muted-foreground'}`}
+    >
+      {parts.map((part, index) => (
+        <span key={index} aria-hidden className="inline-flex items-center gap-1.5">
+          {index > 0 && <span className="opacity-50">·</span>}
+          {part}
+        </span>
+      ))}
+    </p>
+  );
+}
 
 export function MangaCover({
   manga,
   chapterBadge = true,
   statusBadge = true,
   downloaded = false,
+  downloadCount = 0,
+  titleOnCover = false,
+  countsBelowTitle = false,
 }: {
   manga: Manga;
   /** Has downloaded chapters, so it can still be read without a connection. */
   downloaded?: boolean;
+  /** Downloaded chapters, for the count (Settings > Appearance, off by default). */
+  downloadCount?: number;
   /** Pass false where the status already sits beside the title, so a screen reader
    * doesn't announce it twice. */
   statusBadge?: boolean;
-  /** Callers that never want the chip (hero, cover dialog) pass false; when true it still
-   * defers to Settings > Appearance > Show chapter badge on covers. */
+  /** Callers that never want the counts (hero, cover dialog) pass false; when true they
+   * still follow Settings > Appearance > Cover badges. */
   chapterBadge?: boolean;
+  /** The compact grid's title sits over the bottom of the cover. */
+  titleOnCover?: boolean;
+  /** The card shows the counts under its title instead. */
+  countsBelowTitle?: boolean;
 }) {
-  const badgeEnabled = useSetting('showChapterBadge', true) as boolean;
-  const unreadEnabled = useSetting('showUnreadBadge', true) as boolean;
-  const showBadge = chapterBadge && badgeEnabled;
-  // progress is a read/total ratio, so the remainder is what's left unread.
-  const unread = Math.max(0, manga.chapters - Math.round((manga.progress ?? 0) * manga.chapters));
-  const showUnread = chapterBadge && unreadEnabled && unread > 0 && manga.inLibrary;
-  const anyPill = showUnread || showBadge;
+  const counts = useCoverCounts(manga, downloadCount, chapterBadge);
+  const corner =
+    countsBelowTitle || !hasCounts(counts) ? null : coverCorner(counts.position, { titleOnCover });
+  const top = corner === 'top-left' || corner === 'top-right';
+  const right = corner === 'top-right' || corner === 'bottom-right';
+  const badges = corner ? <CoverBadges counts={counts} /> : null;
+  // The offline icon says the same as a download count, so it gives way to one.
+  const showOffline = downloaded && counts.downloads === 0;
   return (
     // A size container: the chips follow the cover's own width, not the window's. A cover
     // is narrow on a wide window too, e.g. with the Recently Updated rail open.
@@ -44,10 +217,10 @@ export function MangaCover({
       />
       {/* Scrim so the status/chapter chips stay readable over light artwork. */}
       <div className="pointer-events-none absolute inset-0 bg-linear-to-b from-black/50 via-transparent to-transparent" />
-      {downloaded && (
+      {showOffline && (
         <div
           role="img"
-          className="absolute bottom-2 right-2 grid size-6 place-items-center rounded-full bg-black/60 text-white backdrop-blur"
+          className={`absolute bottom-2 grid size-6 place-items-center rounded-full bg-black/60 text-white backdrop-blur ${corner === 'bottom-right' ? 'left-2' : 'right-2'}`}
           title="Has downloaded chapters"
           aria-label="Has downloaded chapters"
         >
@@ -55,41 +228,23 @@ export function MangaCover({
         </div>
       )}
 
-      <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-1.5 p-2 @[11rem]:p-3">
-        {/* On a narrow cover the status gives way to the counts, and only the unread count
-            shows; the latest chapter returns once both fit. Truncation is the last guard. */}
-        {statusBadge ? (
+      <div className="absolute inset-x-0 top-0 flex items-start gap-1.5 p-2 @[11rem]:p-3">
+        {top && !right && badges}
+        {/* On a narrow cover the status gives way to counts on the same row. */}
+        {statusBadge && (
           <div
-            className={`min-w-0 truncate rounded-md bg-black/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white/90 backdrop-blur ${anyPill ? 'hidden @[10rem]:block' : ''}`}
+            className={`min-w-0 truncate rounded-md bg-black/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white/90 backdrop-blur ${top && !right ? 'ml-auto' : ''} ${top ? 'hidden @[10rem]:block' : ''}`}
           >
             {manga.status}
           </div>
-        ) : (
-          <span />
         )}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {/* The unread pill says "unread" and the latest-chapter pill says "Ch." so the two
-              numbers can't be confused. */}
-          {showUnread && (
-            <div
-              className="whitespace-nowrap rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur"
-              title={`${unread} unread chapter${unread === 1 ? '' : 's'}`}
-              aria-label={`${unread} unread chapter${unread === 1 ? '' : 's'}`}
-            >
-              {unread} unread
-            </div>
-          )}
-          {showBadge && (
-            <div
-              className={`whitespace-nowrap rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-glow ${showUnread ? 'hidden @[14rem]:block' : ''}`}
-              title={`Latest chapter: ${manga.latestChapterNum}`}
-              aria-label={`Latest chapter ${manga.latestChapterNum}`}
-            >
-              Ch. {manga.latestChapterNum}
-            </div>
-          )}
-        </div>
+        {top && right && <div className="ml-auto flex shrink-0">{badges}</div>}
       </div>
+      {corner && !top && (
+        <div className={`absolute bottom-0 p-2 @[11rem]:p-3 ${right ? 'right-0' : 'left-0'}`}>
+          {badges}
+        </div>
+      )}
     </div>
   );
 }
@@ -102,9 +257,12 @@ export function MangaCard({
   onOpenActions,
   compact = false,
   downloaded = false,
+  downloadCount = 0,
 }: {
   manga: Manga;
   downloaded?: boolean;
+  /** Downloaded chapters, for the count (Settings > Appearance, off by default). */
+  downloadCount?: number;
   selected?: boolean;
   selectionMode?: boolean;
   onSelect?: () => void;
@@ -114,6 +272,8 @@ export function MangaCard({
 }) {
   const hold = useHoldToSelect({ onSelect: () => onSelect?.(), disabled: !onSelect });
   const router = useRouter();
+  const counts = useCoverCounts(manga, downloadCount);
+  const countsBelow = counts.position === 'below-title';
   // A title with a chapter under way offers to continue it straight from the cover.
   const resumeHref =
     manga.currentChapter !== undefined
@@ -151,7 +311,13 @@ export function MangaCard({
       className={`flex flex-col gap-3 rounded-xl outline-none ${selectionMode ? 'focus-visible:ring-2 focus-visible:ring-primary' : 'group'} ${onSelect ? 'select-none touch-pan-y' : ''}`}
     >
       <div className="relative transition-transform duration-500 group-hover:-translate-y-1">
-        <MangaCover manga={manga} downloaded={downloaded} />
+        <MangaCover
+          manga={manga}
+          downloaded={downloaded}
+          downloadCount={downloadCount}
+          titleOnCover={compact}
+          countsBelowTitle={countsBelow}
+        />
         {selected && (
           <div className="pointer-events-none absolute inset-0 rounded-xl bg-primary/25 ring-2 ring-primary" />
         )}
@@ -180,6 +346,7 @@ export function MangaCard({
         {compact && (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 rounded-b-xl bg-linear-to-t from-black/85 via-black/50 to-transparent px-2.5 pb-2 pt-8">
             <h3 className="line-clamp-2 text-xs font-semibold text-white">{manga.title}</h3>
+            {countsBelow && <CoverCountsLine counts={counts} onCover />}
           </div>
         )}
       </div>
@@ -189,6 +356,7 @@ export function MangaCard({
             {manga.title}
           </h3>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{authorLine(manga)}</p>
+          {countsBelow && <CoverCountsLine counts={counts} onCover={false} />}
         </div>
       )}
     </Link>

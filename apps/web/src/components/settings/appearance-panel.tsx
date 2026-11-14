@@ -16,7 +16,23 @@ import {
   resolveUiStyle,
   shownAccent,
 } from '@/lib/theme';
-import { Panel, Field, Group, Select, Toggle } from '@/components/settings/field-controls';
+import {
+  Panel,
+  Field,
+  Group,
+  OptionSelect,
+  Select,
+  Toggle,
+} from '@/components/settings/field-controls';
+import {
+  COVER_BADGE_POSITIONS,
+  COVER_BADGE_POSITION_SETTING,
+  COVER_BADGE_STYLES,
+  COVER_BADGE_STYLE_SETTING,
+  DEFAULT_COVER_BADGE_POSITION,
+  DEFAULT_COVER_BADGE_STYLE,
+  DOWNLOAD_BADGE_SETTING,
+} from '@/lib/cover-badges';
 import { Check } from 'lucide-react';
 
 /** A miniature of the theme — page background, a raised card, and a line of text — so the
@@ -235,11 +251,34 @@ export function AppearancePanel() {
             defaultValue="Medium"
           />
         </Field>
-        <Field label="Show chapter badge on covers" hint="The latest chapter number chip">
-          <Toggle settingKey="showChapterBadge" defaultOn />
+      </Panel>
+
+      <Panel title="Cover badges" subtitle="The counts on library covers">
+        <Field label="Cover badge position" hint="A corner of the cover, or a line under the title">
+          <OptionSelect
+            settingKey={COVER_BADGE_POSITION_SETTING}
+            options={[...COVER_BADGE_POSITIONS]}
+            defaultValue={DEFAULT_COVER_BADGE_POSITION}
+          />
         </Field>
-        <Field label="Show unread count" hint="Unread chapter count on covers">
+        <Field
+          label="Cover badge style"
+          hint="Joined: one block with a coloured number per count. Pills: a labelled chip each"
+        >
+          <OptionSelect
+            settingKey={COVER_BADGE_STYLE_SETTING}
+            options={[...COVER_BADGE_STYLES]}
+            defaultValue={DEFAULT_COVER_BADGE_STYLE}
+          />
+        </Field>
+        <Field label="Unread count on covers" hint="Chapters not read yet, in the accent colour">
           <Toggle settingKey="showUnreadBadge" defaultOn />
+        </Field>
+        <Field label="Download count on covers" hint="Chapters downloaded for offline reading">
+          <Toggle settingKey={DOWNLOAD_BADGE_SETTING} />
+        </Field>
+        <Field label="Latest chapter on covers" hint="The newest chapter number">
+          <Toggle settingKey="showChapterBadge" defaultOn />
         </Field>
       </Panel>
 

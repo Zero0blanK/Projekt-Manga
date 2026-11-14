@@ -7,7 +7,7 @@ import type { Manga } from '@/lib/manga-data';
 import { useEffect, useRef, useState } from 'react';
 import { LibraryTitleContextMenu } from './library-title-context-menu';
 import { useMangaLibrary } from '@/lib/library-store';
-import { useDownloadedTitleIds } from '@/components/downloads/row-data';
+import { useDownloadCounts } from '@/components/downloads/row-data';
 /** List rows mounted at first, and added each time the end comes into view. */
 const CHUNK = 60;
 
@@ -54,7 +54,7 @@ export function LibraryGrid({
     observer.observe(node);
     return () => observer.disconnect();
   }, [more, revealed]);
-  const downloaded = useDownloadedTitleIds();
+  const downloadCounts = useDownloadCounts();
   if (!manga.length)
     return (
       <EmptyState>
@@ -84,7 +84,8 @@ export function LibraryGrid({
                 key={item.id}
                 manga={item}
                 compact={view === 'compact'}
-                downloaded={downloaded.has(item.id)}
+                downloaded={downloadCounts.has(item.id)}
+                downloadCount={downloadCounts.get(item.id) ?? 0}
                 {...selection(item)}
               />
             ))}
