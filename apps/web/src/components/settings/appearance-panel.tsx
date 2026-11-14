@@ -3,13 +3,18 @@
 import { actions, useSetting } from '@/lib/app-store';
 import {
   ACCENTS,
-  DEFAULT_ACCENT,
+  DEFAULT_FROST_THEME,
   DEFAULT_THEME,
   DEFAULT_UI_SCALE,
+  DEFAULT_UI_STYLE,
+  FROST_THEMES,
   THEMES,
   UI_SCALES,
-  isValidAccent,
+  UI_STYLES,
+  resolveFrostTheme,
   resolveTheme,
+  resolveUiStyle,
+  shownAccent,
 } from '@/lib/theme';
 import { Panel, Field, Group, Select, Toggle } from '@/components/settings/field-controls';
 import { Check } from 'lucide-react';
@@ -21,7 +26,7 @@ function ThemeCard({
   selected,
   onSelect,
 }: {
-  option: (typeof THEMES)[number];
+  option: Omit<(typeof THEMES)[number], 'id'> & { id: string };
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -69,33 +74,105 @@ function ThemeCard({
   );
 }
 
+/** An interface style: its name and what it looks like, in words. */
+function UiStyleCard({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: (typeof UI_STYLES)[number];
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`relative rounded-xl border px-3 py-2.5 text-left transition ${
+        selected ? 'border-primary ring-1 ring-primary/40' : 'border-border/60 hover:border-border'
+      }`}
+    >
+      <div className={`text-sm font-medium ${selected ? 'text-primary' : 'text-foreground'}`}>
+        {option.label}
+      </div>
+      <div className="mt-0.5 pr-5 text-xs text-muted-foreground">{option.hint}</div>
+      {selected && (
+        <span className="absolute right-2 top-2 grid h-4 w-4 place-items-center rounded-full bg-primary text-primary-foreground">
+          <Check className="h-2.5 w-2.5" />
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function AppearancePanel() {
   // Stored values are lowercase ids; lowercasing also normalizes legacy capitalised values ("Dark").
   const storedTheme = String(useSetting('theme', DEFAULT_THEME)).toLowerCase();
-  const accent = useSetting('accent', DEFAULT_ACCENT) as string;
+  const uiStyle = resolveUiStyle(useSetting('uiStyle', DEFAULT_UI_STYLE));
+  const frost = uiStyle === 'frost';
+  const storedFrostTheme = String(useSetting('frostTheme', DEFAULT_FROST_THEME)).toLowerCase();
+  const accent = shownAccent(useSetting('accent', ''), uiStyle, storedFrostTheme);
   const customAccent = !ACCENTS.some((a) => a.value.toLowerCase() === accent.toLowerCase());
 
   return (
     <div className="space-y-6">
-      <Panel title="Appearance" subtitle="Theme, accent, and interface scale">
+      <Panel title="Appearance" subtitle="Interface style, theme, accent, and interface scale">
         <div>
-          <div className="text-sm font-medium text-foreground">Theme</div>
+          <div className="text-sm font-medium text-foreground">Interface style</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {storedTheme === 'auto'
-              ? `Following your system — currently ${resolveTheme('auto')}.`
-              : 'Applied instantly, and before the page paints on your next visit.'}
+            Each style has its own themes below; your accent works with both.
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {THEMES.map((t) => (
-              <ThemeCard
-                key={t.id}
-                option={t}
-                selected={storedTheme === t.id}
-                onSelect={() => actions.setSetting('theme', t.id)}
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            {UI_STYLES.map((style) => (
+              <UiStyleCard
+                key={style.id}
+                option={style}
+                selected={uiStyle === style.id}
+                onSelect={() => actions.setSetting('uiStyle', style.id)}
               />
             ))}
           </div>
         </div>
+
+        <div>
+          <div className="text-sm font-medium text-foreground">Theme</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {(frost ? storedFrostTheme : storedTheme) === 'auto'
+              ? `Following your system — currently ${
+                  frost ? resolveFrostTheme('auto') : resolveTheme('auto')
+                }.`
+              : 'Applied instantly, and before the page paints on your next visit.'}
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {frost
+              ? FROST_THEMES.map((t) => (
+                  <ThemeCard
+                    key={t.id}
+                    option={t}
+                    selected={storedFrostTheme === t.id}
+                    onSelect={() => actions.setSetting('frostTheme', t.id)}
+                  />
+                ))
+              : THEMES.map((t) => (
+                  <ThemeCard
+                    key={t.id}
+                    option={t}
+                    selected={storedTheme === t.id}
+                    onSelect={() => actions.setSetting('theme', t.id)}
+                  />
+                ))}
+          </div>
+        </div>
+
+        {frost && (
+          <Field
+            label="Glass effects"
+            hint="Frosted, see-through cards, menus and navigation. Off gives solid surfaces"
+          >
+            <Toggle settingKey="frostGlass" defaultOn />
+          </Field>
+        )}
 
         <Field label="Accent color" hint="Buttons, links, focus rings, and progress bars">
           <div className="flex flex-col items-end gap-2.5">
@@ -121,7 +198,7 @@ export function AppearancePanel() {
               <span className={customAccent ? 'text-primary' : ''}>Custom</span>
               <input
                 type="color"
-                value={isValidAccent(accent) ? accent : DEFAULT_ACCENT}
+                value={accent}
                 onChange={(e) => actions.setSetting('accent', e.target.value)}
                 aria-label="Custom accent color"
                 className={`h-6 w-10 cursor-pointer rounded border bg-transparent ${
@@ -130,7 +207,7 @@ export function AppearancePanel() {
               />
               <button
                 type="button"
-                onClick={() => actions.setSetting('accent', DEFAULT_ACCENT)}
+                onClick={() => actions.setSetting('accent', '')}
                 className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
               >
                 Reset

@@ -27,6 +27,8 @@ vi.mock('@/lib/theme', () => ({
   DEFAULT_ACCENT: '',
   DEFAULT_THEME: '',
   DEFAULT_UI_SCALE: '',
+  DEFAULT_UI_STYLE: 'classic',
+  DEFAULT_FROST_THEME: 'original',
 }));
 vi.mock('@/components/floating-nav', () => ({ FloatingNav: () => null }));
 vi.mock('@/components/command-palette', () => ({ CommandPalette: () => null }));
