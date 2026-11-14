@@ -5,6 +5,10 @@ import { QueryProvider } from '@/components/query-provider';
 import { CoverPrivacyProvider } from '@/components/discover/cover-privacy-provider';
 import { SPLASH_INIT_SCRIPT } from '@/lib/splash';
 import { THEME_INIT_SCRIPT } from '@/lib/theme';
+// Bundled with the app (no font host), so the Minimal interface style works offline.
+import '@fontsource-variable/dm-sans';
+import '@fontsource/dm-mono/400.css';
+import '@fontsource/dm-mono/500.css';
 import '@/styles.css';
 
 export const metadata: Metadata = {

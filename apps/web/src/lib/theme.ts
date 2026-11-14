@@ -77,7 +77,36 @@ export const ACCENTS: Array<{ value: string; label: string }> = [
   { value: '#5ad1d1', label: 'Teal' },
   { value: '#7fffb5', label: 'Mint' },
   { value: '#c9d16a', label: 'Citron' },
+  { value: '#86a886', label: 'Sage' },
 ];
+
+/**
+ * The interface style, on top of the theme: Classic is the app's own look; Minimal is a
+ * quieter, denser one (neutral near-black layers, hairline borders, small corners, DM Sans
+ * with DM Mono labels, quick motion), in the spirit of the Moku reader. Each theme has a
+ * Minimal variant in `styles.css`, keyed off `data-ui` on `<html>`.
+ */
+export type UiStyle = 'classic' | 'minimal';
+
+export const UI_STYLES: Array<{ id: UiStyle; label: string; hint: string }> = [
+  { id: 'classic', label: 'Classic', hint: 'The look you know: rounded, warm, roomy' },
+  { id: 'minimal', label: 'Minimal', hint: 'Compact and quiet, Moku-inspired' },
+];
+
+export const DEFAULT_UI_STYLE: UiStyle = 'classic';
+
+export function resolveUiStyle(value: unknown): UiStyle {
+  return value === 'minimal' ? 'minimal' : DEFAULT_UI_STYLE;
+}
+
+/** Minimal's own default accent, a muted sage, used until an accent is picked. */
+export const MINIMAL_ACCENT = '#86a886';
+
+/** The accent in effect: the one picked, or the interface style's default. */
+export function effectiveAccent(accent: unknown, uiStyle: unknown): string {
+  if (isValidAccent(accent)) return accent;
+  return resolveUiStyle(uiStyle) === 'minimal' ? MINIMAL_ACCENT : DEFAULT_ACCENT;
+}
 
 export const UI_SCALES = ['90%', '100%', '110%', '125%'] as const;
 export const DEFAULT_UI_SCALE = '100%';
@@ -129,9 +158,11 @@ export function resolveTheme(theme: string): Exclude<ThemeId, 'auto'> {
 
 export type AppearanceSettings = {
   theme: string;
-  accent: string;
+  /** The accent picked, or undefined for the interface style's default. */
+  accent: string | undefined;
   uiScale: string;
   reduceMotion: boolean;
+  uiStyle?: string;
 };
 
 /** Applies appearance to `<html>`. Mirrored by THEME_INIT_SCRIPT — keep the two in step. */
@@ -140,14 +171,16 @@ export function applyAppearance(settings: AppearanceSettings) {
   const resolved = resolveTheme(settings.theme);
 
   root.setAttribute('data-theme', resolved);
+  root.setAttribute('data-ui', resolveUiStyle(settings.uiStyle));
   root.classList.toggle('dark', !LIGHT_THEMES.includes(resolved));
 
-  if (isValidAccent(settings.accent)) {
-    const fg = accentForeground(settings.accent);
-    root.style.setProperty('--primary', settings.accent);
+  const accent = effectiveAccent(settings.accent, settings.uiStyle);
+  if (isValidAccent(accent)) {
+    const fg = accentForeground(accent);
+    root.style.setProperty('--primary', accent);
     root.style.setProperty('--primary-foreground', fg);
-    root.style.setProperty('--ring', settings.accent);
-    root.style.setProperty('--sidebar-primary', settings.accent);
+    root.style.setProperty('--ring', accent);
+    root.style.setProperty('--sidebar-primary', accent);
     root.style.setProperty('--sidebar-primary-foreground', fg);
   } else {
     for (const prop of [
@@ -177,8 +210,11 @@ var L=${JSON.stringify(LIGHT_THEMES)},r=document.documentElement;
 var t=String(s.theme||${JSON.stringify(DEFAULT_THEME)}).toLowerCase();
 if(t==="auto"){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}
 r.setAttribute("data-theme",t);
+var u=s.uiStyle==="minimal"?"minimal":"classic";
+r.setAttribute("data-ui",u);
 r.classList.toggle("dark",L.indexOf(t)===-1);
 var a=s.accent;
+if(!(typeof a==="string"&&/^#[0-9a-f]{6}$/i.test(a))){a=u==="minimal"?${JSON.stringify(MINIMAL_ACCENT)}:${JSON.stringify(DEFAULT_ACCENT)};}
 if(typeof a==="string"&&/^#[0-9a-f]{6}$/i.test(a)){
 var n=parseInt(a.slice(1),16);
 var c=[(n>>16)&255,(n>>8)&255,n&255].map(function(v){v=v/255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});

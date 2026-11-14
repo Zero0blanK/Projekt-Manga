@@ -3,13 +3,15 @@
 import { actions, useSetting } from '@/lib/app-store';
 import {
   ACCENTS,
-  DEFAULT_ACCENT,
   DEFAULT_THEME,
   DEFAULT_UI_SCALE,
+  DEFAULT_UI_STYLE,
   THEMES,
   UI_SCALES,
-  isValidAccent,
+  UI_STYLES,
+  effectiveAccent,
   resolveTheme,
+  resolveUiStyle,
 } from '@/lib/theme';
 import { Panel, Field, Group, Select, Toggle } from '@/components/settings/field-controls';
 import { Check } from 'lucide-react';
@@ -69,15 +71,97 @@ function ThemeCard({
   );
 }
 
+/** A sketch of each interface style's shape (corner size, title type, label type), drawn in
+ * the current colours so it reads as a style rather than another theme. */
+function UiStyleCard({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: (typeof UI_STYLES)[number];
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const minimal = option.id === 'minimal';
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`overflow-hidden rounded-xl border text-left transition ${
+        selected ? 'border-primary ring-1 ring-primary/40' : 'border-border/60 hover:border-border'
+      }`}
+    >
+      <div
+        className={`relative flex h-20 items-center gap-2.5 bg-muted/40 px-3 ${minimal ? '' : 'ui-classic-preview'}`}
+        aria-hidden
+      >
+        <div
+          className={`h-12 w-8 shrink-0 bg-primary/70 ${minimal ? 'rounded-[3px]' : 'rounded-lg'}`}
+        />
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <div
+            className={`truncate text-sm text-foreground ${
+              minimal
+                ? 'font-[family-name:var(--font-minimal-sans)] font-semibold tracking-tight'
+                : 'font-[family-name:var(--font-display)]'
+            }`}
+          >
+            Title
+          </div>
+          <div
+            className={`truncate text-[10px] uppercase text-muted-foreground ${
+              minimal
+                ? 'font-[family-name:var(--font-minimal-mono)] tracking-[0.08em]'
+                : 'tracking-wider'
+            }`}
+          >
+            Chapter 12
+          </div>
+        </div>
+        {selected && (
+          <span className="absolute right-1.5 top-1.5 grid h-4 w-4 place-items-center rounded-full bg-primary text-primary-foreground">
+            <Check className="h-2.5 w-2.5" />
+          </span>
+        )}
+      </div>
+      <div className="border-t border-border/50 bg-background/60 px-2.5 py-1.5">
+        <div className={`text-xs font-medium ${selected ? 'text-primary' : 'text-foreground'}`}>
+          {option.label}
+        </div>
+        <div className="text-xs text-muted-foreground">{option.hint}</div>
+      </div>
+    </button>
+  );
+}
+
 export function AppearancePanel() {
   // Stored values are lowercase ids; lowercasing also normalizes legacy capitalised values ("Dark").
   const storedTheme = String(useSetting('theme', DEFAULT_THEME)).toLowerCase();
-  const accent = useSetting('accent', DEFAULT_ACCENT) as string;
+  const uiStyle = resolveUiStyle(useSetting('uiStyle', DEFAULT_UI_STYLE));
+  const accent = effectiveAccent(useSetting('accent', ''), uiStyle);
   const customAccent = !ACCENTS.some((a) => a.value.toLowerCase() === accent.toLowerCase());
 
   return (
     <div className="space-y-6">
-      <Panel title="Appearance" subtitle="Theme, accent, and interface scale">
+      <Panel title="Appearance" subtitle="Interface style, theme, accent, and interface scale">
+        <div>
+          <div className="text-sm font-medium text-foreground">Interface style</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Works with every theme and accent below.
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            {UI_STYLES.map((style) => (
+              <UiStyleCard
+                key={style.id}
+                option={style}
+                selected={uiStyle === style.id}
+                onSelect={() => actions.setSetting('uiStyle', style.id)}
+              />
+            ))}
+          </div>
+        </div>
+
         <div>
           <div className="text-sm font-medium text-foreground">Theme</div>
           <div className="mt-1 text-xs text-muted-foreground">
@@ -121,7 +205,7 @@ export function AppearancePanel() {
               <span className={customAccent ? 'text-primary' : ''}>Custom</span>
               <input
                 type="color"
-                value={isValidAccent(accent) ? accent : DEFAULT_ACCENT}
+                value={accent}
                 onChange={(e) => actions.setSetting('accent', e.target.value)}
                 aria-label="Custom accent color"
                 className={`h-6 w-10 cursor-pointer rounded border bg-transparent ${
@@ -130,7 +214,7 @@ export function AppearancePanel() {
               />
               <button
                 type="button"
-                onClick={() => actions.setSetting('accent', DEFAULT_ACCENT)}
+                onClick={() => actions.setSetting('accent', '')}
                 className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
               >
                 Reset

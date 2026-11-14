@@ -672,3 +672,189 @@ html[data-skip-splash] .splash-root {
     display: none;
   }
 }
+
+/* ---------------------------------------------------------------------------------------
+   Interface style: Minimal (Settings > Appearance > Interface style)
+
+   A quieter, denser look in the spirit of the Moku reader: neutral near-black layers a
+   small step apart, hairline borders, small corners, DM Sans with DM Mono for labels,
+   flat surfaces and quick motion. Classic is everything above this block. Each theme has
+   a Minimal variant; the accent still comes from Settings (Minimal defaults to sage).
+   --------------------------------------------------------------------------------------- */
+/* Defined for every style, so Settings can preview Minimal from Classic too. */
+:root {
+  --font-minimal-sans: 'DM Sans Variable', 'DM Sans';
+  --font-minimal-mono: 'DM Mono';
+}
+
+:root[data-ui='minimal'] {
+  --radius: 0.4375rem;
+  --font-sans: var(--font-minimal-sans), ui-sans-serif, system-ui, sans-serif;
+  --default-transition-duration: 140ms;
+  --shadow-glow: 0 0 0 0 transparent;
+}
+
+:root[data-ui='minimal'][data-theme='dark'] {
+  --background: oklch(0.155 0.002 100);
+  --foreground: oklch(0.95 0.006 90);
+  --surface: oklch(0.18 0.002 100);
+  --surface-elevated: oklch(0.205 0.003 100);
+  --card: oklch(0.18 0.002 100);
+  --card-foreground: oklch(0.95 0.006 90);
+  --popover: oklch(0.2 0.003 100);
+  --popover-foreground: oklch(0.95 0.006 90);
+  --secondary: oklch(0.225 0.003 100);
+  --secondary-foreground: oklch(0.93 0.006 90);
+  --muted: oklch(0.205 0.003 100);
+  --muted-foreground: oklch(0.66 0.008 90);
+  --accent: oklch(0.235 0.004 100);
+  --accent-foreground: oklch(0.95 0.006 90);
+  --border: oklch(1 0 0 / 7%);
+  --input: oklch(1 0 0 / 9%);
+  --sidebar: oklch(0.135 0.002 100);
+  --sidebar-accent: oklch(0.21 0.003 100);
+  --sidebar-border: oklch(1 0 0 / 6%);
+  --gradient-surface: linear-gradient(180deg, oklch(0.18 0.002 100), oklch(0.155 0.002 100));
+  --gradient-hero:
+    radial-gradient(
+      90% 70% at 15% 0%,
+      color-mix(in oklch, var(--primary) 14%, transparent),
+      transparent 65%
+    ),
+    oklch(0.165 0.002 100);
+  --shadow-cover: 0 12px 26px -16px oklch(0 0 0 / 0.75), 0 4px 10px -6px oklch(0 0 0 / 0.5);
+}
+
+:root[data-ui='minimal'][data-theme='dim'] {
+  --background: oklch(0.225 0.003 100);
+  --foreground: oklch(0.95 0.006 90);
+  --surface: oklch(0.25 0.003 100);
+  --surface-elevated: oklch(0.275 0.004 100);
+  --card: oklch(0.25 0.003 100);
+  --card-foreground: oklch(0.95 0.006 90);
+  --popover: oklch(0.27 0.004 100);
+  --popover-foreground: oklch(0.95 0.006 90);
+  --secondary: oklch(0.295 0.004 100);
+  --secondary-foreground: oklch(0.93 0.006 90);
+  --muted: oklch(0.275 0.004 100);
+  --muted-foreground: oklch(0.7 0.008 90);
+  --accent: oklch(0.305 0.005 100);
+  --accent-foreground: oklch(0.95 0.006 90);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 10%);
+  --sidebar: oklch(0.205 0.003 100);
+  --sidebar-accent: oklch(0.28 0.004 100);
+  --gradient-surface: linear-gradient(180deg, oklch(0.25 0.003 100), oklch(0.225 0.003 100));
+  --gradient-hero:
+    radial-gradient(
+      90% 70% at 15% 0%,
+      color-mix(in oklch, var(--primary) 14%, transparent),
+      transparent 65%
+    ),
+    oklch(0.235 0.003 100);
+  --shadow-cover: 0 12px 26px -16px oklch(0 0 0 / 0.6), 0 4px 10px -6px oklch(0 0 0 / 0.4);
+}
+
+:root[data-ui='minimal'][data-theme='midnight'] {
+  --background: oklch(0 0 0);
+  --foreground: oklch(0.97 0.004 90);
+  --surface: oklch(0.12 0.001 100);
+  --surface-elevated: oklch(0.15 0.002 100);
+  --card: oklch(0.12 0.001 100);
+  --card-foreground: oklch(0.97 0.004 90);
+  --popover: oklch(0.14 0.002 100);
+  --popover-foreground: oklch(0.97 0.004 90);
+  --secondary: oklch(0.17 0.002 100);
+  --secondary-foreground: oklch(0.95 0.004 90);
+  --muted: oklch(0.15 0.002 100);
+  --muted-foreground: oklch(0.7 0.006 90);
+  --accent: oklch(0.18 0.003 100);
+  --accent-foreground: oklch(0.97 0.004 90);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 11%);
+  --sidebar: oklch(0 0 0);
+  --sidebar-accent: oklch(0.15 0.002 100);
+  --gradient-surface: linear-gradient(180deg, oklch(0.12 0.001 100), oklch(0 0 0));
+  --gradient-hero:
+    radial-gradient(
+      90% 70% at 15% 0%,
+      color-mix(in oklch, var(--primary) 12%, transparent),
+      transparent 65%
+    ),
+    oklch(0.04 0 0);
+  --shadow-cover: 0 12px 26px -16px oklch(0 0 0 / 0.9);
+}
+
+:root[data-ui='minimal'][data-theme='light'] {
+  --background: oklch(0.935 0.007 85);
+  --foreground: oklch(0.18 0.006 85);
+  --surface: oklch(0.955 0.006 85);
+  --surface-elevated: oklch(0.975 0.005 85);
+  --card: oklch(0.965 0.006 85);
+  --card-foreground: oklch(0.18 0.006 85);
+  --popover: oklch(0.985 0.004 85);
+  --popover-foreground: oklch(0.18 0.006 85);
+  --secondary: oklch(0.905 0.008 85);
+  --secondary-foreground: oklch(0.2 0.006 85);
+  --muted: oklch(0.915 0.008 85);
+  --muted-foreground: oklch(0.44 0.01 85);
+  --accent: oklch(0.895 0.009 85);
+  --accent-foreground: oklch(0.18 0.006 85);
+  --border: oklch(0.3 0.01 85 / 16%);
+  --input: oklch(0.3 0.01 85 / 20%);
+  --sidebar: oklch(0.92 0.008 85);
+  --sidebar-accent: oklch(0.895 0.009 85);
+  --sidebar-border: oklch(0.3 0.01 85 / 14%);
+  --gradient-surface: linear-gradient(180deg, oklch(0.965 0.006 85), oklch(0.935 0.007 85));
+  --gradient-hero:
+    radial-gradient(
+      90% 70% at 15% 0%,
+      color-mix(in oklch, var(--primary) 16%, transparent),
+      transparent 65%
+    ),
+    oklch(0.94 0.007 85);
+  --shadow-cover:
+    0 12px 26px -16px oklch(0.35 0.02 70 / 0.35), 0 4px 10px -6px oklch(0.35 0.02 70 / 0.2);
+}
+
+:root[data-ui='minimal'][data-theme='paper'] {
+  --background: oklch(0.915 0.026 82);
+  --foreground: oklch(0.27 0.03 62);
+  --surface: oklch(0.935 0.024 84);
+  --surface-elevated: oklch(0.955 0.02 84);
+  --card: oklch(0.935 0.024 84);
+  --card-foreground: oklch(0.27 0.03 62);
+  --popover: oklch(0.955 0.02 84);
+  --popover-foreground: oklch(0.27 0.03 62);
+  --muted-foreground: oklch(0.47 0.03 62);
+  --border: oklch(0.35 0.03 62 / 16%);
+  --input: oklch(0.35 0.03 62 / 20%);
+  --gradient-hero:
+    radial-gradient(
+      90% 70% at 15% 0%,
+      color-mix(in oklch, var(--primary) 14%, transparent),
+      transparent 65%
+    ),
+    oklch(0.92 0.026 82);
+  --shadow-cover: 0 12px 26px -16px oklch(0.35 0.04 60 / 0.35);
+}
+
+/* Type: titles in DM Sans rather than the serif, and the small uppercase labels (section
+   headings, chips, metadata) in DM Mono, as Moku sets its interface chrome. */
+:root[data-ui='minimal'] .text-display {
+  font-family: var(--font-minimal-sans), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+:root[data-ui='minimal'] .uppercase {
+  font-family: var(--font-minimal-mono), ui-monospace, monospace;
+  letter-spacing: 0.08em;
+}
+/* Settings draws Classic's preview card in Classic's type, whichever style is on. */
+:root[data-ui='minimal'] .ui-classic-preview .uppercase {
+  font-family: inherit;
+  letter-spacing: 0.05em;
+}
+:root[data-ui='minimal'] body {
+  letter-spacing: -0.005em;
+}
