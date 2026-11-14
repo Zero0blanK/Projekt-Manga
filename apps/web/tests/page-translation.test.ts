@@ -309,3 +309,43 @@ describe('finding the text on the server', () => {
     expect(pageTranslation('detected.png')).toMatchObject({ regions: [{ text: 'A dog' }] });
   });
 });
+
+describe('translating pages as they load', () => {
+  it('translates each loaded page once, one at a time', async () => {
+    const { autoTranslatePage } = await import('@/lib/page-translation');
+    let running = 0;
+    let most = 0;
+    readPageText.mockImplementation(async () => {
+      running++;
+      most = Math.max(most, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running--;
+      return [{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }];
+    });
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    autoTranslatePage('a.png', 'en');
+    autoTranslatePage('b.png', 'en');
+    autoTranslatePage('a.png', 'en');
+    await vi.waitFor(() => expect(pageTranslation('b.png')?.status).toBe('done'));
+    expect(pageTranslation('a.png')?.status).toBe('done');
+    expect(readPageText).toHaveBeenCalledTimes(2);
+    expect(most).toBe(1);
+  });
+
+  it('leaves a page shown in the original as it is', async () => {
+    const { autoTranslatePage } = await import('@/lib/page-translation');
+    readPageText.mockResolvedValue([{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }]);
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    await translatePage('kept.png', 'en');
+    showOriginal('kept.png');
+    autoTranslatePage('kept.png', 'en');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(pageTranslation('kept.png')).toMatchObject({ shown: false });
+  });
+
+  it('is off unless turned on', async () => {
+    const { READER_AUTO_TRANSLATE } = await import('@/lib/page-translation');
+    const { getSetting } = await import('@/lib/app-store');
+    expect(getSetting(READER_AUTO_TRANSLATE, false)).toBe(false);
+  });
+});

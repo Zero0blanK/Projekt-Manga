@@ -11,7 +11,11 @@ import {
   ActionButton,
 } from '@/components/settings/field-controls';
 import { PAGE_LAYOUTS, useSetting } from '@/lib/app-store';
-import { READER_TRANSLATE_TARGET, TRANSLATE_LANGUAGES } from '@/lib/page-translation';
+import {
+  READER_AUTO_TRANSLATE,
+  READER_TRANSLATE_TARGET,
+  TRANSLATE_LANGUAGES,
+} from '@/lib/page-translation';
 import { useMangaLibrary } from '@/lib/library-store';
 import {
   DEFAULT_PAGE_PREFETCH,
@@ -351,13 +355,19 @@ export function ReaderPanel() {
         </Field>
         <Field
           label="Translate pages into"
-          hint="Right-click a Japanese page and choose Translate page. Text is read on this device; only the text goes to the translation service below"
+          hint="Right-click a Japanese page and choose Translate page, or Translate all pages for the chapter"
         >
           <Select
             settingKey={READER_TRANSLATE_TARGET}
             options={TRANSLATE_LANGUAGES.map(([name]) => name)}
             defaultValue="English"
           />
+        </Field>
+        <Field
+          label="Translate pages automatically"
+          hint="Each Japanese page is translated as soon as it loads, one at a time. Show original on a page keeps it as it is"
+        >
+          <Toggle settingKey={READER_AUTO_TRANSLATE} />
         </Field>
         <Field label="Crop borders" hint="Trim white or black margins around each page">
           <Toggle settingKey={READER_CROP_BORDERS} />

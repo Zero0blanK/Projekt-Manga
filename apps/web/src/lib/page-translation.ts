@@ -253,6 +253,7 @@ export function fitFontSize(text: string, w: number, h: number, aspect: number):
 
 /** For tests. */
 export function resetPageTranslations() {
+  autoQueued.clear();
   pages.clear();
   allRun++;
   allState = { status: 'idle' };
@@ -260,4 +261,30 @@ export function resetPageTranslations() {
   serverReads = false;
   serverFindsText = true;
   listeners.forEach((listener) => listener());
+}
+
+/** Settings › Reader › Page translation › Translate pages automatically. Off unless turned on. */
+export const READER_AUTO_TRANSLATE = 'readerAutoTranslate';
+
+let autoQueue: Promise<void> = Promise.resolve();
+const autoQueued = new Set<string>();
+
+/**
+ * Translates a page that just loaded, when automatic translation is on. One page at a
+ * time, however many load at once (a long strip loads several): the server reads one page at
+ * a time anyway, and its rate limit would turn the rest away. A page translated before, or
+ * one that failed, is left as it is, so "Show original" stays shown and a page with no text
+ * isn't tried again and again.
+ */
+export function autoTranslatePage(url: string, target: TranslateTarget): void {
+  if (pages.has(url) || autoQueued.has(url)) return;
+  autoQueued.add(url);
+  autoQueue = autoQueue
+    .then(async () => {
+      if (pages.has(url)) return;
+      if (!(await translationAvailable())) return;
+      await translatePage(url, target);
+    })
+    .catch(() => undefined)
+    .finally(() => autoQueued.delete(url));
 }
