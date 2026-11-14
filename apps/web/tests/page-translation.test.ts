@@ -1,15 +1,37 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const readPageText = vi.fn();
+const readPageTextWith = vi.fn();
 const translateTexts = vi.fn();
+const api = vi.hoisted(() => ({
+  localStatus: vi.fn(async (): Promise<unknown> => ({ enabled: false })),
+  download: vi.fn(async () => ({})),
+  readBubbles: vi.fn(),
+}));
 vi.mock('@/lib/page-ocr', async (original) => ({
   ...(await original<typeof import('@/lib/page-ocr')>()),
   readPageText: (url: string) => readPageText(url),
+  readPageTextWith: (url: string, read: (images: string[]) => Promise<string[]>) =>
+    readPageTextWith(url, read),
 }));
-vi.mock('@projekt-manga/api-client', () => ({
-  getTranslateStatus: vi.fn(async () => ({ enabled: true, provider: 'libretranslate' })),
-  translateTexts: (body: unknown) => translateTexts(body),
-}));
+vi.mock('@projekt-manga/api-client', () => {
+  class ApiError extends Error {
+    constructor(
+      message: string,
+      public status: number,
+    ) {
+      super(message);
+    }
+  }
+  return {
+    ApiError,
+    getTranslateStatus: vi.fn(async () => ({ enabled: true, provider: 'libretranslate' })),
+    translateTexts: (body: unknown) => translateTexts(body),
+    getLocalTranslationStatus: () => api.localStatus(),
+    downloadLocalTranslation: () => api.download(),
+    readBubbleTexts: (body: unknown) => api.readBubbles(body),
+  };
+});
 
 import { cleanText, findTextAreas, inReadingOrder } from '@/lib/page-ocr';
 import {
@@ -24,7 +46,11 @@ import {
 afterEach(() => {
   resetPageTranslations();
   readPageText.mockReset();
+  readPageTextWith.mockReset();
   translateTexts.mockReset();
+  api.localStatus.mockReset().mockResolvedValue({ enabled: false });
+  api.download.mockClear();
+  api.readBubbles.mockReset();
 });
 
 /** A synthetic scan: paper, with hatching, ellipses and glyph-like marks painted on. */
@@ -173,5 +199,42 @@ describe('translating a page', () => {
       message: 'Translation is not set up on this server',
     });
     expect(translateTargetFor('Klingon')).toBe('en');
+  });
+
+  it('reads the bubbles on the server once its models are in, else here while they download', async () => {
+    api.localStatus.mockResolvedValue({
+      enabled: true,
+      state: 'missing',
+      size: 1,
+      targets: ['en'],
+    });
+    readPageText.mockResolvedValue([{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }]);
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    await translatePage('first.png', 'en');
+    expect(readPageText).toHaveBeenCalledWith('first.png');
+    expect(api.download).toHaveBeenCalledTimes(1);
+
+    api.localStatus.mockResolvedValue({ enabled: true, state: 'ready', size: 1, targets: ['en'] });
+    api.readBubbles.mockResolvedValue({ texts: ['犬です'] });
+    readPageTextWith.mockImplementation(async (_url, read) => {
+      const [text] = await read(['png-base64']);
+      return [{ text, x: 0, y: 0, w: 0.1, h: 0.1 }];
+    });
+    translateTexts.mockResolvedValue({ translations: ['A dog'] });
+    await translatePage('second.png', 'en');
+    expect(api.readBubbles).toHaveBeenCalledWith({ images: ['png-base64'] });
+    expect(readPageText).toHaveBeenCalledTimes(1);
+    expect(pageTranslation('second.png')).toMatchObject({ regions: [{ text: 'A dog' }] });
+  });
+
+  it('reads here again on a server from before local translation', async () => {
+    const { ApiError } = await import('@projekt-manga/api-client');
+    api.localStatus.mockResolvedValue({ enabled: true, state: 'ready', size: 1, targets: ['en'] });
+    readPageTextWith.mockRejectedValue(new ApiError('Not found', 404));
+    readPageText.mockResolvedValue([{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }]);
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    await translatePage('old-server.png', 'en');
+    expect(readPageText).toHaveBeenCalledWith('old-server.png');
+    expect(pageTranslation('old-server.png')).toMatchObject({ status: 'done' });
   });
 });

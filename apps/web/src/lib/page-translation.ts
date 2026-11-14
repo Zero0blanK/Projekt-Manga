@@ -1,12 +1,21 @@
 /**
  * Reader › Translate page: the translations shown over pages, keyed by each page's own
- * image URL. Japanese only for now: the text is read on the device (lib/page-ocr.ts) and
- * only that text goes to the server's translation service.
+ * image URL. Japanese only for now. The bubbles are found on the device (lib/page-ocr.ts);
+ * the server's manga-ocr reads them when its local translation models are in, else
+ * Tesseract does here. The text then goes to the server's translation service: the
+ * reader's own, the host's, or the server's own model (English).
  */
 import { useSyncExternalStore } from 'react';
-import { getTranslateStatus, translateTexts } from '@projekt-manga/api-client';
+import {
+  ApiError,
+  downloadLocalTranslation,
+  getLocalTranslationStatus,
+  getTranslateStatus,
+  readBubbleTexts,
+  translateTexts,
+} from '@projekt-manga/api-client';
 import type { TranslateTarget } from '@projekt-manga/schemas';
-import { readPageText, type TextRegion } from '@/lib/page-ocr';
+import { readPageText, readPageTextWith, type TextRegion } from '@/lib/page-ocr';
 
 export const READER_TRANSLATE_TARGET = 'readerTranslateTarget';
 
@@ -79,6 +88,36 @@ export function translationAvailable(): Promise<boolean> {
   return status;
 }
 
+/** Once the server's models are in, they stay in: asked again only until then. */
+let serverReads = false;
+
+/**
+ * The page's Japanese text: read by the server's manga-ocr when its models are in, else by
+ * Tesseract here. Models not yet downloaded start downloading (local translation's first
+ * use), and this page is read here meanwhile.
+ */
+async function readPage(url: string): Promise<TextRegion[]> {
+  if (!serverReads) {
+    const local = await getLocalTranslationStatus().catch(() => null);
+    if (local?.enabled && local.state === 'ready') serverReads = true;
+    else if (local?.enabled && (local.state === 'missing' || local.state === 'error'))
+      void downloadLocalTranslation().catch(() => undefined);
+  }
+  if (serverReads) {
+    try {
+      return await readPageTextWith(
+        url,
+        async (images) => (await readBubbleTexts({ images })).texts,
+      );
+    } catch (error) {
+      // A server from before local translation: read here, as it used to.
+      if (!(error instanceof ApiError && error.status === 404)) throw error;
+      serverReads = false;
+    }
+  }
+  return readPageText(url);
+}
+
 const messageOf = (error: unknown) =>
   error instanceof Error && error.message ? error.message : "The page couldn't be translated";
 
@@ -95,7 +134,7 @@ export async function translatePage(url: string, target: TranslateTarget): Promi
   }
   set(url, { status: 'working' });
   try {
-    const regions = await readPageText(url);
+    const regions = await readPage(url);
     if (regions.length === 0) {
       set(url, { status: 'error', message: 'No Japanese text was found on this page' });
       return;
@@ -141,5 +180,6 @@ export function fitFontSize(text: string, w: number, h: number, aspect: number):
 export function resetPageTranslations() {
   pages.clear();
   status = null;
+  serverReads = false;
   listeners.forEach((listener) => listener());
 }

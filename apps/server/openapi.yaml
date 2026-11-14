@@ -266,17 +266,62 @@ paths:
       summary: Whether page translation is set up, and with which service
       responses:
         '200':
-          description: '{ enabled, provider: libretranslate | deepl | null, source: ja }'
+          description: '{ enabled, provider: libretranslate | deepl | local | null, origin, server_configured, source: ja }'
+
+  /translate/local:
+    get:
+      tags: [Reader]
+      summary: Local translation's models (manga-ocr and Opus-MT) on this server
+      description: >-
+        `{ enabled: false }` when the host set LOCAL_TRANSLATION=off. Otherwise `{ enabled:
+        true, state: missing | downloading | ready | error, size, targets: [en] }`, with
+        `downloaded`/`total` bytes while downloading and `message` after a failure.
+      responses:
+        '200':
+          description: The models' state
+
+  /translate/local/download:
+    post:
+      tags: [Reader]
+      summary: Start (or join) downloading local translation's models
+      description: >-
+        About 230 MB from Hugging Face, each file pinned to a revision and checked against
+        its SHA-256, into TRANSLATION_MODELS_DIR.
+      responses:
+        '200':
+          description: The models' state, as GET /translate/local
+        '503':
+          description: Local translation is turned off on this server
+
+  /translate/read:
+    post:
+      tags: [Reader]
+      summary: Read the Japanese in one page's speech bubbles with this server's manga-ocr
+      description: >-
+        Body `{ images: string[] }`: 1–60 bubble crops from the device, PNG/JPEG/WebP,
+        base64, each ≤256 KB. At most 30 pages a minute per caller.
+      responses:
+        '200':
+          description: '{ texts: string[] } in the order of images'
+        '400':
+          description: A crop was not an image
+        '429':
+          description: Too many pages in the last minute
+        '503':
+          description: >-
+            The models are still downloading (code TRANSLATION_MODELS_DOWNLOADING), or local
+            translation is turned off
 
   /translate:
     post:
       tags: [Reader]
-      summary: Translate Japanese text read off a page on the device
+      summary: Translate Japanese text read off a page
       description: >-
         Body `{ texts: string[] (1–60, each ≤2000 chars), target }`. The source is always
-        Japanese. The service is set by TRANSLATE_PROVIDER, TRANSLATE_URL and
-        TRANSLATE_API_KEY; only the text is sent to it. At most 30 uncached calls a minute
-        per caller.
+        Japanese. The service is the reader's own (Settings), else the host's
+        (TRANSLATE_PROVIDER, TRANSLATE_URL, TRANSLATE_API_KEY), else this server's own model
+        (English only); only the text is sent to an outside service. At most 30 uncached
+        calls a minute per caller.
       responses:
         '200':
           description: '{ translations: string[] } in the order of texts'

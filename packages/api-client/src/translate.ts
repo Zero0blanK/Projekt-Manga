@@ -1,7 +1,19 @@
-import type { TranslateBody, TranslateSettingsBody } from '@projekt-manga/schemas';
+import type {
+  TranslateBody,
+  TranslateReadBody,
+  TranslateSettingsBody,
+} from '@projekt-manga/schemas';
 import { request } from './client.js';
-import type { TranslateStatus, TranslateSettings } from '@projekt-manga/types';
-export type { TranslateStatus, TranslateSettings } from '@projekt-manga/types';
+import type {
+  LocalTranslationStatus,
+  TranslateStatus,
+  TranslateSettings,
+} from '@projekt-manga/types';
+export type {
+  LocalTranslationStatus,
+  TranslateStatus,
+  TranslateSettings,
+} from '@projekt-manga/types';
 
 export const getTranslateStatus = (signal?: AbortSignal) =>
   request<TranslateStatus>('/translate/status', { signal });
@@ -19,3 +31,15 @@ export const saveTranslateSettings = (body: TranslateSettingsBody) =>
 
 export const removeTranslateSettings = () =>
   request<null>('/translate/settings', { method: 'DELETE' });
+
+/** Local translation's models on the server: whether they are here, or downloading. */
+export const getLocalTranslationStatus = (signal?: AbortSignal) =>
+  request<LocalTranslationStatus>('/translate/local', { signal });
+
+/** Starts (or joins) downloading local translation's models. */
+export const downloadLocalTranslation = () =>
+  request<LocalTranslationStatus>('/translate/local/download', { method: 'POST' });
+
+/** The Japanese in one page's speech bubbles, read by the server's manga-ocr. */
+export const readBubbleTexts = (body: TranslateReadBody, signal?: AbortSignal) =>
+  request<{ texts: string[] }>('/translate/read', { method: 'POST', body, signal });

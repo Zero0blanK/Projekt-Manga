@@ -1,8 +1,11 @@
 /**
- * Reader › Translate page, step one: finding and reading the Japanese text on a page,
- * on the device. Tesseract (WASM) runs in a worker with its vertical-Japanese model, all
- * served from this app's own `/ocr` folder (scripts/copy-ocr-assets.mjs), so pages never
- * leave the device and nothing loads from a CDN.
+ * Reader › Translate page, step one: finding and reading the Japanese text on a page.
+ *
+ * The text areas are always found on the device ({@link cropPageText}). Each is then read
+ * by the server's manga-ocr when it has its models ({@link readPageTextWith}, local
+ * translation), or else here by Tesseract (WASM) in a worker with its vertical-Japanese
+ * model ({@link readPageText}), all served from this app's own `/ocr` folder
+ * (scripts/copy-ocr-assets.mjs), so nothing loads from a CDN.
  *
  * Tesseract's own page layout finds nothing on a real manga page: the art around the
  * bubbles breaks it. So the text is found here first, and Tesseract reads one area at a
@@ -419,8 +422,18 @@ function pixelsOf(img: HTMLImageElement, longest: number) {
   return { data, width: canvas.width, height: canvas.height };
 }
 
-/** Reads the Japanese text on the page at `url`, in reading order. */
-export async function readPageText(url: string): Promise<TextRegion[]> {
+/** One text area cut out of the page, everything around it whitened, ready to read. */
+export interface PageCrop {
+  kind: TextArea['kind'];
+  grey: Grey;
+  /** Typical glyph size in the crop, in pixels. */
+  glyph: number;
+  /** Where its translation goes, as fractions of the page. */
+  region: ViewRect;
+}
+
+/** The text areas on the page at `url`, each cut out, in the order they were found. */
+export async function cropPageText(url: string): Promise<PageCrop[]> {
   const img = await loadPixels(url);
   const scan = pixelsOf(img, SCAN_SIZE);
   const areas = findTextAreas(scan.data, scan.width, scan.height);
@@ -428,8 +441,7 @@ export async function readPageText(url: string): Promise<TextRegion[]> {
   const page = pixelsOf(img, OCR_MAX_SIDE);
   // Page pixels per scan pixel.
   const ratio = page.width / scan.width;
-  const ocr = await ocrWorker();
-  const regions: TextRegion[] = [];
+  const crops: PageCrop[] = [];
   for (const area of areas) {
     const x0 = Math.floor(area.box.x0 * ratio);
     const y0 = Math.floor(area.box.y0 * ratio);
@@ -448,15 +460,6 @@ export async function readPageText(url: string): Promise<TextRegion[]> {
     const grey = { pixels, width, height };
     const { glyph, ink } = measureInk(grey);
     if (ink.x1 <= ink.x0) continue;
-    const { data } = await ocr.recognize(cropCanvas(grey, glyph), {}, { blocks: true });
-    const paragraphs = (data.blocks ?? []).flatMap((block) => block.paragraphs);
-    const characters = paragraphs.reduce((sum, p) => sum + p.text.length, 0);
-    const confidence = characters
-      ? paragraphs.reduce((sum, p) => sum + p.confidence * p.text.length, 0) / characters
-      : 0;
-    const text = cleanText(paragraphs.map((p) => p.text).join(''));
-    if (confidence < MIN_CONFIDENCE[area.kind]) continue;
-    if ((text.match(JAPANESE)?.length ?? 0) < MIN_CHARACTERS) continue;
     // The translation goes over the bubble's inside (an ellipse's inner rectangle), and
     // always over all of the ink.
     const inset = area.kind === 'bubble' ? 0.15 : 0;
@@ -466,13 +469,88 @@ export async function readPageText(url: string): Promise<TextRegion[]> {
       x1: Math.max(x0 + width * (1 - inset), x0 + ink.x1),
       y1: Math.max(y0 + height * (1 - inset), y0 + ink.y1),
     };
-    regions.push({
-      text,
-      x: box.x0 / page.width,
-      y: box.y0 / page.height,
-      w: (box.x1 - box.x0) / page.width,
-      h: (box.y1 - box.y0) / page.height,
+    crops.push({
+      kind: area.kind,
+      grey,
+      glyph,
+      region: {
+        x: box.x0 / page.width,
+        y: box.y0 / page.height,
+        w: (box.x1 - box.x0) / page.width,
+        h: (box.y1 - box.y0) / page.height,
+      },
     });
   }
+  return crops;
+}
+
+/** Dialogue rather than a sound effect or noise: enough kana or kanji. */
+export function isDialogue(text: string): boolean {
+  return (text.match(JAPANESE)?.length ?? 0) >= MIN_CHARACTERS;
+}
+
+/** The longest side a crop is sent to the server at: the model reads it at 224px. */
+const SERVER_CROP_SIDE = 448;
+
+/** A crop as the server's manga-ocr takes it: grey on white, PNG, base64. */
+export async function cropAsPng({ grey }: PageCrop): Promise<string> {
+  const scale = Math.min(1, SERVER_CROP_SIDE / Math.max(grey.width, grey.height));
+  const source = document.createElement('canvas');
+  source.width = grey.width;
+  source.height = grey.height;
+  const sourceContext = source.getContext('2d')!;
+  const image = sourceContext.createImageData(grey.width, grey.height);
+  for (let i = 0; i < grey.pixels.length; i++) {
+    image.data[i * 4] = image.data[i * 4 + 1] = image.data[i * 4 + 2] = grey.pixels[i];
+    image.data[i * 4 + 3] = 255;
+  }
+  sourceContext.putImageData(image, 0, 0);
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(grey.width * scale));
+  out.height = Math.max(1, Math.round(grey.height * scale));
+  const context = out.getContext('2d')!;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(source, 0, 0, out.width, out.height);
+  return out.toDataURL('image/png').slice('data:image/png;base64,'.length);
+}
+
+/** Reads the Japanese text on the page at `url` on the device (Tesseract), in reading order. */
+export async function readPageText(url: string): Promise<TextRegion[]> {
+  const crops = await cropPageText(url);
+  if (crops.length === 0) return [];
+  const ocr = await ocrWorker();
+  const regions: TextRegion[] = [];
+  for (const crop of crops) {
+    const { data } = await ocr.recognize(cropCanvas(crop.grey, crop.glyph), {}, { blocks: true });
+    const paragraphs = (data.blocks ?? []).flatMap((block) => block.paragraphs);
+    const characters = paragraphs.reduce((sum, p) => sum + p.text.length, 0);
+    const confidence = characters
+      ? paragraphs.reduce((sum, p) => sum + p.confidence * p.text.length, 0) / characters
+      : 0;
+    const text = cleanText(paragraphs.map((p) => p.text).join(''));
+    if (confidence < MIN_CONFIDENCE[crop.kind]) continue;
+    if (!isDialogue(text)) continue;
+    regions.push({ text, ...crop.region });
+  }
+  return inReadingOrder(regions);
+}
+
+/**
+ * Reads the Japanese text on the page at `url` with the server's manga-ocr, in reading
+ * order. `read` takes the page's crops (PNG, base64) and returns their text in order.
+ */
+export async function readPageTextWith(
+  url: string,
+  read: (images: string[]) => Promise<string[]>,
+): Promise<TextRegion[]> {
+  const crops = (await cropPageText(url)).slice(0, 60);
+  if (crops.length === 0) return [];
+  const texts = await read(await Promise.all(crops.map(cropAsPng)));
+  const regions: TextRegion[] = [];
+  crops.forEach((crop, index) => {
+    // manga-ocr's own output: already tidy, unlike Tesseract's (see cleanText).
+    const text = (texts[index] ?? '').trim();
+    if (isDialogue(text)) regions.push({ text, ...crop.region });
+  });
   return inReadingOrder(regions);
 }

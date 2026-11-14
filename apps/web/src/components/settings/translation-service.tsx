@@ -2,10 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import {
+  downloadLocalTranslation,
+  getLocalTranslationStatus,
   getTranslateSettings,
   getTranslateStatus,
   removeTranslateSettings,
   saveTranslateSettings,
+  type LocalTranslationStatus,
   type TranslateSettings,
   type TranslateStatus,
 } from '@projekt-manga/api-client';
@@ -29,6 +32,93 @@ const PROVIDERS: Array<{ provider: Provider; label: string; help: string }> = [
 
 const INPUT =
   'w-full rounded-lg border border-border/60 bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary/60';
+
+const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
+
+/**
+ * Translation on this server: manga-ocr reads the bubbles and Opus-MT translates them to
+ * English, with models downloaded once (about 230 MB). Shows whether they are in, and the
+ * download while it runs.
+ */
+function LocalTranslation({ active }: { active: boolean }) {
+  const [local, setLocal] = useState<LocalTranslationStatus | null | undefined>(undefined);
+  const [failed, setFailed] = useState('');
+
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = () =>
+      getLocalTranslationStatus()
+        .then((next) => {
+          if (stopped) return;
+          setLocal(next);
+          if (next.enabled && next.state === 'downloading') timer = setTimeout(poll, 1500);
+        })
+        .catch(() => !stopped && setLocal(null));
+    void poll();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [local?.enabled && local.state === 'downloading']);
+
+  // A server from before local translation, or one whose host turned it off.
+  if (local === undefined || local === null || !local.enabled) return null;
+
+  const download = () => {
+    setFailed('');
+    downloadLocalTranslation()
+      .then(setLocal)
+      .catch((error: unknown) => setFailed(errorText(error, "Couldn't start the download.")));
+  };
+
+  return (
+    <section
+      aria-label="Translate on this computer"
+      className="space-y-2 rounded-xl border border-border/60 bg-background/40 p-4"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-foreground">Translate on this computer</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            manga-ocr reads the speech bubbles and Opus-MT translates them into English, on this
+            server. No account or key, and nothing goes to another service.
+            {active ? ' In use for English.' : ''}
+          </p>
+        </div>
+        {(local.state === 'missing' || local.state === 'error') && (
+          <ActionButton onClick={download}>Download ({megabytes(local.size)})</ActionButton>
+        )}
+      </div>
+      {local.state === 'ready' && (
+        <p className="text-xs text-muted-foreground">Models downloaded and ready.</p>
+      )}
+      {local.state === 'missing' && (
+        <p className="text-xs text-muted-foreground">
+          The models download once, the first time you translate a page, or now.
+        </p>
+      )}
+      {local.state === 'downloading' && (
+        <div role="status" className="space-y-1">
+          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-[width]"
+              style={{ width: `${Math.round((local.downloaded / local.total) * 100)}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Downloading the models: {megabytes(local.downloaded)} of {megabytes(local.total)}
+          </p>
+        </div>
+      )}
+      {(local.state === 'error' || failed) && (
+        <p role="alert" className="text-xs text-destructive">
+          {failed || (local.state === 'error' ? local.message : '')}
+        </p>
+      )}
+    </section>
+  );
+}
 
 const errorText = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback;
@@ -128,9 +218,13 @@ export function TranslationService() {
           ? `Pages are translated with your ${PROVIDERS.find((p) => p.provider === saved.provider)?.label} service.`
           : status?.server_configured
             ? 'Pages are translated with the service this server provides. Add your own to use it instead.'
-            : 'No translation service yet. Add one to use Translate page in the reader.'}{' '}
-        Only the text read off a page is sent, never the image.
+            : status?.provider === 'local'
+              ? 'Pages are translated into English on this server. For other languages, add DeepL or LibreTranslate below.'
+              : 'No translation service yet. Add one to use Translate page in the reader.'}{' '}
+        A DeepL or LibreTranslate service only ever gets the text read off a page, never the image.
       </p>
+
+      <LocalTranslation active={status?.provider === 'local'} />
 
       {saved?.has_key && !saved.key_readable && (
         <p role="alert" className="text-xs text-destructive">

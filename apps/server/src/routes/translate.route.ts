@@ -1,14 +1,17 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import {
   translateBodySchema,
+  translateReadBodySchema,
   translateSettingsBodySchema,
   type TranslateBody,
+  type TranslateReadBody,
   type TranslateSettingsBody,
 } from '@projekt-manga/schemas';
 import { validateBody } from '../middleware/validate.middleware.js';
 import { requireAdmin } from '../middleware/admin.middleware.js';
 import { HTTPSuccessResponse } from '../utils/responseHandlers.js';
-import translateService from '../services/translate.service.js';
+import translateService, { checkReadRate } from '../services/translate.service.js';
+import localTranslation, { decodeImages } from '../services/localTranslation.service.js';
 import translationSettings from '../services/translationSetting.service.js';
 
 /**
@@ -56,6 +59,28 @@ router.delete(
   run(async (req) => {
     await translationSettings.remove(owner(req));
     return null;
+  }),
+);
+
+/** Local translation's models: whether they are here, and their download. */
+router.get(
+  '/local',
+  run(() => localTranslation.status()),
+);
+router.post(
+  '/local/download',
+  run(() => localTranslation.download()),
+);
+
+/** The Japanese in one page's speech bubbles, read by this server's manga-ocr. */
+router.post(
+  '/read',
+  validateBody(translateReadBodySchema),
+  run(async (req) => {
+    const identity = req.user?.id ?? `ip:${req.ip ?? 'unknown'}`;
+    checkReadRate(identity);
+    const { images } = req.validated as TranslateReadBody;
+    return { texts: await localTranslation.read(decodeImages(images)) };
   }),
 );
 

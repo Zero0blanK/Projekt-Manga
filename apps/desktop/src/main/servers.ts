@@ -332,6 +332,10 @@ export async function startServers(
       // The desktop's only reader is its host, so a translation service saved in Settings
       // may be a LibreTranslate on this machine or the LAN.
       TRANSLATE_ALLOW_PRIVATE_HOSTS: 'true',
+      // Local page translation's models (about 230 MB, downloaded on first use): beside
+      // the installed sources, for the same reasons, so an update doesn't download them
+      // again and a per-machine install can still save them.
+      TRANSLATION_MODELS_DIR: path.join(path.dirname(extensionBundlesDir), 'translation-models'),
       // Only when generated here: a key the user set in their own environment is
       // inherited unchanged.
       ...(apiSecrets.tokenEncryptionKey
