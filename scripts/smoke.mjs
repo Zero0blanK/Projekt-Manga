@@ -2054,8 +2054,25 @@ try {
       'A cleared revoked session must not be sent again',
     );
     fixtureSyncRevoked = false;
+    // Clearing the revoked session also drops its cookie, so the web app sees it is signed
+    // out without being told. Sign in again to check the Sign out button itself.
     await page.getByRole('button', { name: 'Profile', exact: true }).click();
-    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await page.getByRole('tab', { name: 'Sign in' }).click({ timeout: 15_000 });
+    await page.getByLabel('Email').fill('smoke-reader@example.test');
+    await page.getByLabel('Password').fill('fixture-password');
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: 'domcontentloaded' }),
+      page.getByRole('button', { name: 'Sign in', exact: true }).click(),
+    ]);
+    await page.getByRole('button', { name: 'Profile', exact: true }).click();
+    try {
+      await page.getByRole('button', { name: 'Sign out', exact: true }).click({ timeout: 15_000 });
+    } catch (error) {
+      throw new Error(
+        `No Sign out button on Profile after signing in again. URL: ${page.url()}; body: ${(await page.locator('body').innerText()).slice(0, 1600)}; auth requests: ${apiRequests.filter((request) => request.includes('/auth/')).slice(-8)}`,
+        { cause: error },
+      );
+    }
     await page.getByRole('button', { name: 'Profile', exact: true }).click();
     await page.getByRole('tab', { name: 'Sign in' }).waitFor();
     const requestsBeforeSignedOutSync = syncCookies.length;

@@ -560,5 +560,11 @@ try {
   if (restartedServer) await stopServer(restartedServer);
   if (webServer) await stopServer(webServer);
   await browser?.close();
-  if (workDir && workDir.startsWith(tempRoot)) await rm(workDir, { recursive: true, force: true });
+  // Windows can hold a just-stopped server's files for a moment. Retry, and never let the
+  // cleanup replace the smoke's own error.
+  if (workDir && workDir.startsWith(tempRoot)) {
+    await rm(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 }).catch(
+      (error) => console.warn(`Could not remove ${workDir}: ${error.message}`),
+    );
+  }
 }
