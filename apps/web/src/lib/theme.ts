@@ -85,19 +85,20 @@ export const ACCENTS: Array<{ value: string; label: string }> = [
  * frosted-glass surfaces, near-black (or paper) layers, DM Sans with DM Mono labels, small
  * corners and quick motion, on this app's own layout. Its tokens are in `styles.css` under
  * `data-ui="frost"` (with the credit for where they come from), and its own palettes are
- * picked by `data-frost` on `<html>`.
+ * picked by `data-frost` on `<html>`. Ink is the third, described with its palettes below.
  */
-export type UiStyle = 'classic' | 'frost';
+export type UiStyle = 'classic' | 'frost' | 'ink';
 
 export const UI_STYLES: Array<{ id: UiStyle; label: string; hint: string }> = [
   { id: 'classic', label: 'Classic', hint: 'The look you know: rounded, warm, roomy' },
   { id: 'frost', label: 'Frost', hint: 'Frosted glass, compact and quiet' },
+  { id: 'ink', label: 'Ink', hint: 'Bold outlines and hard shadows, like a comic panel' },
 ];
 
 export const DEFAULT_UI_STYLE: UiStyle = 'classic';
 
 export function resolveUiStyle(value: unknown): UiStyle {
-  return value === 'frost' ? 'frost' : DEFAULT_UI_STYLE;
+  return value === 'frost' || value === 'ink' ? value : DEFAULT_UI_STYLE;
 }
 
 /** Frost's own palettes. Each has its own accent. */
@@ -169,23 +170,91 @@ export const FROST_ACCENTS: Record<Exclude<FrostThemeId, 'auto'>, string> = {
   light: '#3f9142',
 };
 
+/**
+ * Ink: thick dark outlines, hard offset shadows with no blur, flat fills, square-ish
+ * corners and a heavy grotesque for titles, as in neo-brutalist design, with the reading
+ * text left in the app's plain sans. Its tokens are in `styles.css` under `data-ui="ink"`
+ * (with the references), and its palettes are picked by `data-ink` on `<html>`.
+ */
+export type InkThemeId = 'paper' | 'blueprint' | 'night' | 'auto';
+
+export type InkThemeOption = Omit<ThemeOption, 'id'> & { id: InkThemeId };
+
+export const INK_THEMES: InkThemeOption[] = [
+  {
+    id: 'paper',
+    label: 'Paper',
+    hint: 'Black ink on cream, red accent',
+    preview: { background: '#fbf6ea', surface: '#ffffff', foreground: '#111111' },
+  },
+  {
+    id: 'blueprint',
+    label: 'Blueprint',
+    hint: 'Pale blue page, blue accent',
+    preview: { background: '#dfeafe', surface: '#ffffff', foreground: '#111111' },
+  },
+  {
+    id: 'night',
+    label: 'Night',
+    hint: 'Slate page, black ink, yellow accent',
+    preview: { background: '#2c2b33', surface: '#1d1c22', foreground: '#f4efe4' },
+  },
+  {
+    id: 'auto',
+    label: 'Auto',
+    hint: 'Paper or Night, as your system',
+    preview: { background: '#2c2b33', surface: '#fbf6ea', foreground: '#6b6873' },
+  },
+];
+
+export const DEFAULT_INK_THEME: InkThemeId = 'paper';
+
+export function resolveInkTheme(theme: unknown): Exclude<InkThemeId, 'auto'> {
+  const id = String(theme || DEFAULT_INK_THEME).toLowerCase();
+  if (id === 'auto') {
+    return typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'night'
+      : 'paper';
+  }
+  return (INK_THEMES.some((t) => t.id === id) ? id : DEFAULT_INK_THEME) as Exclude<
+    InkThemeId,
+    'auto'
+  >;
+}
+
+/** Each Ink palette's own accent. */
+export const INK_ACCENTS: Record<Exclude<InkThemeId, 'auto'>, string> = {
+  paper: '#ff5f4a',
+  blueprint: '#5294ff',
+  night: '#facc00',
+};
+
 /** Frost sets its body in 13px where Classic's is 14px: the same scale, a size smaller. */
 const FROST_TYPE_SCALE = 13 / 14;
 
 /**
- * The accent picked, or none: Classic then uses its default, and Frost its palette's own
- * accent from `styles.css`.
+ * The accent picked, or none: Classic then uses its default, and Frost and Ink their
+ * palette's own accent from `styles.css`.
  */
 export function effectiveAccent(accent: unknown, uiStyle: unknown): string | null {
   if (isValidAccent(accent)) return accent;
-  return resolveUiStyle(uiStyle) === 'frost' ? null : DEFAULT_ACCENT;
+  return resolveUiStyle(uiStyle) === 'classic' ? DEFAULT_ACCENT : null;
 }
 
 /** The accent the swatches show as current. */
-export function shownAccent(accent: unknown, uiStyle: unknown, frostTheme: unknown): string {
+export function shownAccent(
+  accent: unknown,
+  uiStyle: unknown,
+  frostTheme: unknown,
+  inkTheme?: unknown,
+): string {
+  const style = resolveUiStyle(uiStyle);
   return (
-    effectiveAccent(accent, uiStyle) ??
-    FROST_ACCENTS[resolveFrostTheme(frostTheme)] ??
+    effectiveAccent(accent, style) ??
+    (style === 'ink'
+      ? INK_ACCENTS[resolveInkTheme(inkTheme)]
+      : FROST_ACCENTS[resolveFrostTheme(frostTheme)]) ??
     DEFAULT_ACCENT
   );
 }
@@ -249,6 +318,10 @@ export type AppearanceSettings = {
   frostTheme?: string;
   /** Frost's glass; false gives solid surfaces. */
   frostGlass?: boolean;
+  /** Ink's palette (Ink style only). */
+  inkTheme?: string;
+  /** Ink's dotted screentone page; false gives a plain page. */
+  inkTone?: boolean;
 };
 
 /** Applies appearance to `<html>`. Mirrored by THEME_INIT_SCRIPT — keep the two in step. */
@@ -256,14 +329,27 @@ export function applyAppearance(settings: AppearanceSettings) {
   const root = document.documentElement;
   const style = resolveUiStyle(settings.uiStyle);
   const frost = style === 'frost' ? resolveFrostTheme(settings.frostTheme) : null;
-  // Frost keeps data-theme on the nearest Classic one, which is what dark/light checks read.
-  const resolved = frost ? (frost === 'light' ? 'light' : 'dark') : resolveTheme(settings.theme);
+  const ink = style === 'ink' ? resolveInkTheme(settings.inkTheme) : null;
+  // Frost and Ink keep data-theme on the nearest Classic one, which is what dark/light
+  // checks read.
+  const resolved = frost
+    ? frost === 'light'
+      ? 'light'
+      : 'dark'
+    : ink
+      ? ink === 'night'
+        ? 'dark'
+        : 'light'
+      : resolveTheme(settings.theme);
 
   root.setAttribute('data-theme', resolved);
   root.setAttribute('data-ui', style);
   if (frost) root.setAttribute('data-frost', frost);
   else root.removeAttribute('data-frost');
+  if (ink) root.setAttribute('data-ink', ink);
+  else root.removeAttribute('data-ink');
   root.classList.toggle('frost-off', frost !== null && settings.frostGlass === false);
+  root.classList.toggle('ink-tone-off', ink !== null && settings.inkTone === false);
   root.classList.toggle('dark', !LIGHT_THEMES.includes(resolved));
 
   const accent = effectiveAccent(settings.accent, settings.uiStyle);
@@ -303,7 +389,7 @@ var s=(JSON.parse(localStorage.getItem(${JSON.stringify(APP_STATE_STORAGE_KEY)})
 var L=${JSON.stringify(LIGHT_THEMES)},r=document.documentElement;
 var t=String(s.theme||${JSON.stringify(DEFAULT_THEME)}).toLowerCase();
 if(t==="auto"){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}
-var u=s.uiStyle==="frost"?"frost":"classic";
+var u=s.uiStyle==="frost"||s.uiStyle==="ink"?s.uiStyle:"classic";
 if(u==="frost"){
 var M=${JSON.stringify(FROST_THEMES.map((theme) => theme.id))};
 var m=String(s.frostTheme||${JSON.stringify(DEFAULT_FROST_THEME)}).toLowerCase();
@@ -311,6 +397,14 @@ if(m==="auto"){m=window.matchMedia("(prefers-color-scheme: dark)").matches?"orig
 if(M.indexOf(m)===-1){m=${JSON.stringify(DEFAULT_FROST_THEME)};}
 r.setAttribute("data-frost",m);t=m==="light"?"light":"dark";
 if(s.frostGlass===false){r.classList.add("frost-off");}
+}
+if(u==="ink"){
+var K=${JSON.stringify(INK_THEMES.map((theme) => theme.id))};
+var k=String(s.inkTheme||${JSON.stringify(DEFAULT_INK_THEME)}).toLowerCase();
+if(k==="auto"){k=window.matchMedia("(prefers-color-scheme: dark)").matches?"night":"paper";}
+if(K.indexOf(k)===-1){k=${JSON.stringify(DEFAULT_INK_THEME)};}
+r.setAttribute("data-ink",k);t=k==="night"?"dark":"light";
+if(s.inkTone===false){r.classList.add("ink-tone-off");}
 }
 r.setAttribute("data-theme",t);
 r.setAttribute("data-ui",u);

@@ -961,3 +961,212 @@ html[data-skip-splash] .splash-root {
 :root[data-ui='frost'] :is([role='menu'], [role='listbox'])[data-state='open'] {
   animation: frost-fade-up 0.18s ease both;
 }
+
+/* ---------------------------------------------------------------------------------------
+   Interface style: Ink (Settings > Appearance > Interface style)
+
+   Neo-brutalist, drawn like a comic panel: thick dark outlines, hard offset shadows with
+   no blur, flat fills, small corners, a heavy grotesque for titles, and a faint
+   screentone on the page. Like Frost it keeps the app's layout and only changes the look.
+
+   References:
+   - Nielsen Norman Group, "Neobrutalism: Definition and Best Practices" (2025): high
+     contrast, thick borders, solid single-colour shadows offset by about 4px, 2-3 bold
+     colours that still meet text contrast, a plain body face, and clear interactive
+     states. https://www.nngroup.com/articles/neobrutalism/
+   - neobrutalism.dev (shadcn/ui components), Copyright (c) 2023 Samuel Breznjak, MIT
+     licence (a copy is in licenses/neobrutalism-components-LICENSE): the 2px border,
+     4px 4px 0 shadow, 5px radius, the Blueprint palette and accent, the chart colours,
+     and buttons that press into their shadow on hover. Changes: mapped onto this app's
+     theme variables and applied to its own components here; Paper and Night are this
+     app's own palettes.
+   --------------------------------------------------------------------------------------- */
+
+/* Ink's title face. Body text stays in the app's sans, as NN/g recommends. */
+:root {
+  --font-ink-display: 'Space Grotesk Variable', 'Space Grotesk';
+}
+
+/* Paper (the default palette): black ink on cream, red accent. */
+:root[data-ui='ink'] {
+  color-scheme: light;
+  --ink: #111111;
+  --ink-page: #fbf6ea;
+  --ink-surface: #ffffff;
+  --ink-raised: #f3ecdc;
+  --ink-text: #111111;
+  --ink-muted: #57534a;
+  --ink-line: #111111;
+  --ink-accent: #ff5f4a;
+  --ink-on-accent: #111111;
+  --ink-error: #d62828;
+  --ink-on-error: #ffffff;
+  --ink-tone: rgba(17, 17, 17, 0.07);
+  --ink-shadow: 4px 4px 0 0 var(--ink);
+  --ink-shadow-small: 3px 3px 0 0 var(--ink);
+
+  /* The app's tokens, from the palette above. */
+  --radius: 5px;
+  --background: var(--ink-page);
+  --foreground: var(--ink-text);
+  --surface: var(--ink-surface);
+  --surface-elevated: var(--ink-surface);
+  --card: var(--ink-surface);
+  --card-foreground: var(--ink-text);
+  --popover: var(--ink-surface);
+  --popover-foreground: var(--ink-text);
+  --primary: var(--ink-accent);
+  --primary-foreground: var(--ink-on-accent);
+  --secondary: var(--ink-raised);
+  --secondary-foreground: var(--ink-text);
+  --muted: var(--ink-raised);
+  --muted-foreground: var(--ink-muted);
+  --accent: var(--ink-raised);
+  --accent-foreground: var(--ink-text);
+  --destructive: var(--ink-error);
+  --destructive-foreground: var(--ink-on-error);
+  --border: var(--ink-line);
+  --input: var(--ink);
+  --ring: var(--ink);
+  --chart-1: #5294ff;
+  --chart-2: #ff4d50;
+  --chart-3: #facc00;
+  --chart-4: #05e17a;
+  --chart-5: #7a83ff;
+  --sidebar: var(--ink-surface);
+  --sidebar-foreground: var(--ink-text);
+  --sidebar-primary: var(--ink-accent);
+  --sidebar-primary-foreground: var(--ink-on-accent);
+  --sidebar-accent: var(--ink-raised);
+  --sidebar-accent-foreground: var(--ink-text);
+  --sidebar-border: var(--ink);
+  --sidebar-ring: var(--ink);
+  --scrollbar-thumb: var(--ink);
+  --scrollbar-thumb-hover: var(--ink);
+  --gradient-primary: linear-gradient(var(--primary), var(--primary));
+  --gradient-surface: linear-gradient(var(--ink-surface), var(--ink-surface));
+  --gradient-hero: var(--ink-raised);
+  --shadow-cover: var(--ink-shadow);
+  --shadow-glow: 0 0 0 0 transparent;
+  --default-transition-duration: 0.1s;
+  --default-transition-timing-function: ease-out;
+}
+
+/* Blueprint: pale blue page and blue accent, after neobrutalism.dev's blue palette. */
+:root[data-ui='ink'][data-ink='blueprint'] {
+  --ink-page: #dfeafe;
+  --ink-raised: #eaf1ff;
+  --ink-muted: #3f4a5c;
+  --ink-accent: #5294ff;
+  --ink-tone: rgba(17, 17, 17, 0.06);
+}
+
+/* Night: a slate page that black ink and shadows still stand out on, yellow accent.
+   Lines inside a surface are lifted so they don't vanish into the dark fill. */
+:root[data-ui='ink'][data-ink='night'] {
+  color-scheme: dark;
+  --ink: #000000;
+  --ink-page: #2c2b33;
+  --ink-surface: #1d1c22;
+  --ink-raised: #26252c;
+  --ink-text: #f4efe4;
+  --ink-muted: #b4afa5;
+  --ink-line: #4a4852;
+  --ink-accent: #facc00;
+  --ink-on-accent: #111111;
+  --ink-error: #ff6b6b;
+  --ink-on-error: #111111;
+  --ink-tone: rgba(0, 0, 0, 0.22);
+}
+
+/* The page, with the screentone (Settings > Appearance > Screentone). */
+:root[data-ui='ink'] :is(body, [data-slot='app-page']) {
+  background-color: var(--ink-page);
+  background-image: radial-gradient(var(--ink-tone) 1px, transparent 1.5px);
+  background-size: 12px 12px;
+}
+:root[data-ui='ink'].ink-tone-off :is(body, [data-slot='app-page']) {
+  background-image: none;
+}
+
+/* Surfaces that float over the page (cards and panels, menus and popovers, dialogs and
+   sheets, the navigation bar) are inked: a dark outline and a hard shadow. Not pills,
+   buttons and links, which are handled below. */
+:root[data-ui='ink']
+  :is(
+    .bg-card,
+    [class*='bg-card/'],
+    .bg-popover,
+    [class*='bg-popover/'],
+    .bg-surface,
+    [class*='bg-surface/'],
+    [role='dialog'],
+    [role='alertdialog'],
+    [role='menu'],
+    [role='listbox']
+  ):not(button, a, .rounded-full) {
+  background-color: var(--ink-surface);
+  border-color: var(--ink);
+  box-shadow: var(--ink-shadow);
+}
+/* Outlines are thick, wherever a surface or control already has a full border. */
+:root[data-ui='ink'] .border {
+  border-width: 2px;
+}
+
+/* Covers are panels too. */
+:root[data-ui='ink'] .shadow-cover {
+  border: 2px solid var(--ink);
+}
+
+/* Filled buttons: outlined, with a small shadow they press into on hover and click. */
+:root[data-ui='ink']
+  :is(button, a):is(.bg-primary, .bg-destructive, .bg-secondary):not(.rounded-full, :disabled) {
+  border: 2px solid var(--ink);
+  box-shadow: var(--ink-shadow-small);
+  transition-property: transform, box-shadow, background-color, color;
+}
+:root[data-ui='ink']
+  :is(button, a):is(.bg-primary, .bg-destructive, .bg-secondary):not(.rounded-full, :disabled):is(
+    :hover,
+    :active
+  ) {
+  transform: translate(3px, 3px);
+  box-shadow: none;
+}
+
+/* Focus is always a solid outline, never colour alone. */
+:root[data-ui='ink'] :focus-visible {
+  outline: 2px solid var(--ink-text);
+  outline-offset: 2px;
+}
+
+/* Type: heavy grotesque titles and labels; the reading text is left alone. */
+:root[data-ui='ink'] .text-display {
+  font-family: var(--font-ink-display), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+:root[data-ui='ink'] .uppercase {
+  font-family: var(--font-ink-display), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+/* Accent-coloured text is deepened toward the ink so it still reads as text: a bright
+   fill accent alone is too light for small type on a pale page. */
+:root[data-ui='ink'] .text-primary {
+  color: color-mix(in oklch, var(--primary) 60%, var(--ink-text));
+}
+
+/* Selected text is highlighted like a marker. */
+:root[data-ui='ink'] ::selection {
+  background: var(--ink-accent);
+  color: var(--ink-on-accent);
+}
+
+/* Square ink scrollbars. */
+:root[data-ui='ink'] ::-webkit-scrollbar-thumb {
+  border-radius: 0;
+  border-width: 3px;
+}
