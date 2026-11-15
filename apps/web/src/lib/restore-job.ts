@@ -17,7 +17,7 @@ import { toast } from '@/hooks/use-toast';
 import { setState } from './app-store';
 import { queryClient, queryKeys } from './query-client';
 import { profileSettingsForImport, replaceProfileSettings } from './profile-settings';
-import { applyTachiyomiImportExtras, clearTachiyomiImportExtras } from './tachiyomi-backup/extras';
+import { applyExternalImportExtras, clearExternalImportExtras } from './external-backup/extras';
 
 /**
  * The restore this browser is tracking: the one record of it (localStorage, so it
@@ -160,7 +160,7 @@ export async function startTrackedRestore(
       // The upload may still have arrived; give the server its grace period from now.
       markRestoreAccepted(tracked.id);
     } else {
-      clearTachiyomiImportExtras(tracked.id);
+      clearExternalImportExtras(tracked.id);
       clearPendingRestore(tracked.id);
     }
     throw error;
@@ -297,7 +297,7 @@ export function markRestoreAccepted(id: string): void {
 export function discardTrackedRestore(): void {
   const pending = getPendingRestore();
   if (!pending) return;
-  clearTachiyomiImportExtras(pending.id);
+  clearExternalImportExtras(pending.id);
   clearPendingRestore(pending.id);
 }
 
@@ -313,7 +313,7 @@ export async function cancelPendingRestore(): Promise<'cancelled' | 'running'> {
   if (!pending || pending.failed || pending.cancelled) return 'cancelled';
   const job = await cancelReplaceRestore(pending.id, pending.owner);
   if (job.state === 'cancelled') {
-    clearTachiyomiImportExtras(pending.id);
+    clearExternalImportExtras(pending.id);
     store({ ...pending, cancelled: true }, 'started');
     return 'cancelled';
   }
@@ -366,7 +366,7 @@ export async function checkPendingRestore(
     return 'cancelled';
   }
   if (job.state === 'failed') {
-    clearTachiyomiImportExtras(pending.id);
+    clearExternalImportExtras(pending.id);
     store({ ...pending, failed: true }, 'started');
     toast({ description: 'Restore failed. Your previous library and history were kept.' });
     return 'failed';
@@ -390,8 +390,8 @@ export async function checkPendingRestore(
   await refreshRestoredLibrary();
   signal?.throwIfAborted();
   clearPendingRestore(pending.id);
-  // A Tachiyomi import's categories and tracker links need the restored titles' ids.
-  const extras = await applyTachiyomiImportExtras(pending.id, owner).catch(() => null);
+  // An external backup import's categories and tracker links need the restored titles' ids.
+  const extras = await applyExternalImportExtras(pending.id, owner).catch(() => null);
   const extrasNote = extras
     ? ` Added ${extras.categories} categories and ${extras.trackerLinks} tracker links${extras.skippedTrackerLinks > 0 ? ` (${extras.skippedTrackerLinks} skipped: tracker not connected or link refused)` : ''}.`
     : '';

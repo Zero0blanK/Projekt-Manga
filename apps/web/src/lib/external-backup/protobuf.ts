@@ -1,12 +1,12 @@
 /** A damaged or unsupported backup. The message is safe to show as is. */
-export class TachiyomiBackupError extends Error {
+export class ExternalBackupError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'TachiyomiBackupError';
+    this.name = 'ExternalBackupError';
   }
 }
 
-const truncated = () => new TachiyomiBackupError('The backup file is truncated or damaged.');
+const truncated = () => new ExternalBackupError('The backup file is truncated or damaged.');
 
 export const WIRE_VARINT = 0;
 export const WIRE_FIXED64 = 1;
@@ -16,10 +16,10 @@ export const WIRE_FIXED32 = 5;
 const utf8 = new TextDecoder('utf-8');
 
 /**
- * Just enough of the protobuf wire format to walk a Tachiyomi backup: varints, 32/64-bit fixed
+ * Just enough of the protobuf wire format to walk an external backup: varints, 32/64-bit fixed
  * values and length-delimited fields. Fields a caller does not ask for are skipped by wire
  * type, so newer backups with extra fields still read. Every read is bounds-checked and
- * throws `TachiyomiBackupError` on a short buffer.
+ * throws `ExternalBackupError` on a short buffer.
  */
 export class ProtoReader {
   private pos: number;
@@ -42,7 +42,8 @@ export class ProtoReader {
   tag(): { field: number; wire: number } {
     const value = this.varint();
     const field = Number(value >> 3n);
-    if (field < 1) throw new TachiyomiBackupError('The backup file is not a Tachiyomi backup.');
+    if (field < 1)
+      throw new ExternalBackupError('The backup file is not a Tachiyomi/Mihon backup.');
     return { field, wire: Number(value & 7n) };
   }
 
@@ -67,14 +68,14 @@ export class ProtoReader {
       if (byte < 0x80) return BigInt.asUintN(64, result);
       big += 7n;
     }
-    throw new TachiyomiBackupError('The backup file is damaged (bad number).');
+    throw new ExternalBackupError('The backup file is damaged (bad number).');
   }
 
   int32(): number {
     return Number(BigInt.asIntN(32, this.varint()));
   }
 
-  /** A signed 64-bit value. Kept as a bigint: Tachiyomi's source ids use all 63 bits. */
+  /** A signed 64-bit value. Kept as a bigint: the backup's source ids use all 63 bits. */
   int64(): bigint {
     return BigInt.asIntN(64, this.varint());
   }
@@ -141,8 +142,8 @@ export class ProtoReader {
         this.pos += 4;
         return;
       default:
-        // Groups (3/4) were never used by Tachiyomi; anything else means this is not protobuf.
-        throw new TachiyomiBackupError('The backup file is not a Tachiyomi backup.');
+        // Groups (3/4) were never used by the format; anything else means this is not protobuf.
+        throw new ExternalBackupError('The backup file is not a Tachiyomi/Mihon backup.');
     }
   }
 }

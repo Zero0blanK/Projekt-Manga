@@ -110,9 +110,9 @@ export interface Source {
   resolveMangaUrl?(url: string): Promise<Mangas | null>;
 
   /**
-   * Turns a Tachiyomi URL for this source (usually site-relative, as Tachiyomi stores it)
+   * Turns a URL from an external backup for this source (usually site-relative, as stored there)
    * into this source's own key: the title's `slug` for `'manga'`, or a chapter's `id` (its
-   * `source_chapter_key`) for `'chapter'`. Used to import Tachiyomi backups. Must be pure — no
+   * `source_chapter_key`) for `'chapter'`. Used to import external backups. Must be pure — no
    * network — and return null for a URL it does not recognise. Optional: without it, an
    * import matches read state by chapter number after the title's first chapter sync.
    */

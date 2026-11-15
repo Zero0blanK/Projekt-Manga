@@ -16,20 +16,20 @@ import { Field } from '@/components/settings/field-controls';
 import { parseBackup } from '@/lib/backup-validation';
 import { startTrackedRestore } from '@/lib/restore-job';
 import {
-  buildTachiyomiImport,
+  buildExternalImport,
   findTitlesInSources,
-  readTachiyomiBackupFile,
-  resolveTachiyomiKeys,
+  readExternalBackupFile,
+  resolveExternalKeys,
   summariseSources,
   type InstalledSource,
-  type TachiyomiBackup,
-  type TachiyomiImport as BuiltImport,
-  type TachiyomiSourceSummary,
+  type ExternalBackup,
+  type ExternalImport as BuiltImport,
+  type ExternalSourceSummary,
   type TitleSearchResult,
-} from '@/lib/tachiyomi-backup';
+} from '@/lib/external-backup';
 import { useMigrationPreferences } from '@/lib/migration-state';
 import { SourceOrderList } from '@/components/settings/source-order-list';
-import { saveTachiyomiImportExtras } from '@/lib/tachiyomi-backup/extras';
+import { saveExternalImportExtras } from '@/lib/external-backup/extras';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -47,21 +47,21 @@ type Step =
   | { kind: 'closed' }
   | {
       kind: 'map';
-      backup: TachiyomiBackup;
+      backup: ExternalBackup;
       installed: InstalledSource[];
-      sources: TachiyomiSourceSummary[];
+      sources: ExternalSourceSummary[];
     }
   | {
       kind: 'review';
       built: BuiltImport;
-      backup: TachiyomiBackup;
+      backup: ExternalBackup;
       installed: InstalledSource[];
       search: TitleSearchResult | null;
       preview: RestorePreview | null;
       previewError: string | null;
     };
 
-function initialChoices(sources: TachiyomiSourceSummary[]): Map<string, string | null> {
+function initialChoices(sources: ExternalSourceSummary[]): Map<string, string | null> {
   return new Map(
     sources.map((source) => [
       source.id,
@@ -79,11 +79,11 @@ const searchInSource = (sourceId: string, query: string, signal?: AbortSignal) =
 const REVIEW_LIST_LIMIT = 50;
 
 /**
- * Settings › Privacy › Backups: imports a Tachiyomi backup. The file is decoded here,
+ * Settings › Privacy › Backups: imports a backup from another reader app. The file is decoded here,
  * its sources are matched to installed ones, and the result goes through the same restore
  * job as a Projekt Manga backup (merge only), after a preview and a confirmation.
  */
-export function TachiyomiImport({
+export function ExternalImport({
   owner,
   expectedUserId,
   disabled,
@@ -129,7 +129,7 @@ export function TachiyomiImport({
       return;
     }
     setBusy('Reading backup…');
-    void Promise.all([readTachiyomiBackupFile(file), getSources()])
+    void Promise.all([readExternalBackupFile(file), getSources()])
       .then(([backup, installed]) => {
         const sources = summariseSources(backup, installed);
         setChoices(initialChoices(sources));
@@ -144,7 +144,7 @@ export function TachiyomiImport({
       .catch((error: unknown) =>
         toast({
           description:
-            error instanceof Error && error.name === 'TachiyomiBackupError'
+            error instanceof Error && error.name === 'ExternalBackupError'
               ? error.message
               : "Couldn't read that backup.",
         }),
@@ -159,7 +159,7 @@ export function TachiyomiImport({
     const controller = new AbortController();
     searching.current = controller;
     setBusy('Matching chapters…');
-    void resolveTachiyomiKeys(backup, choices, getSourceKeysFromUrls, controller.signal)
+    void resolveExternalKeys(backup, choices, getSourceKeysFromUrls, controller.signal)
       .then(async (keys) => {
         const search = [...orders.values()].some((order) => order.length)
           ? await findTitlesInSources(backup, choices, orders, searchInSource, {
@@ -167,7 +167,7 @@ export function TachiyomiImport({
               onProgress: ({ done, total }) => setBusy(`Searching sources… ${done} of ${total}`),
             })
           : null;
-        const built = buildTachiyomiImport(backup, {
+        const built = buildExternalImport(backup, {
           sources: choices,
           keys,
           unmatched,
@@ -241,7 +241,7 @@ export function TachiyomiImport({
           { id: jobId, mode: 'merge', owner, settings: {}, skippedDownloads: 0 },
           parsed.data,
           // Applied when the restore finishes, by the id it is tracked under.
-          () => saveTachiyomiImportExtras(jobId, owner, step.built.extras),
+          () => saveExternalImportExtras(jobId, owner, step.built.extras),
         );
       })
       .then(() => {
@@ -280,7 +280,7 @@ export function TachiyomiImport({
   return (
     <>
       <Field
-        label="Import from Tachiyomi…"
+        label="Import from Tachiyomi/Mihon…"
         hint="A .tachibk or .proto.gz backup; added to your current library"
       >
         <>
@@ -313,9 +313,9 @@ export function TachiyomiImport({
           {step.kind === 'map' && (
             <>
               <AlertDialogHeader>
-                <AlertDialogTitle>Import from Tachiyomi</AlertDialogTitle>
+                <AlertDialogTitle>Import from Tachiyomi/Mihon</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Each Tachiyomi source is matched to an installed source by name. Titles from a
+                  Each source in the backup is matched to an installed source by name. Titles from a
                   source with no match cannot sync chapters here.
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -429,8 +429,8 @@ export function TachiyomiImport({
                 })}
               </ul>
               {unmatchedSources.length > 0 && (
-                <section className="space-y-1.5 text-sm" aria-labelledby="tachiyomi-default-order">
-                  <h3 id="tachiyomi-default-order" className="font-medium">
+                <section className="space-y-1.5 text-sm" aria-labelledby="import-default-order">
+                  <h3 id="import-default-order" className="font-medium">
                     Search other sources by name
                   </h3>
                   <p className="text-xs text-muted-foreground">
@@ -451,7 +451,7 @@ export function TachiyomiImport({
                 <label className="flex items-center gap-2">
                   <input
                     type="radio"
-                    name="tachiyomi-unmatched"
+                    name="import-unmatched"
                     checked={unmatched === 'skip'}
                     onChange={() => setUnmatched('skip')}
                   />
@@ -460,7 +460,7 @@ export function TachiyomiImport({
                 <label className="flex items-center gap-2">
                   <input
                     type="radio"
-                    name="tachiyomi-unmatched"
+                    name="import-unmatched"
                     checked={unmatched === 'import'}
                     onChange={() => setUnmatched('import')}
                   />
@@ -523,7 +523,7 @@ export function TachiyomiImport({
                 <p className="text-xs text-muted-foreground">
                   {step.built.stats.guessedSlugs} title
                   {step.built.stats.guessedSlugs === 1 ? '' : 's'} come from sources that cannot
-                  read Tachiyomi links; their address was guessed from the link and may need a
+                  read the backup's links; their address was guessed from the link and may need a
                   migration if chapters do not load.
                 </p>
               )}

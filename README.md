@@ -43,7 +43,7 @@ run. Choose **More info → Run anyway**.
 - **Library updates** in the background, with a log of what changed and why a source failed.
   New chapters can also alert you through ntfy, Discord, Telegram or a webhook.
 - **Move a title to another source** without losing progress, shelf, rating or history.
-- **Backups**, automatic or on demand, and imports from Mihon/Tachiyomi backups and Suwayomi.
+- **Backups**, automatic or on demand, and imports from Tachiyomi/Mihon backups and Suwayomi.
 - **No account needed.** Signing in is optional and adds sync between devices.
 - **Tracker sync** with AniList, MyAnimeList, MangaUpdates, Kitsu, Shikimori, Bangumi, Komga and
   Kavita.

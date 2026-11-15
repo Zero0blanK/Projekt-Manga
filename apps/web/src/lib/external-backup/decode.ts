@@ -1,11 +1,10 @@
-import { TachiyomiBackupError, ProtoReader, WIRE_BYTES, WIRE_FIXED32 } from './protobuf';
+import { ExternalBackupError, ProtoReader, WIRE_BYTES, WIRE_FIXED32 } from './protobuf';
 
 /**
- * The parts of a Tachiyomi backup (`Backup` in Tachiyomi's
- * `data/backup/models`) this app imports. Field numbers follow Tachiyomi's `@ProtoNumber`s;
- * everything else in the file is skipped.
+ * The parts of an external backup (its `Backup` message) this app imports. Field numbers
+ * follow the format's `@ProtoNumber`s; everything else in the file is skipped.
  */
-export interface TachiyomiChapter {
+export interface ExternalChapter {
   url: string;
   name: string;
   scanlator: string | null;
@@ -17,14 +16,14 @@ export interface TachiyomiChapter {
   dateUpload: number;
 }
 
-export interface TachiyomiHistory {
+export interface ExternalHistory {
   url: string;
   /** Milliseconds since the epoch. */
   lastRead: number;
 }
 
-export interface TachiyomiTracking {
-  /** Tachiyomi's tracker id: 1 MAL, 2 AniList, 3 Kitsu, 4 Shikimori, 5 Bangumi, 6 Komga,
+export interface ExternalTracking {
+  /** The backup's tracker id: 1 MAL, 2 AniList, 3 Kitsu, 4 Shikimori, 5 Bangumi, 6 Komga,
    * 7 MangaUpdates, 8 Kavita. */
   syncId: number;
   /** The tracker's id for the title, as a decimal string. */
@@ -33,8 +32,8 @@ export interface TachiyomiTracking {
   title: string;
 }
 
-export interface TachiyomiManga {
-  /** Tachiyomi's numeric source id, as a decimal string (it does not fit in a number). */
+export interface ExternalManga {
+  /** The backup's numeric source id, as a decimal string (it does not fit in a number). */
   source: string;
   url: string;
   title: string;
@@ -42,41 +41,41 @@ export interface TachiyomiManga {
   artist: string | null;
   description: string | null;
   genres: string[];
-  /** Tachiyomi's SManga status: 0 unknown, 1 ongoing, 2 completed, 3 licensed,
+  /** The backup's SManga status: 0 unknown, 1 ongoing, 2 completed, 3 licensed,
    * 4 publishing finished, 5 cancelled, 6 on hiatus. */
   status: number;
   thumbnailUrl: string | null;
   /** Milliseconds since the epoch; 0 when unknown. */
   dateAdded: number;
-  /** In the library. Tachiyomi also backs up titles that only have history. */
+  /** In the library. The backup also holds titles that only have history. */
   favorite: boolean;
-  /** The `order` of each category this title is in (Tachiyomi links by order, not id). */
+  /** The `order` of each category this title is in (the backup links by order, not id). */
   categories: number[];
-  chapters: TachiyomiChapter[];
-  history: TachiyomiHistory[];
-  tracking: TachiyomiTracking[];
+  chapters: ExternalChapter[];
+  history: ExternalHistory[];
+  tracking: ExternalTracking[];
 }
 
-export interface TachiyomiCategory {
+export interface ExternalCategory {
   name: string;
   order: number;
 }
 
-export interface TachiyomiSource {
+export interface ExternalSource {
   id: string;
   name: string;
 }
 
-export interface TachiyomiBackup {
-  manga: TachiyomiManga[];
-  categories: TachiyomiCategory[];
-  sources: TachiyomiSource[];
+export interface ExternalBackup {
+  manga: ExternalManga[];
+  categories: ExternalCategory[];
+  sources: ExternalSource[];
 }
 
 const optional = (value: string) => (value.trim() ? value : null);
 
-function readChapter(reader: ProtoReader): TachiyomiChapter {
-  const chapter: TachiyomiChapter = {
+function readChapter(reader: ProtoReader): ExternalChapter {
+  const chapter: ExternalChapter = {
     url: '',
     name: '',
     scanlator: null,
@@ -101,8 +100,8 @@ function readChapter(reader: ProtoReader): TachiyomiChapter {
   return chapter;
 }
 
-function readHistory(reader: ProtoReader): TachiyomiHistory {
-  const history: TachiyomiHistory = { url: '', lastRead: 0 };
+function readHistory(reader: ProtoReader): ExternalHistory {
+  const history: ExternalHistory = { url: '', lastRead: 0 };
   while (!reader.done) {
     const { field, wire } = reader.tag();
     if (field === 1 && wire === WIRE_BYTES) history.url = reader.string();
@@ -112,8 +111,8 @@ function readHistory(reader: ProtoReader): TachiyomiHistory {
   return history;
 }
 
-function readTracking(reader: ProtoReader): TachiyomiTracking {
-  const tracking: TachiyomiTracking = { syncId: 0, mediaId: '', trackingUrl: '', title: '' };
+function readTracking(reader: ProtoReader): ExternalTracking {
+  const tracking: ExternalTracking = { syncId: 0, mediaId: '', trackingUrl: '', title: '' };
   let legacyMediaId = 0;
   while (!reader.done) {
     const { field, wire } = reader.tag();
@@ -124,14 +123,14 @@ function readTracking(reader: ProtoReader): TachiyomiTracking {
     else if (field === 100 && wire === 0) tracking.mediaId = reader.int64().toString();
     else reader.skip(wire);
   }
-  // Old Tachiyomi backups only carry the 32-bit id.
+  // Old backups only carry the 32-bit id.
   if ((!tracking.mediaId || tracking.mediaId === '0') && legacyMediaId > 0)
     tracking.mediaId = String(legacyMediaId);
   return tracking;
 }
 
-function readManga(reader: ProtoReader): TachiyomiManga {
-  const manga: TachiyomiManga = {
+function readManga(reader: ProtoReader): ExternalManga {
+  const manga: ExternalManga = {
     source: '0',
     url: '',
     title: '',
@@ -175,8 +174,8 @@ function readManga(reader: ProtoReader): TachiyomiManga {
   return manga;
 }
 
-function readCategory(reader: ProtoReader): TachiyomiCategory {
-  const category: TachiyomiCategory = { name: '', order: 0 };
+function readCategory(reader: ProtoReader): ExternalCategory {
+  const category: ExternalCategory = { name: '', order: 0 };
   while (!reader.done) {
     const { field, wire } = reader.tag();
     if (field === 1 && wire === WIRE_BYTES) category.name = reader.string();
@@ -186,8 +185,8 @@ function readCategory(reader: ProtoReader): TachiyomiCategory {
   return category;
 }
 
-function readSource(reader: ProtoReader): TachiyomiSource {
-  const source: TachiyomiSource = { id: '0', name: '' };
+function readSource(reader: ProtoReader): ExternalSource {
+  const source: ExternalSource = { id: '0', name: '' };
   while (!reader.done) {
     const { field, wire } = reader.tag();
     if (field === 1 && wire === WIRE_BYTES) source.name = reader.string();
@@ -197,10 +196,10 @@ function readSource(reader: ProtoReader): TachiyomiSource {
   return source;
 }
 
-/** Decodes an uncompressed Tachiyomi backup. Throws `TachiyomiBackupError` on damaged input. */
-export function decodeTachiyomiBackup(bytes: Uint8Array): TachiyomiBackup {
+/** Decodes an uncompressed external backup. Throws `ExternalBackupError` on damaged input. */
+export function decodeExternalBackup(bytes: Uint8Array): ExternalBackup {
   const reader = new ProtoReader(bytes);
-  const backup: TachiyomiBackup = { manga: [], categories: [], sources: [] };
+  const backup: ExternalBackup = { manga: [], categories: [], sources: [] };
   while (!reader.done) {
     const { field, wire } = reader.tag();
     if (field === 1 && wire === WIRE_BYTES) backup.manga.push(readManga(reader.message()));
@@ -211,12 +210,12 @@ export function decodeTachiyomiBackup(bytes: Uint8Array): TachiyomiBackup {
     else reader.skip(wire);
   }
   if (backup.manga.length === 0 && backup.categories.length === 0 && backup.sources.length === 0)
-    throw new TachiyomiBackupError('That file has no Tachiyomi library in it.');
+    throw new ExternalBackupError('That file has no Tachiyomi/Mihon library in it.');
   return backup;
 }
 
 /** Decompressed backups above this are refused: a real library is a few MiB. */
-export const TACHIYOMI_BACKUP_MAX_BYTES = 128 * 1024 * 1024;
+export const EXTERNAL_BACKUP_MAX_BYTES = 128 * 1024 * 1024;
 
 async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new ReadableStream<BufferSource>({
@@ -233,15 +232,15 @@ async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > TACHIYOMI_BACKUP_MAX_BYTES) {
+      if (total > EXTERNAL_BACKUP_MAX_BYTES) {
         void reader.cancel();
-        throw new TachiyomiBackupError('That backup is too large to import.');
+        throw new ExternalBackupError('That backup is too large to import.');
       }
       chunks.push(value);
     }
   } catch (error) {
-    if (error instanceof TachiyomiBackupError) throw error;
-    throw new TachiyomiBackupError('The backup file is truncated or damaged.');
+    if (error instanceof ExternalBackupError) throw error;
+    throw new ExternalBackupError('The backup file is truncated or damaged.');
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -253,8 +252,8 @@ async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
 }
 
 /** Reads a `.tachibk` / `.proto.gz` file. An already-decompressed backup is accepted too. */
-export async function readTachiyomiBackupFile(file: Blob): Promise<TachiyomiBackup> {
+export async function readExternalBackupFile(file: Blob): Promise<ExternalBackup> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const gzipped = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
-  return decodeTachiyomiBackup(gzipped ? await gunzip(bytes) : bytes);
+  return decodeExternalBackup(gzipped ? await gunzip(bytes) : bytes);
 }

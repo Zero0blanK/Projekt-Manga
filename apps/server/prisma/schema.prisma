@@ -16,7 +16,7 @@ model manga {
   /** Library membership. A row can exist without being in the library — previewing,
    * reading, or downloading straight from a source creates one so chapters and downloads
    * have something to hang off (both require a manga_id), while only an explicit "Add to
-   * Library" flips this true. Mirrors Tachiyomi's `favorite` column. Defaults true
+   * Library" flips this true. Mirrors the `favorite` column of external backups. Defaults true
    * so every pre-existing row stays in the library. */
   in_library     Boolean          @default(true)
   created_at     DateTime         @default(now())

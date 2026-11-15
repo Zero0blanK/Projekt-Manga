@@ -1,5 +1,5 @@
 import type { TrackerName } from '@projekt-manga/api-client';
-import type { TachiyomiBackup, TachiyomiTracking } from './decode';
+import type { ExternalBackup, ExternalTracking } from './decode';
 
 /** An installed source, as `getSources` lists it. */
 export interface InstalledSource {
@@ -14,15 +14,15 @@ export type SourceMatch =
   | { kind: 'ambiguous'; candidates: string[] }
   | { kind: 'unmatched' };
 
-export interface TachiyomiSourceSummary {
-  /** Tachiyomi's numeric source id, as a string. */
+export interface ExternalSourceSummary {
+  /** The backup's numeric source id, as a string. */
   id: string;
   name: string;
   titles: number;
   match: SourceMatch;
 }
 
-/** Trailing "(EN)", "(pt-BR)" and the like, which Tachiyomi adds to some source names. */
+/** Trailing "(EN)", "(pt-BR)" and the like, which the backup adds to some source names. */
 const LANGUAGE_SUFFIX = /\s*\(([a-z]{2,3}(?:[-_][a-z0-9]{2,4})?|all|multi)\)\s*$/i;
 
 /** Case, accents, spacing and punctuation never decide a match. */
@@ -38,9 +38,9 @@ export function normaliseSourceName(name: string): string {
 const normaliseLanguage = (lang: string) => lang.trim().toLowerCase().replace('_', '-');
 
 /**
- * Matches one Tachiyomi source to an installed source by normalised name. The language only
+ * Matches one backup source to an installed source by normalised name. The language only
  * counts when the name repeats among installed sources: it is then read from a language
- * suffix on Tachiyomi's name ("MangaDex (EN)"). Without one the match is ambiguous, for the
+ * suffix on the backup's name ("MangaDex (EN)"). Without one the match is ambiguous, for the
  * reader to settle.
  */
 export function matchSource(name: string, installed: InstalledSource[]): SourceMatch {
@@ -61,9 +61,9 @@ export function matchSource(name: string, installed: InstalledSource[]): SourceM
 /** Every source the backup's titles use, with its match. A title whose source has no
  * `backupSources` entry is listed under its bare id, which never matches. */
 export function summariseSources(
-  backup: TachiyomiBackup,
+  backup: ExternalBackup,
   installed: InstalledSource[],
-): TachiyomiSourceSummary[] {
+): ExternalSourceSummary[] {
   const names = new Map(backup.sources.map((source) => [source.id, source.name]));
   const titles = new Map<string, number>();
   for (const manga of backup.manga) titles.set(manga.source, (titles.get(manga.source) ?? 0) + 1);
@@ -80,8 +80,8 @@ export function summariseSources(
     .sort((a, b) => b.titles - a.titles || a.name.localeCompare(b.name));
 }
 
-/** Tachiyomi's tracker ids (`TrackerManager`) to this app's tracker names. */
-export const TACHIYOMI_TRACKERS: Readonly<Record<number, TrackerName>> = {
+/** The backup's tracker ids (`TrackerManager`) to this app's tracker names. */
+export const EXTERNAL_TRACKERS: Readonly<Record<number, TrackerName>> = {
   1: 'MYANIMELIST',
   2: 'ANILIST',
   3: 'KITSU',
@@ -93,17 +93,17 @@ export const TACHIYOMI_TRACKERS: Readonly<Record<number, TrackerName>> = {
 };
 
 /** The self-hosted trackers keep their series id in the tracking URL
- * (`…/api/v1/series/<id>`), not in Tachiyomi's numeric media id. */
+ * (`…/api/v1/series/<id>`), not in the backup's numeric media id. */
 function seriesIdFromUrl(url: string): string | null {
   const match = /\/series\/([A-Za-z0-9_-]{1,64})\/?(?:[?#].*)?$/i.exec(url.trim());
   return match?.[1] ?? null;
 }
 
-/** A Tachiyomi tracking row as this app's tracker link, or null when it cannot be one. */
+/** A tracking row from the backup as this app's tracker link, or null when it cannot be one. */
 export function mapTracking(
-  tracking: TachiyomiTracking,
+  tracking: ExternalTracking,
 ): { tracker: TrackerName; tracker_media_id: string } | null {
-  const tracker = TACHIYOMI_TRACKERS[tracking.syncId];
+  const tracker = EXTERNAL_TRACKERS[tracking.syncId];
   if (!tracker) return null;
   const numeric = /^[1-9]\d{0,18}$/.test(tracking.mediaId) ? tracking.mediaId : null;
   const mediaId =
@@ -115,7 +115,7 @@ export function mapTracking(
   return mediaId ? { tracker, tracker_media_id: mediaId } : null;
 }
 
-/** Tachiyomi's SManga status codes to this app's statuses. */
+/** The backup's SManga status codes to this app's statuses. */
 export function mapStatus(status: number): string {
   switch (status) {
     case 1:

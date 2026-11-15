@@ -34,7 +34,7 @@ export type SandboxedMethod =
   | 'fetchChapterPages'
   | 'getFilters'
   | 'fetchMangaUpdates'
-  /** Batched `keyFromUrl`: one round-trip for a whole Tachiyomi import instead of one per URL. */
+  /** Batched `keyFromUrl`: one round-trip for a whole backup import instead of one per URL. */
   | 'keysFromUrls';
 
 /** Input of the batched `keysFromUrls` call. */

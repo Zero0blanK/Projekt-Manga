@@ -11,11 +11,11 @@ import {
 } from '@projekt-manga/api-client';
 import { actions } from '@/lib/app-store';
 import { bulkPayload } from '@/lib/chapter-gaps';
-import type { ChapterNumberState, TachiyomiImportExtras } from './payload';
+import type { ChapterNumberState, ExternalImportExtras } from './payload';
 import { CHAPTER_STATE_STORAGE_KEY, EXTRAS_STORAGE_KEY, readStored } from './stored-names';
 
 /**
- * What a Tachiyomi import adds after its restore job succeeds. The restore payload has no
+ * What an external backup import adds after its restore job succeeds. The restore payload has no
  * room for categories (kept in this browser's app state), tracker links (their own
  * endpoint) or read state matched by chapter number, so they wait here, tied to the job.
  */
@@ -23,7 +23,7 @@ const extrasKey = EXTRAS_STORAGE_KEY;
 /** Per-title read state still waiting for the title's first chapter sync. */
 const chapterStateKey = CHAPTER_STATE_STORAGE_KEY;
 
-interface PendingExtras extends TachiyomiImportExtras {
+interface PendingExtras extends ExternalImportExtras {
   jobId: string;
   owner: string;
 }
@@ -46,15 +46,15 @@ const write = (key: string, value: unknown) => {
   }
 };
 
-export function saveTachiyomiImportExtras(
+export function saveExternalImportExtras(
   jobId: string,
   owner: string,
-  extras: TachiyomiImportExtras,
+  extras: ExternalImportExtras,
 ) {
   write(extrasKey, { jobId, owner, ...extras } satisfies PendingExtras);
 }
 
-export function clearTachiyomiImportExtras(jobId: string) {
+export function clearExternalImportExtras(jobId: string) {
   if (read<PendingExtras>(extrasKey)?.jobId === jobId) write(extrasKey, null);
 }
 
@@ -73,7 +73,7 @@ export interface AppliedExtras {
  * library has refreshed; does nothing for any other job. Each step is best-effort: a
  * tracker that refuses one link does not undo the categories.
  */
-export async function applyTachiyomiImportExtras(
+export async function applyExternalImportExtras(
   jobId: string,
   owner: string,
 ): Promise<AppliedExtras | null> {
@@ -140,7 +140,7 @@ function dropChapterState(id: string) {
  * once; a failed attempt (offline) keeps it for the next. Marking is idempotent, so two
  * callers meeting the same title (its page and the library sweep) do no harm.
  */
-export async function applyTachiyomiChapterState(
+export async function applyExternalChapterState(
   owner: string,
   manga: { id: string; slug: string; source: string },
   rows: MangaChapterRecord[],
@@ -202,7 +202,7 @@ export async function applyPendingImportedChapterStates(
     if (manga.chapters === 0 || !store[stateId(owner, manga.source, manga.slug)]) continue;
     try {
       const rows = await getMangaChapters(manga.id, manga.slug, manga.source, signal);
-      if (await applyTachiyomiChapterState(owner, manga, rows)) marked += 1;
+      if (await applyExternalChapterState(owner, manga, rows)) marked += 1;
     } catch {
       // Left saved: the next library load tries again.
     }

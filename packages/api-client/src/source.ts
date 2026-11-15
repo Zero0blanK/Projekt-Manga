@@ -193,7 +193,7 @@ export const saveSourceBrowserSession = (sourceId: string, body: SourceBrowserSe
 export const clearSourceBrowserSession = (sourceId: string) =>
   request<null>(`/source/${encode(sourceId)}/browser-session`, { method: 'DELETE' });
 
-/** Converts Tachiyomi URLs into this source's slugs and chapter keys. At most
+/** Converts an external backup's URLs into this source's slugs and chapter keys. At most
  * `SOURCE_URL_KEYS_LIMIT` URLs per call. */
 export const getSourceKeysFromUrls = (
   sourceId: string,

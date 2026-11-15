@@ -1,11 +1,11 @@
 import type { TrackerName } from '@projekt-manga/api-client';
 import type { PreviewBackupBody } from '@projekt-manga/schemas';
-import type { TachiyomiBackup, TachiyomiChapter, TachiyomiManga } from './decode';
+import type { ExternalBackup, ExternalChapter, ExternalManga } from './decode';
 import { mapStatus, mapTracking } from './mapping';
 import type { FoundTitle } from './search';
 import { UNMATCHED_SOURCE_PREFIX } from './stored-names';
 
-/** What `keyFromUrl` made of one Tachiyomi source's URLs (see `resolveTachiyomiKeys`). */
+/** What `keyFromUrl` made of one backup source's URLs (see `resolveExternalKeys`). */
 export interface SourceKeys {
   /** False when the source has no `keyFromUrl`: chapter state is then matched by number. */
   supported: boolean;
@@ -13,8 +13,8 @@ export interface SourceKeys {
   chapters: Map<string, string | null>;
 }
 
-export interface TachiyomiImportOptions {
-  /** Tachiyomi source id → installed source id, or null when it has none. */
+export interface ExternalImportOptions {
+  /** Backup source id → installed source id, or null when it has none. */
   sources: ReadonlyMap<string, string | null>;
   keys: ReadonlyMap<string, SourceKeys>;
   /** Titles from sources with no installed match: left out, or added to the library
@@ -25,7 +25,7 @@ export interface TachiyomiImportOptions {
   found?: ReadonlyMap<number, FoundTitle>;
 }
 
-/** Read state for a title whose source cannot name its chapters from Tachiyomi's URLs. It is
+/** Read state for a title whose source cannot name its chapters from the backup's URLs. It is
  * applied by chapter number once the title's chapter list has been synced. */
 export interface ChapterNumberState {
   source: string;
@@ -35,13 +35,13 @@ export interface ChapterNumberState {
   lastPage: Array<[number, number]>;
 }
 
-export interface TachiyomiImportExtras {
+export interface ExternalImportExtras {
   categories: Array<{ name: string; titles: Array<{ source: string; slug: string }> }>;
   trackers: Array<{ source: string; slug: string; tracker: TrackerName; tracker_media_id: string }>;
   chapterNumbers: ChapterNumberState[];
 }
 
-export interface TachiyomiImportStats {
+export interface ExternalImportStats {
   libraryTitles: number;
   matchedTitles: number;
   /** Titles with no matched source that a title search found in another source. */
@@ -59,17 +59,17 @@ export interface TachiyomiImportStats {
   skippedTrackers: number;
 }
 
-export type TachiyomiRestorePayload = Omit<PreviewBackupBody, 'mode' | 'expectedUserId'>;
+export type ExternalRestorePayload = Omit<PreviewBackupBody, 'mode' | 'expectedUserId'>;
 
-export interface TachiyomiImport {
-  payload: TachiyomiRestorePayload;
-  extras: TachiyomiImportExtras;
-  stats: TachiyomiImportStats;
+export interface ExternalImport {
+  payload: ExternalRestorePayload;
+  extras: ExternalImportExtras;
+  stats: ExternalImportStats;
 }
 
-type RestoreManga = TachiyomiRestorePayload['manga'][number];
+type RestoreManga = ExternalRestorePayload['manga'][number];
 type RestoreChapter = RestoreManga['chapters'][number];
-type RestoreHistory = TachiyomiRestorePayload['history'][number];
+type RestoreHistory = ExternalRestorePayload['history'][number];
 
 /** Matches the restore schema's caps, so an oversized backup fails here with a reason. */
 const MAX_TITLES = 10_000;
@@ -100,27 +100,27 @@ function decodeURIComponentSafe(value: string) {
   }
 }
 
-const hasState = (chapter: TachiyomiChapter) =>
+const hasState = (chapter: ExternalChapter) =>
   chapter.read || chapter.bookmark || chapter.lastPageRead > 0;
 
-/** A Tachiyomi source's name from the backup, or its id when the backup has none. */
-export function unmatchedSourceName(backup: TachiyomiBackup, id: string) {
+/** A backup source's name from the backup, or its id when the backup has none. */
+export function unmatchedSourceName(backup: ExternalBackup, id: string) {
   return backup.sources.find((source) => source.id === id)?.name || id;
 }
 
 /**
  * Builds the version-2 restore payload, plus what it cannot carry (categories, tracker
- * links, read state by chapter number), from a decoded Tachiyomi backup.
+ * links, read state by chapter number), from a decoded external backup.
  *
  * Only chapters with some state (read, bookmarked, partly read) are sent: the rest come
  * from the source on the title's next chapter sync, so leaving them out keeps big
  * libraries within the restore's size limits.
  */
-export function buildTachiyomiImport(
-  backup: TachiyomiBackup,
-  options: TachiyomiImportOptions,
-): TachiyomiImport {
-  const stats: TachiyomiImportStats = {
+export function buildExternalImport(
+  backup: ExternalBackup,
+  options: ExternalImportOptions,
+): ExternalImport {
+  const stats: ExternalImportStats = {
     libraryTitles: 0,
     matchedTitles: 0,
     foundBySearch: 0,
@@ -138,10 +138,10 @@ export function buildTachiyomiImport(
   const manga = new Map<string, RestoreManga>();
   const history = new Map<string, RestoreHistory>();
   const categories = new Map<string, Array<{ source: string; slug: string }>>();
-  const trackers = new Map<string, TachiyomiImportExtras['trackers'][number]>();
+  const trackers = new Map<string, ExternalImportExtras['trackers'][number]>();
   const byNumber = new Map<string, ChapterNumberState>();
 
-  const addTitleExtras = (title: TachiyomiManga, source: string, slug: string) => {
+  const addTitleExtras = (title: ExternalManga, source: string, slug: string) => {
     for (const order of new Set(title.categories)) {
       const name = categoryNames.get(order)?.name.trim();
       if (!name) continue;
@@ -160,7 +160,7 @@ export function buildTachiyomiImport(
     }
   };
 
-  const baseEntry = (title: TachiyomiManga, id: string, source: string, slug: string) => ({
+  const baseEntry = (title: ExternalManga, id: string, source: string, slug: string) => ({
     id,
     source,
     slug,
@@ -191,7 +191,7 @@ export function buildTachiyomiImport(
       const slug = title.url.slice(0, 512);
       if (manga.has(`${source}\0${slug}`)) continue;
       manga.set(`${source}\0${slug}`, {
-        ...baseEntry(title, `tachiyomi-${index}`, source, slug),
+        ...baseEntry(title, `import-${index}`, source, slug),
         chapters: [],
       });
       addTitleExtras(title, source, slug);
@@ -199,7 +199,7 @@ export function buildTachiyomiImport(
       continue;
     }
 
-    // A title found by search is on another site: Tachiyomi's URLs mean nothing there, so its
+    // A title found by search is on another site: the backup's URLs mean nothing there, so its
     // chapter state goes by number.
     const keys = found ? undefined : options.keys.get(title.source);
     let slug = found?.slug ?? keys?.manga.get(title.url) ?? null;
@@ -218,7 +218,7 @@ export function buildTachiyomiImport(
     if (title.favorite) {
       let entry = manga.get(titleKey);
       if (!entry) {
-        entry = { ...baseEntry(title, `tachiyomi-${index}`, sourceId, slug), chapters: [] };
+        entry = { ...baseEntry(title, `import-${index}`, sourceId, slug), chapters: [] };
         // The old site's cover may not load from here; the new source's will.
         if (found?.thumbnailUrl) entry.thumbnail_url = found.thumbnailUrl;
         manga.set(titleKey, entry);
@@ -233,7 +233,7 @@ export function buildTachiyomiImport(
         if (!hasState(chapter)) continue;
         const key = chapterKey(chapter.url);
         if (!key) {
-          // Tachiyomi uses -1 for "no number"; such a chapter cannot be matched later.
+          // The backup uses -1 for "no number"; such a chapter cannot be matched later.
           if (chapter.chapterNumber < 0) continue;
           if (chapter.read) numbered.read.push(chapter.chapterNumber);
           else if (chapter.lastPageRead > 0)

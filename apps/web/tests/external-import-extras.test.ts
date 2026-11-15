@@ -29,13 +29,13 @@ Object.defineProperty(window, 'localStorage', { configurable: true, value: memor
 
 import { getAppState } from '@/lib/app-store';
 import {
-  applyTachiyomiChapterState,
-  applyTachiyomiImportExtras,
+  applyExternalChapterState,
+  applyExternalImportExtras,
   applyPendingImportedChapterStates,
-  clearTachiyomiImportExtras,
-  saveTachiyomiImportExtras,
-} from '@/lib/tachiyomi-backup/extras';
-import { sourceNameOfUnmatched } from '@/lib/tachiyomi-backup/stored-names';
+  clearExternalImportExtras,
+  saveExternalImportExtras,
+} from '@/lib/external-backup/extras';
+import { sourceNameOfUnmatched } from '@/lib/external-backup/stored-names';
 
 const extras = {
   categories: [
@@ -76,7 +76,7 @@ const record = (id: string, chapter_number: number): MangaChapterRecord => ({
   updated_at: '',
 });
 
-describe('Tachiyomi import extras', () => {
+describe('External backup import extras', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
@@ -91,11 +91,11 @@ describe('Tachiyomi import extras', () => {
   });
 
   it('applies only for its own job and owner, once', async () => {
-    saveTachiyomiImportExtras('job-1', 'anonymous', extras);
-    expect(await applyTachiyomiImportExtras('job-2', 'anonymous')).toBeNull();
-    expect(await applyTachiyomiImportExtras('job-1', 'someone-else')).toBeNull();
+    saveExternalImportExtras('job-1', 'anonymous', extras);
+    expect(await applyExternalImportExtras('job-2', 'anonymous')).toBeNull();
+    expect(await applyExternalImportExtras('job-1', 'someone-else')).toBeNull();
 
-    const applied = await applyTachiyomiImportExtras('job-1', 'anonymous');
+    const applied = await applyExternalImportExtras('job-1', 'anonymous');
     expect(applied).toEqual({ categories: 1, trackerLinks: 1, skippedTrackerLinks: 1 });
     expect(getAppState().customCategories).toContain('Weekly');
     expect(getAppState().categoryMembers.Weekly).toEqual(['m-a']);
@@ -103,17 +103,17 @@ describe('Tachiyomi import extras', () => {
       tracker: 'ANILIST',
       tracker_media_id: '1',
     });
-    expect(await applyTachiyomiImportExtras('job-1', 'anonymous')).toBeNull();
+    expect(await applyExternalImportExtras('job-1', 'anonymous')).toBeNull();
   });
 
   it('reuses an existing category of the same name and is idempotent on retry', async () => {
     const { setState } = await import('@/lib/app-store');
     setState({ customCategories: ['weekly'], categoryMembers: { weekly: ['m-old'] } });
-    saveTachiyomiImportExtras('job-1', 'anonymous', extras);
-    await applyTachiyomiImportExtras('job-1', 'anonymous');
+    saveExternalImportExtras('job-1', 'anonymous', extras);
+    await applyExternalImportExtras('job-1', 'anonymous');
     // Applied a second time, nothing is duplicated.
-    saveTachiyomiImportExtras('job-1', 'anonymous', extras);
-    await applyTachiyomiImportExtras('job-1', 'anonymous');
+    saveExternalImportExtras('job-1', 'anonymous', extras);
+    await applyExternalImportExtras('job-1', 'anonymous');
     expect(getAppState().customCategories.filter((c) => c.toLowerCase() === 'weekly')).toEqual([
       'weekly',
     ]);
@@ -121,21 +121,21 @@ describe('Tachiyomi import extras', () => {
   });
 
   it('is dropped when the restore fails', async () => {
-    saveTachiyomiImportExtras('job-1', 'anonymous', extras);
-    clearTachiyomiImportExtras('job-1');
-    expect(await applyTachiyomiImportExtras('job-1', 'anonymous')).toBeNull();
+    saveExternalImportExtras('job-1', 'anonymous', extras);
+    clearExternalImportExtras('job-1');
+    expect(await applyExternalImportExtras('job-1', 'anonymous')).toBeNull();
   });
 
   it('marks chapters by number after the first sync, once', async () => {
-    saveTachiyomiImportExtras('job-1', 'anonymous', extras);
-    await applyTachiyomiImportExtras('job-1', 'anonymous');
+    saveExternalImportExtras('job-1', 'anonymous', extras);
+    await applyExternalImportExtras('job-1', 'anonymous');
     const manga = { id: 'm-b', slug: 'b', source: 'src' };
 
     // Not synced yet: the state waits.
-    expect(await applyTachiyomiChapterState('anonymous', manga, [])).toBeNull();
+    expect(await applyExternalChapterState('anonymous', manga, [])).toBeNull();
 
     const rows = [record('1', 1), record('2', 2), record('3', 3), record('4', 4)];
-    const marked = await applyTachiyomiChapterState('anonymous', manga, rows);
+    const marked = await applyExternalChapterState('anonymous', manga, rows);
     expect(marked?.map((row) => [row.is_read, row.last_page_read])).toEqual([
       [true, 0],
       [true, 0],
@@ -146,12 +146,12 @@ describe('Tachiyomi import extras', () => {
       api.markPreviousChaptersAsRead.mock.calls[0][1].map((c: { id: string }) => c.id),
     ).toEqual(['key-1', 'key-2']);
     expect(api.markChapterByLastPage).toHaveBeenCalledWith('b', 'key-3', 4, expect.any(Object));
-    expect(await applyTachiyomiChapterState('anonymous', manga, rows)).toBeNull();
+    expect(await applyExternalChapterState('anonymous', manga, rows)).toBeNull();
   });
 
   it('marks a title the library update synced, without waiting for its page to open', async () => {
-    saveTachiyomiImportExtras('job-1', 'anonymous', extras);
-    await applyTachiyomiImportExtras('job-1', 'anonymous');
+    saveExternalImportExtras('job-1', 'anonymous', extras);
+    await applyExternalImportExtras('job-1', 'anonymous');
     const rows = [record('1', 1), record('2', 2), record('3', 3)];
     api.getMangaChapters.mockResolvedValue(rows);
     const library = [
@@ -171,8 +171,8 @@ describe('Tachiyomi import extras', () => {
   });
 
   it('leaves a title with no chapters yet for later, without asking for them', async () => {
-    saveTachiyomiImportExtras('job-1', 'anonymous', extras);
-    await applyTachiyomiImportExtras('job-1', 'anonymous');
+    saveExternalImportExtras('job-1', 'anonymous', extras);
+    await applyExternalImportExtras('job-1', 'anonymous');
     const unsynced = [{ id: 'm-b', slug: 'b', source: 'src', chapters: 0 }];
     expect(await applyPendingImportedChapterStates('anonymous', unsynced)).toBe(0);
     expect(api.getMangaChapters).not.toHaveBeenCalled();
@@ -183,8 +183,8 @@ describe('Tachiyomi import extras', () => {
   });
 
   it('keeps the saved state when marking fails, and applies it on the next try', async () => {
-    saveTachiyomiImportExtras('job-1', 'anonymous', extras);
-    await applyTachiyomiImportExtras('job-1', 'anonymous');
+    saveExternalImportExtras('job-1', 'anonymous', extras);
+    await applyExternalImportExtras('job-1', 'anonymous');
     api.getMangaChapters.mockResolvedValue([record('1', 1)]);
     api.markPreviousChaptersAsRead.mockRejectedValueOnce(new Error('offline'));
     const library = [{ id: 'm-b', slug: 'b', source: 'src', chapters: 1 }];
@@ -214,13 +214,13 @@ describe('Tachiyomi import extras', () => {
     expect(await applyPendingImportedChapterStates('anonymous', library)).toBe(1);
     // Moved to the new name as it was read, then dropped once applied.
     expect(localStorage.getItem(formerKey)).toBeNull();
-    expect(localStorage.getItem('projekt-manga-tachiyomi-chapter-state')).toBeNull();
+    expect(localStorage.getItem('projekt-manga-external-chapter-state')).toBeNull();
   });
 });
 
 describe('titles kept without a source', () => {
   it('are recognised under the current and the former prefix', () => {
-    expect(sourceNameOfUnmatched('tachiyomi:Gone Source')).toBe('Gone Source');
+    expect(sourceNameOfUnmatched('imported:Gone Source')).toBe('Gone Source');
     expect(sourceNameOfUnmatched('mihon:Gone Source')).toBe('Gone Source');
     expect(sourceNameOfUnmatched('asura-scans')).toBeNull();
   });

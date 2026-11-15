@@ -29,7 +29,7 @@ export function zoneAt(x: number, y: number, layout: string): Zone | null {
   const column: Zone = x < 1 / 3 ? 'left' : x > 2 / 3 ? 'right' : 'center';
   switch (layout) {
     case 'L-shape':
-      // Tachiyomi's L: the top row and the left of the middle row are one zone, the bottom
+      // The L layout: the top row and the left of the middle row are one zone, the bottom
       // row and the right of the middle row the other.
       if (y < 1 / 3) return 'left';
       if (y > 2 / 3) return 'right';

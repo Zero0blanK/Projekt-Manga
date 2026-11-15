@@ -1,7 +1,7 @@
 import type { FilterValue, MangaFilter } from '@projekt-manga/types';
 
 /**
- * Suwayomi's source filters (Tachiyomi's `FilterList`) in this app's filter shape, and the
+ * Suwayomi's source filters (their `FilterList`) in this app's filter shape, and the
  * chosen values back as Suwayomi `FilterChange`s.
  *
  * A filter's key is its position in the source's list (`f3`), which is how Suwayomi

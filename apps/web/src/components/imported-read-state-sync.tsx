@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useMangaLibrary } from '@/lib/library-store';
 import { useCurrentUser } from '@/lib/session-resource';
-import { applyPendingImportedChapterStates } from '@/lib/tachiyomi-backup/extras';
+import { applyPendingImportedChapterStates } from '@/lib/external-backup/extras';
 import type { Manga } from '@/lib/manga-data';
 
 /**

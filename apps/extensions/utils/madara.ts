@@ -304,7 +304,7 @@ export function createMadaraSource(config: MadaraSourceConfig): Source {
     base_url: config.baseUrl,
     isNSFW: config.isNSFW,
 
-    // Tachiyomi's Madara sources store the same site paths these keys are parsed from.
+    // Other readers' Madara sources store the same site paths these keys are parsed from.
     keyFromUrl(url: string, kind: 'manga' | 'chapter') {
       return (kind === 'manga' ? extractMangaSlug(url) : extractChapterKey(url)) || null;
     },
