@@ -2,13 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Mangas } from '@projekt-manga/types';
 import {
   bestTitleMatch,
-  buildMihonImport,
+  buildExternalImport,
   findTitlesInSources,
-  type MihonBackup,
-  type MihonManga,
-} from '@/lib/mihon-backup';
+  type ExternalBackup,
+  type ExternalManga,
+} from '@/lib/external-backup';
 
-const title = (source: string, name: string, extra: Partial<MihonManga> = {}): MihonManga => ({
+const title = (
+  source: string,
+  name: string,
+  extra: Partial<ExternalManga> = {},
+): ExternalManga => ({
   source,
   url: `/series/${name.toLowerCase().replace(/\W+/g, '-')}`,
   title: name,
@@ -35,7 +39,7 @@ const result = (source: string, name: string, slug = name.toLowerCase()): Mangas
   thumbnail_url: `https://${source}.example/${slug}.jpg`,
 });
 
-const backup: MihonBackup = {
+const backup: ExternalBackup = {
   manga: [
     title('1', 'Solo Leveling', {
       chapters: [
@@ -139,9 +143,9 @@ describe('findTitlesInSources', () => {
   });
 });
 
-describe('buildMihonImport with titles found by name', () => {
+describe('buildExternalImport with titles found by name', () => {
   it('imports them under the source they were found in, with state by chapter number', () => {
-    const built = buildMihonImport(backup, {
+    const built = buildExternalImport(backup, {
       sources: new Map([
         ['1', null],
         ['2', null],

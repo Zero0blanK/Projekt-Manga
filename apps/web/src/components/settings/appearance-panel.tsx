@@ -4,14 +4,17 @@ import { actions, useSetting } from '@/lib/app-store';
 import {
   ACCENTS,
   DEFAULT_FROST_THEME,
+  DEFAULT_INK_THEME,
   DEFAULT_THEME,
   DEFAULT_UI_SCALE,
   DEFAULT_UI_STYLE,
   FROST_THEMES,
+  INK_THEMES,
   THEMES,
   UI_SCALES,
   UI_STYLES,
   resolveFrostTheme,
+  resolveInkTheme,
   resolveTheme,
   resolveUiStyle,
   shownAccent,
@@ -127,9 +130,17 @@ export function AppearancePanel() {
   const storedTheme = String(useSetting('theme', DEFAULT_THEME)).toLowerCase();
   const uiStyle = resolveUiStyle(useSetting('uiStyle', DEFAULT_UI_STYLE));
   const frost = uiStyle === 'frost';
+  const ink = uiStyle === 'ink';
   const storedFrostTheme = String(useSetting('frostTheme', DEFAULT_FROST_THEME)).toLowerCase();
-  const accent = shownAccent(useSetting('accent', ''), uiStyle, storedFrostTheme);
+  const storedInkTheme = String(useSetting('inkTheme', DEFAULT_INK_THEME)).toLowerCase();
+  const accent = shownAccent(useSetting('accent', ''), uiStyle, storedFrostTheme, storedInkTheme);
   const customAccent = !ACCENTS.some((a) => a.value.toLowerCase() === accent.toLowerCase());
+  const storedPalette = frost ? storedFrostTheme : ink ? storedInkTheme : storedTheme;
+  const autoPalette = frost
+    ? resolveFrostTheme('auto')
+    : ink
+      ? resolveInkTheme('auto')
+      : resolveTheme('auto');
 
   return (
     <div className="space-y-6">
@@ -137,9 +148,9 @@ export function AppearancePanel() {
         <div>
           <div className="text-sm font-medium text-foreground">Interface style</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            Each style has its own themes below; your accent works with both.
+            Each style has its own themes below; your accent works with all of them.
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
             {UI_STYLES.map((style) => (
               <UiStyleCard
                 key={style.id}
@@ -154,10 +165,8 @@ export function AppearancePanel() {
         <div>
           <div className="text-sm font-medium text-foreground">Theme</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {(frost ? storedFrostTheme : storedTheme) === 'auto'
-              ? `Following your system — currently ${
-                  frost ? resolveFrostTheme('auto') : resolveTheme('auto')
-                }.`
+            {storedPalette === 'auto'
+              ? `Following your system — currently ${autoPalette}.`
               : 'Applied instantly, and before the page paints on your next visit.'}
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -170,14 +179,23 @@ export function AppearancePanel() {
                     onSelect={() => actions.setSetting('frostTheme', t.id)}
                   />
                 ))
-              : THEMES.map((t) => (
-                  <ThemeCard
-                    key={t.id}
-                    option={t}
-                    selected={storedTheme === t.id}
-                    onSelect={() => actions.setSetting('theme', t.id)}
-                  />
-                ))}
+              : ink
+                ? INK_THEMES.map((t) => (
+                    <ThemeCard
+                      key={t.id}
+                      option={t}
+                      selected={storedInkTheme === t.id}
+                      onSelect={() => actions.setSetting('inkTheme', t.id)}
+                    />
+                  ))
+                : THEMES.map((t) => (
+                    <ThemeCard
+                      key={t.id}
+                      option={t}
+                      selected={storedTheme === t.id}
+                      onSelect={() => actions.setSetting('theme', t.id)}
+                    />
+                  ))}
           </div>
         </div>
 
@@ -187,6 +205,15 @@ export function AppearancePanel() {
             hint="Frosted, see-through cards, menus and navigation. Off gives solid surfaces"
           >
             <Toggle settingKey="frostGlass" defaultOn />
+          </Field>
+        )}
+
+        {ink && (
+          <Field
+            label="Screentone"
+            hint="A faint dot pattern on the page, like manga screentone. Off gives a plain page"
+          >
+            <Toggle settingKey="inkTone" defaultOn />
           </Field>
         )}
 

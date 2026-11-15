@@ -683,7 +683,7 @@ export interface CheckLibraryUpdatesResult {
 }
 
 export interface SourceUrlKeys {
-  /** False when the source cannot convert Mihon URLs at all. */
+  /** False when the source cannot convert an external backup's URLs at all. */
   supported: boolean;
   /** One title slug per requested manga URL, in order; null where unrecognised. */
   manga: Array<string | null>;
@@ -711,7 +711,7 @@ export interface SuwayomiConnectionTest {
   sources: number;
 }
 
-/** A Mihon extension the Suwayomi server can install, installed or not. */
+/** An extension the Suwayomi server can install, installed or not. */
 export interface SuwayomiExtension {
   pkg_name: string;
   name: string;

@@ -2,7 +2,7 @@ import { absoluteSuwayomiUrl, requireConnection, suwayomiGraphql } from './clien
 import { forgetSuwayomiSourceList } from './registry.js';
 
 /**
- * The Mihon extensions the host's Suwayomi server can install: every one in its extension
+ * The extensions the host's Suwayomi server can install: every one in its extension
  * repositories, not just the installed ones, so Discover › Extensions can install, update
  * and remove them there. Installing runs nothing here; Suwayomi does it, and the sources it
  * adds appear beside the installed extensions.
@@ -40,7 +40,7 @@ const PKG = /^[A-Za-z0-9_.]{1,200}$/;
 
 function toExtension(node: ExtensionNode): SuwayomiExtension | null {
   if (!node || typeof node.pkgName !== 'string' || !PKG.test(node.pkgName)) return null;
-  // Suwayomi names a Mihon extension "Tachiyomi: <Name>"; the prefix says nothing here.
+  // Suwayomi prefixes an extension's name with the app it was made for; the prefix says nothing here.
   const name = String(node.name ?? node.pkgName).replace(/^Tachiyomi:\s*/, '');
   return {
     pkg_name: node.pkgName,

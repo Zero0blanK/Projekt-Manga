@@ -1,6 +1,6 @@
 import type { SourceUrlKeys } from '@projekt-manga/api-client';
 import { SOURCE_URL_KEYS_LIMIT } from '@projekt-manga/schemas';
-import type { MihonBackup } from './decode';
+import type { ExternalBackup } from './decode';
 import type { SourceKeys } from './payload';
 
 export type FetchSourceKeys = (
@@ -17,8 +17,8 @@ const unsupported = (): SourceKeys => ({ supported: false, manga: new Map(), cha
  * converted, since nothing else is imported. A source that cannot convert them, or a
  * failed request, leaves that source on the chapter-number fallback.
  */
-export async function resolveMihonKeys(
-  backup: MihonBackup,
+export async function resolveExternalKeys(
+  backup: ExternalBackup,
   sources: ReadonlyMap<string, string | null>,
   fetchKeys: FetchSourceKeys,
   signal?: AbortSignal,
@@ -36,8 +36,8 @@ export async function resolveMihonKeys(
   }
 
   const result = new Map<string, SourceKeys>();
-  for (const [mihonId, urls] of wanted) {
-    const sourceId = sources.get(mihonId)!;
+  for (const [backupSourceId, urls] of wanted) {
+    const sourceId = sources.get(backupSourceId)!;
     const keys: SourceKeys = { supported: true, manga: new Map(), chapters: new Map() };
     const queue = [
       ...[...urls.manga].map((url) => ['manga', url] as const),
@@ -59,10 +59,10 @@ export async function resolveMihonKeys(
     } catch {
       signal?.throwIfAborted();
       // An older server has no key endpoint; fall back rather than fail the import.
-      result.set(mihonId, unsupported());
+      result.set(backupSourceId, unsupported());
       continue;
     }
-    result.set(mihonId, keys.supported ? keys : unsupported());
+    result.set(backupSourceId, keys.supported ? keys : unsupported());
   }
   return result;
 }

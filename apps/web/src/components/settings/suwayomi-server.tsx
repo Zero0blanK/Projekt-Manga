@@ -29,7 +29,7 @@ const refreshSources = () =>
   ]);
 
 /**
- * Settings › Extensions › Suwayomi server: use the Mihon sources installed on a Suwayomi
+ * Settings › Extensions › Suwayomi server: use the sources installed on a Suwayomi
  * server as sources here.
  *
  * The password is write-only: the server stores it encrypted and only says one is saved,
@@ -156,7 +156,7 @@ export function SuwayomiServer() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        Browse, search and read the Mihon sources installed on your Suwayomi server. They appear in
+        Browse, search and read the sources installed on your Suwayomi server. They appear in
         Discover beside your extensions; install and update them in Suwayomi.
       </p>
 

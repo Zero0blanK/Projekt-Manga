@@ -1,7 +1,7 @@
 /**
  * A plain browser window for one source's website, so a Cloudflare challenge or login can
  * be passed, after which the cookies it earned are handed to the local server. A check the
- * app opens by itself runs hidden, as Mihon's does; the visible window is for the reader's
+ * app opens by itself runs hidden, as other readers' do; the visible window is for the reader's
  * own "Open in browser", where they can finish a click or CAPTCHA.
  *
  * The window is deliberately not the app: no preload, context isolation and the renderer
