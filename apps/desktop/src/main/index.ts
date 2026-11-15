@@ -119,12 +119,15 @@ if (!gotLock) {
       noLink: true,
     });
     if (response === 1) {
-      clipboard.writeText(
-        [
-          `Projekt Manga ${app.getVersion()} (Electron ${process.versions.electron}, ${process.platform} ${process.arch})`,
-          `Local cache failed to open: ${message}`,
-        ].join('\n'),
-      );
+      // Asynchronous since Electron 44. A failed copy must not stop the app opening.
+      await clipboard
+        .writeText(
+          [
+            `Projekt Manga ${app.getVersion()} (Electron ${process.versions.electron}, ${process.platform} ${process.arch})`,
+            `Local cache failed to open: ${message}`,
+          ].join('\n'),
+        )
+        .catch(() => undefined);
     }
     return response !== 2;
   }
