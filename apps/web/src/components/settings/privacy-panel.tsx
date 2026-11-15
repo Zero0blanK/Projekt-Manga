@@ -24,7 +24,7 @@ import { profileSettingsForExport, profileSettingsForImport } from '@/lib/profil
 import { queryClient, queryKeys } from '@/lib/query-client';
 import { useMangaLibrary } from '@/lib/library-store';
 import { AutomaticBackups } from '@/components/settings/automatic-backups';
-import { MihonImport } from '@/components/settings/mihon-import';
+import { TachiyomiImport } from '@/components/settings/tachiyomi-import';
 import type { ReadingDataExport } from '@projekt-manga/types';
 import {
   AlertDialog,
@@ -454,7 +454,7 @@ export function PrivacyPanel() {
           </>
         </Field>
         {!sessionLoading && (
-          <MihonImport
+          <TachiyomiImport
             owner={user?.id ?? 'anonymous'}
             expectedUserId={user?.id ?? null}
             disabled={restorePending}

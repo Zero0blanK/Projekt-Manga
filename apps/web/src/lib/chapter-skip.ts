@@ -25,7 +25,7 @@ export function adjacentChapter(
 }
 
 /**
- * Settings › Reader › Skip duplicate chapters. Off (the default, as in Mihon): when
+ * Settings › Reader › Skip duplicate chapters. Off (the default, as in Tachiyomi): when
  * several scanlation groups released the same chapter, next and previous chapter visit
  * each group's release in turn. On: one stop per chapter number, in the preferred group's
  * release where there is one.

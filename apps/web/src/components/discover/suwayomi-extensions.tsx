@@ -89,7 +89,7 @@ const errorText = (error: unknown, fallback: string) =>
   error instanceof ApiError && error.message ? error.message : fallback;
 
 /**
- * Discover › Extensions › Suwayomi: every Mihon extension the connected Suwayomi server can
+ * Discover › Extensions › Suwayomi: every Tachiyomi extension the connected Suwayomi server can
  * install, not only the installed ones. Installing, updating and removing happen on that
  * server; the sources an extension adds then show under Installed sources.
  *
@@ -123,7 +123,7 @@ export function useSuwayomiExtensions() {
 }
 
 /**
- * Discover › Extensions › Suwayomi: every Mihon extension the connected Suwayomi server can
+ * Discover › Extensions › Suwayomi: every Tachiyomi extension the connected Suwayomi server can
  * install, not only the installed ones. Installing, updating and removing happen on that
  * server; the sources an extension adds then show under Installed sources. Follows the
  * page's name search and its language and rating filters.
@@ -230,8 +230,8 @@ export function SuwayomiExtensions({
         </div>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Mihon extensions from your Suwayomi server&apos;s repositories. They install on that server,
-        and their sources appear under Installed sources.
+        Tachiyomi extensions from your Suwayomi server&apos;s repositories. They install on that
+        server, and their sources appear under Installed sources.
       </p>
       {list.isPending ? (
         <p className="mt-4 text-sm text-muted-foreground">Loading Suwayomi extensions…</p>

@@ -205,7 +205,7 @@ export function ExtensionsPanel() {
       <SourceHealthPanel />
       <Panel
         title="Suwayomi server"
-        subtitle="Use the Mihon sources installed on your Suwayomi server"
+        subtitle="Use the Tachiyomi sources installed on your Suwayomi server"
       >
         <SuwayomiServer />
       </Panel>

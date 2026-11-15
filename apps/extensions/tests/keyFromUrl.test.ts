@@ -48,7 +48,7 @@ describe('Madara keyFromUrl', () => {
     api: {} as AxiosInstance,
   });
 
-  it("turns Mihon's site paths into the keys the source itself parses", () => {
+  it("turns Tachiyomi's site paths into the keys the source itself parses", () => {
     expect(source.keyFromUrl!('/manga/solo-leveling/', 'manga')).toBe('solo-leveling');
     expect(source.keyFromUrl!('https://madara.invalid/manga/solo-leveling', 'manga')).toBe(
       'solo-leveling',

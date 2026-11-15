@@ -8,7 +8,7 @@ import type { Chapters } from '@projekt-manga/types';
  * restructures its URLs hands back the same chapter under a new key. Diffing on the key
  * alone would turn every such chapter into a "new" unread duplicate.
  *
- * Modelled on Mihon's `SyncChaptersWithSource`: a stored chapter the source stopped
+ * Modelled on Tachiyomi's `SyncChaptersWithSource`: a stored chapter the source stopped
  * listing and a listed chapter that was never stored are the same chapter when they agree
  * on number (and scanlator), and are *relinked* — the stored row takes the new key, and
  * everything hanging off it stays — instead of being counted as one removal plus one new

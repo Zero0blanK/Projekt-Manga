@@ -12,7 +12,7 @@ vi.mock('@/lib/library-store', () => ({
 vi.mock('@/lib/session-resource', () => ({
   useCurrentUser: () => ({ user: null, loading: false }),
 }));
-vi.mock('@/lib/mihon-backup/extras', () => ({
+vi.mock('@/lib/tachiyomi-backup/extras', () => ({
   applyPendingImportedChapterStates: (...args: unknown[]) => state.apply(...args),
 }));
 

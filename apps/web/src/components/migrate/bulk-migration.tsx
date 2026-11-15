@@ -11,6 +11,7 @@ import { isAdultSource, useContentPrivacy } from '@/components/discover/content-
 import { useCurrentUser } from '@/lib/session-resource';
 import { useMigrationPreferences, type MigrationOptions } from '@/lib/migration-state';
 import { sourceLanguageName } from '@/lib/source-language';
+import { sourceNameOfUnmatched } from '@/lib/tachiyomi-backup/stored-names';
 import {
   bulkMigration,
   bulkProgress,
@@ -31,9 +32,12 @@ const optionLabels: Record<keyof MigrationOptions, string> = {
   categories: 'Categories',
 };
 
-/** Titles a Mihon import kept without a source are stored under `mihon:<name>`. */
-const sourceLabel = (id: string, name?: string) =>
-  name ?? (id.startsWith('mihon:') ? `${id.slice(6)} (from a Mihon backup)` : id);
+/** Titles a Tachiyomi import kept without a source are stored under `tachiyomi:<name>`. */
+const sourceLabel = (id: string, name?: string) => {
+  if (name) return name;
+  const unmatched = sourceNameOfUnmatched(id);
+  return unmatched === null ? id : `${unmatched} (from a Tachiyomi backup)`;
+};
 
 /**
  * Library › Migrate a source: moves every library title from one source to others in one

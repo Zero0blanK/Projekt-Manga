@@ -16,20 +16,20 @@ import { Field } from '@/components/settings/field-controls';
 import { parseBackup } from '@/lib/backup-validation';
 import { startTrackedRestore } from '@/lib/restore-job';
 import {
-  buildMihonImport,
+  buildTachiyomiImport,
   findTitlesInSources,
-  readMihonBackupFile,
-  resolveMihonKeys,
+  readTachiyomiBackupFile,
+  resolveTachiyomiKeys,
   summariseSources,
   type InstalledSource,
-  type MihonBackup,
-  type MihonImport as BuiltImport,
-  type MihonSourceSummary,
+  type TachiyomiBackup,
+  type TachiyomiImport as BuiltImport,
+  type TachiyomiSourceSummary,
   type TitleSearchResult,
-} from '@/lib/mihon-backup';
+} from '@/lib/tachiyomi-backup';
 import { useMigrationPreferences } from '@/lib/migration-state';
 import { SourceOrderList } from '@/components/settings/source-order-list';
-import { saveMihonImportExtras } from '@/lib/mihon-backup/extras';
+import { saveTachiyomiImportExtras } from '@/lib/tachiyomi-backup/extras';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -47,21 +47,21 @@ type Step =
   | { kind: 'closed' }
   | {
       kind: 'map';
-      backup: MihonBackup;
+      backup: TachiyomiBackup;
       installed: InstalledSource[];
-      sources: MihonSourceSummary[];
+      sources: TachiyomiSourceSummary[];
     }
   | {
       kind: 'review';
       built: BuiltImport;
-      backup: MihonBackup;
+      backup: TachiyomiBackup;
       installed: InstalledSource[];
       search: TitleSearchResult | null;
       preview: RestorePreview | null;
       previewError: string | null;
     };
 
-function initialChoices(sources: MihonSourceSummary[]): Map<string, string | null> {
+function initialChoices(sources: TachiyomiSourceSummary[]): Map<string, string | null> {
   return new Map(
     sources.map((source) => [
       source.id,
@@ -79,11 +79,11 @@ const searchInSource = (sourceId: string, query: string, signal?: AbortSignal) =
 const REVIEW_LIST_LIMIT = 50;
 
 /**
- * Settings › Privacy › Backups: imports a Mihon/Tachiyomi backup. The file is decoded here,
+ * Settings › Privacy › Backups: imports a Tachiyomi backup. The file is decoded here,
  * its sources are matched to installed ones, and the result goes through the same restore
  * job as a Projekt Manga backup (merge only), after a preview and a confirmation.
  */
-export function MihonImport({
+export function TachiyomiImport({
   owner,
   expectedUserId,
   disabled,
@@ -129,7 +129,7 @@ export function MihonImport({
       return;
     }
     setBusy('Reading backup…');
-    void Promise.all([readMihonBackupFile(file), getSources()])
+    void Promise.all([readTachiyomiBackupFile(file), getSources()])
       .then(([backup, installed]) => {
         const sources = summariseSources(backup, installed);
         setChoices(initialChoices(sources));
@@ -144,7 +144,7 @@ export function MihonImport({
       .catch((error: unknown) =>
         toast({
           description:
-            error instanceof Error && error.name === 'MihonBackupError'
+            error instanceof Error && error.name === 'TachiyomiBackupError'
               ? error.message
               : "Couldn't read that backup.",
         }),
@@ -159,7 +159,7 @@ export function MihonImport({
     const controller = new AbortController();
     searching.current = controller;
     setBusy('Matching chapters…');
-    void resolveMihonKeys(backup, choices, getSourceKeysFromUrls, controller.signal)
+    void resolveTachiyomiKeys(backup, choices, getSourceKeysFromUrls, controller.signal)
       .then(async (keys) => {
         const search = [...orders.values()].some((order) => order.length)
           ? await findTitlesInSources(backup, choices, orders, searchInSource, {
@@ -167,7 +167,7 @@ export function MihonImport({
               onProgress: ({ done, total }) => setBusy(`Searching sources… ${done} of ${total}`),
             })
           : null;
-        const built = buildMihonImport(backup, {
+        const built = buildTachiyomiImport(backup, {
           sources: choices,
           keys,
           unmatched,
@@ -241,7 +241,7 @@ export function MihonImport({
           { id: jobId, mode: 'merge', owner, settings: {}, skippedDownloads: 0 },
           parsed.data,
           // Applied when the restore finishes, by the id it is tracked under.
-          () => saveMihonImportExtras(jobId, owner, step.built.extras),
+          () => saveTachiyomiImportExtras(jobId, owner, step.built.extras),
         );
       })
       .then(() => {
@@ -280,7 +280,7 @@ export function MihonImport({
   return (
     <>
       <Field
-        label="Import from Mihon/Tachiyomi…"
+        label="Import from Tachiyomi…"
         hint="A .tachibk or .proto.gz backup; added to your current library"
       >
         <>
@@ -313,10 +313,10 @@ export function MihonImport({
           {step.kind === 'map' && (
             <>
               <AlertDialogHeader>
-                <AlertDialogTitle>Import from Mihon/Tachiyomi</AlertDialogTitle>
+                <AlertDialogTitle>Import from Tachiyomi</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Each Mihon source is matched to an installed source by name. Titles from a source
-                  with no match cannot sync chapters here.
+                  Each Tachiyomi source is matched to an installed source by name. Titles from a
+                  source with no match cannot sync chapters here.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md bg-muted/50 p-3 text-sm">
@@ -429,8 +429,8 @@ export function MihonImport({
                 })}
               </ul>
               {unmatchedSources.length > 0 && (
-                <section className="space-y-1.5 text-sm" aria-labelledby="mihon-default-order">
-                  <h3 id="mihon-default-order" className="font-medium">
+                <section className="space-y-1.5 text-sm" aria-labelledby="tachiyomi-default-order">
+                  <h3 id="tachiyomi-default-order" className="font-medium">
                     Search other sources by name
                   </h3>
                   <p className="text-xs text-muted-foreground">
@@ -451,7 +451,7 @@ export function MihonImport({
                 <label className="flex items-center gap-2">
                   <input
                     type="radio"
-                    name="mihon-unmatched"
+                    name="tachiyomi-unmatched"
                     checked={unmatched === 'skip'}
                     onChange={() => setUnmatched('skip')}
                   />
@@ -460,7 +460,7 @@ export function MihonImport({
                 <label className="flex items-center gap-2">
                   <input
                     type="radio"
-                    name="mihon-unmatched"
+                    name="tachiyomi-unmatched"
                     checked={unmatched === 'import'}
                     onChange={() => setUnmatched('import')}
                   />
@@ -523,8 +523,8 @@ export function MihonImport({
                 <p className="text-xs text-muted-foreground">
                   {step.built.stats.guessedSlugs} title
                   {step.built.stats.guessedSlugs === 1 ? '' : 's'} come from sources that cannot
-                  read Mihon links; their address was guessed from the link and may need a migration
-                  if chapters do not load.
+                  read Tachiyomi links; their address was guessed from the link and may need a
+                  migration if chapters do not load.
                 </p>
               )}
               {step.search && step.search.found.size > 0 && (

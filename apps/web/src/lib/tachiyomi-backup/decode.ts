@@ -1,11 +1,11 @@
-import { MihonBackupError, ProtoReader, WIRE_BYTES, WIRE_FIXED32 } from './protobuf';
+import { TachiyomiBackupError, ProtoReader, WIRE_BYTES, WIRE_FIXED32 } from './protobuf';
 
 /**
- * The parts of a Mihon/Tachiyomi backup (`Backup` in Mihon's
- * `data/backup/models`) this app imports. Field numbers follow Mihon's `@ProtoNumber`s;
+ * The parts of a Tachiyomi backup (`Backup` in Tachiyomi's
+ * `data/backup/models`) this app imports. Field numbers follow Tachiyomi's `@ProtoNumber`s;
  * everything else in the file is skipped.
  */
-export interface MihonChapter {
+export interface TachiyomiChapter {
   url: string;
   name: string;
   scanlator: string | null;
@@ -17,14 +17,14 @@ export interface MihonChapter {
   dateUpload: number;
 }
 
-export interface MihonHistory {
+export interface TachiyomiHistory {
   url: string;
   /** Milliseconds since the epoch. */
   lastRead: number;
 }
 
-export interface MihonTracking {
-  /** Mihon's tracker id: 1 MAL, 2 AniList, 3 Kitsu, 4 Shikimori, 5 Bangumi, 6 Komga,
+export interface TachiyomiTracking {
+  /** Tachiyomi's tracker id: 1 MAL, 2 AniList, 3 Kitsu, 4 Shikimori, 5 Bangumi, 6 Komga,
    * 7 MangaUpdates, 8 Kavita. */
   syncId: number;
   /** The tracker's id for the title, as a decimal string. */
@@ -33,8 +33,8 @@ export interface MihonTracking {
   title: string;
 }
 
-export interface MihonManga {
-  /** Mihon's numeric source id, as a decimal string (it does not fit in a number). */
+export interface TachiyomiManga {
+  /** Tachiyomi's numeric source id, as a decimal string (it does not fit in a number). */
   source: string;
   url: string;
   title: string;
@@ -42,41 +42,41 @@ export interface MihonManga {
   artist: string | null;
   description: string | null;
   genres: string[];
-  /** Mihon's SManga status: 0 unknown, 1 ongoing, 2 completed, 3 licensed,
+  /** Tachiyomi's SManga status: 0 unknown, 1 ongoing, 2 completed, 3 licensed,
    * 4 publishing finished, 5 cancelled, 6 on hiatus. */
   status: number;
   thumbnailUrl: string | null;
   /** Milliseconds since the epoch; 0 when unknown. */
   dateAdded: number;
-  /** In the library. Mihon also backs up titles that only have history. */
+  /** In the library. Tachiyomi also backs up titles that only have history. */
   favorite: boolean;
-  /** The `order` of each category this title is in (Mihon links by order, not id). */
+  /** The `order` of each category this title is in (Tachiyomi links by order, not id). */
   categories: number[];
-  chapters: MihonChapter[];
-  history: MihonHistory[];
-  tracking: MihonTracking[];
+  chapters: TachiyomiChapter[];
+  history: TachiyomiHistory[];
+  tracking: TachiyomiTracking[];
 }
 
-export interface MihonCategory {
+export interface TachiyomiCategory {
   name: string;
   order: number;
 }
 
-export interface MihonSource {
+export interface TachiyomiSource {
   id: string;
   name: string;
 }
 
-export interface MihonBackup {
-  manga: MihonManga[];
-  categories: MihonCategory[];
-  sources: MihonSource[];
+export interface TachiyomiBackup {
+  manga: TachiyomiManga[];
+  categories: TachiyomiCategory[];
+  sources: TachiyomiSource[];
 }
 
 const optional = (value: string) => (value.trim() ? value : null);
 
-function readChapter(reader: ProtoReader): MihonChapter {
-  const chapter: MihonChapter = {
+function readChapter(reader: ProtoReader): TachiyomiChapter {
+  const chapter: TachiyomiChapter = {
     url: '',
     name: '',
     scanlator: null,
@@ -101,8 +101,8 @@ function readChapter(reader: ProtoReader): MihonChapter {
   return chapter;
 }
 
-function readHistory(reader: ProtoReader): MihonHistory {
-  const history: MihonHistory = { url: '', lastRead: 0 };
+function readHistory(reader: ProtoReader): TachiyomiHistory {
+  const history: TachiyomiHistory = { url: '', lastRead: 0 };
   while (!reader.done) {
     const { field, wire } = reader.tag();
     if (field === 1 && wire === WIRE_BYTES) history.url = reader.string();
@@ -112,8 +112,8 @@ function readHistory(reader: ProtoReader): MihonHistory {
   return history;
 }
 
-function readTracking(reader: ProtoReader): MihonTracking {
-  const tracking: MihonTracking = { syncId: 0, mediaId: '', trackingUrl: '', title: '' };
+function readTracking(reader: ProtoReader): TachiyomiTracking {
+  const tracking: TachiyomiTracking = { syncId: 0, mediaId: '', trackingUrl: '', title: '' };
   let legacyMediaId = 0;
   while (!reader.done) {
     const { field, wire } = reader.tag();
@@ -130,8 +130,8 @@ function readTracking(reader: ProtoReader): MihonTracking {
   return tracking;
 }
 
-function readManga(reader: ProtoReader): MihonManga {
-  const manga: MihonManga = {
+function readManga(reader: ProtoReader): TachiyomiManga {
+  const manga: TachiyomiManga = {
     source: '0',
     url: '',
     title: '',
@@ -175,8 +175,8 @@ function readManga(reader: ProtoReader): MihonManga {
   return manga;
 }
 
-function readCategory(reader: ProtoReader): MihonCategory {
-  const category: MihonCategory = { name: '', order: 0 };
+function readCategory(reader: ProtoReader): TachiyomiCategory {
+  const category: TachiyomiCategory = { name: '', order: 0 };
   while (!reader.done) {
     const { field, wire } = reader.tag();
     if (field === 1 && wire === WIRE_BYTES) category.name = reader.string();
@@ -186,8 +186,8 @@ function readCategory(reader: ProtoReader): MihonCategory {
   return category;
 }
 
-function readSource(reader: ProtoReader): MihonSource {
-  const source: MihonSource = { id: '0', name: '' };
+function readSource(reader: ProtoReader): TachiyomiSource {
+  const source: TachiyomiSource = { id: '0', name: '' };
   while (!reader.done) {
     const { field, wire } = reader.tag();
     if (field === 1 && wire === WIRE_BYTES) source.name = reader.string();
@@ -197,10 +197,10 @@ function readSource(reader: ProtoReader): MihonSource {
   return source;
 }
 
-/** Decodes an uncompressed Mihon backup. Throws `MihonBackupError` on damaged input. */
-export function decodeMihonBackup(bytes: Uint8Array): MihonBackup {
+/** Decodes an uncompressed Tachiyomi backup. Throws `TachiyomiBackupError` on damaged input. */
+export function decodeTachiyomiBackup(bytes: Uint8Array): TachiyomiBackup {
   const reader = new ProtoReader(bytes);
-  const backup: MihonBackup = { manga: [], categories: [], sources: [] };
+  const backup: TachiyomiBackup = { manga: [], categories: [], sources: [] };
   while (!reader.done) {
     const { field, wire } = reader.tag();
     if (field === 1 && wire === WIRE_BYTES) backup.manga.push(readManga(reader.message()));
@@ -211,12 +211,12 @@ export function decodeMihonBackup(bytes: Uint8Array): MihonBackup {
     else reader.skip(wire);
   }
   if (backup.manga.length === 0 && backup.categories.length === 0 && backup.sources.length === 0)
-    throw new MihonBackupError('That file has no Mihon library in it.');
+    throw new TachiyomiBackupError('That file has no Tachiyomi library in it.');
   return backup;
 }
 
 /** Decompressed backups above this are refused: a real library is a few MiB. */
-export const MIHON_BACKUP_MAX_BYTES = 128 * 1024 * 1024;
+export const TACHIYOMI_BACKUP_MAX_BYTES = 128 * 1024 * 1024;
 
 async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new ReadableStream<BufferSource>({
@@ -233,15 +233,15 @@ async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > MIHON_BACKUP_MAX_BYTES) {
+      if (total > TACHIYOMI_BACKUP_MAX_BYTES) {
         void reader.cancel();
-        throw new MihonBackupError('That backup is too large to import.');
+        throw new TachiyomiBackupError('That backup is too large to import.');
       }
       chunks.push(value);
     }
   } catch (error) {
-    if (error instanceof MihonBackupError) throw error;
-    throw new MihonBackupError('The backup file is truncated or damaged.');
+    if (error instanceof TachiyomiBackupError) throw error;
+    throw new TachiyomiBackupError('The backup file is truncated or damaged.');
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -253,8 +253,8 @@ async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
 }
 
 /** Reads a `.tachibk` / `.proto.gz` file. An already-decompressed backup is accepted too. */
-export async function readMihonBackupFile(file: Blob): Promise<MihonBackup> {
+export async function readTachiyomiBackupFile(file: Blob): Promise<TachiyomiBackup> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const gzipped = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
-  return decodeMihonBackup(gzipped ? await gunzip(bytes) : bytes);
+  return decodeTachiyomiBackup(gzipped ? await gunzip(bytes) : bytes);
 }

@@ -155,7 +155,7 @@ export function createSuwayomiSource(info: SuwayomiSourceInfo): Source {
     filters?: Record<string, FilterValue>,
   ): Promise<{ items: Mangas[]; hasNextPage: boolean }> {
     const hasFilters = Boolean(filters && Object.keys(filters).length > 0);
-    // Mihon sources apply filters to search only, so a filtered browse is a blank search.
+    // Tachiyomi sources apply filters to search only, so a filtered browse is a blank search.
     const effectiveType = hasFilters || query ? 'SEARCH' : type;
     const changes = hasFilters ? toFilterChanges(await sourceFilters(), filters) : [];
     const data = await suwayomiGraphql<{

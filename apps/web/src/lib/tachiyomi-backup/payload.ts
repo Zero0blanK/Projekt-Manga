@@ -1,10 +1,11 @@
 import type { TrackerName } from '@projekt-manga/api-client';
 import type { PreviewBackupBody } from '@projekt-manga/schemas';
-import type { MihonBackup, MihonChapter, MihonManga } from './decode';
+import type { TachiyomiBackup, TachiyomiChapter, TachiyomiManga } from './decode';
 import { mapStatus, mapTracking } from './mapping';
 import type { FoundTitle } from './search';
+import { UNMATCHED_SOURCE_PREFIX } from './stored-names';
 
-/** What `keyFromUrl` made of one Mihon source's URLs (see `resolveMihonKeys`). */
+/** What `keyFromUrl` made of one Tachiyomi source's URLs (see `resolveTachiyomiKeys`). */
 export interface SourceKeys {
   /** False when the source has no `keyFromUrl`: chapter state is then matched by number. */
   supported: boolean;
@@ -12,8 +13,8 @@ export interface SourceKeys {
   chapters: Map<string, string | null>;
 }
 
-export interface MihonImportOptions {
-  /** Mihon source id → installed source id, or null when it has none. */
+export interface TachiyomiImportOptions {
+  /** Tachiyomi source id → installed source id, or null when it has none. */
   sources: ReadonlyMap<string, string | null>;
   keys: ReadonlyMap<string, SourceKeys>;
   /** Titles from sources with no installed match: left out, or added to the library
@@ -24,7 +25,7 @@ export interface MihonImportOptions {
   found?: ReadonlyMap<number, FoundTitle>;
 }
 
-/** Read state for a title whose source cannot name its chapters from Mihon's URLs. It is
+/** Read state for a title whose source cannot name its chapters from Tachiyomi's URLs. It is
  * applied by chapter number once the title's chapter list has been synced. */
 export interface ChapterNumberState {
   source: string;
@@ -34,13 +35,13 @@ export interface ChapterNumberState {
   lastPage: Array<[number, number]>;
 }
 
-export interface MihonImportExtras {
+export interface TachiyomiImportExtras {
   categories: Array<{ name: string; titles: Array<{ source: string; slug: string }> }>;
   trackers: Array<{ source: string; slug: string; tracker: TrackerName; tracker_media_id: string }>;
   chapterNumbers: ChapterNumberState[];
 }
 
-export interface MihonImportStats {
+export interface TachiyomiImportStats {
   libraryTitles: number;
   matchedTitles: number;
   /** Titles with no matched source that a title search found in another source. */
@@ -58,17 +59,17 @@ export interface MihonImportStats {
   skippedTrackers: number;
 }
 
-export type MihonRestorePayload = Omit<PreviewBackupBody, 'mode' | 'expectedUserId'>;
+export type TachiyomiRestorePayload = Omit<PreviewBackupBody, 'mode' | 'expectedUserId'>;
 
-export interface MihonImport {
-  payload: MihonRestorePayload;
-  extras: MihonImportExtras;
-  stats: MihonImportStats;
+export interface TachiyomiImport {
+  payload: TachiyomiRestorePayload;
+  extras: TachiyomiImportExtras;
+  stats: TachiyomiImportStats;
 }
 
-type RestoreManga = MihonRestorePayload['manga'][number];
+type RestoreManga = TachiyomiRestorePayload['manga'][number];
 type RestoreChapter = RestoreManga['chapters'][number];
-type RestoreHistory = MihonRestorePayload['history'][number];
+type RestoreHistory = TachiyomiRestorePayload['history'][number];
 
 /** Matches the restore schema's caps, so an oversized backup fails here with a reason. */
 const MAX_TITLES = 10_000;
@@ -99,24 +100,27 @@ function decodeURIComponentSafe(value: string) {
   }
 }
 
-const hasState = (chapter: MihonChapter) =>
+const hasState = (chapter: TachiyomiChapter) =>
   chapter.read || chapter.bookmark || chapter.lastPageRead > 0;
 
-/** A Mihon source's name from the backup, or its id when the backup has none. */
-export function unmatchedSourceName(backup: MihonBackup, id: string) {
+/** A Tachiyomi source's name from the backup, or its id when the backup has none. */
+export function unmatchedSourceName(backup: TachiyomiBackup, id: string) {
   return backup.sources.find((source) => source.id === id)?.name || id;
 }
 
 /**
  * Builds the version-2 restore payload, plus what it cannot carry (categories, tracker
- * links, read state by chapter number), from a decoded Mihon backup.
+ * links, read state by chapter number), from a decoded Tachiyomi backup.
  *
  * Only chapters with some state (read, bookmarked, partly read) are sent: the rest come
  * from the source on the title's next chapter sync, so leaving them out keeps big
  * libraries within the restore's size limits.
  */
-export function buildMihonImport(backup: MihonBackup, options: MihonImportOptions): MihonImport {
-  const stats: MihonImportStats = {
+export function buildTachiyomiImport(
+  backup: TachiyomiBackup,
+  options: TachiyomiImportOptions,
+): TachiyomiImport {
+  const stats: TachiyomiImportStats = {
     libraryTitles: 0,
     matchedTitles: 0,
     foundBySearch: 0,
@@ -134,10 +138,10 @@ export function buildMihonImport(backup: MihonBackup, options: MihonImportOption
   const manga = new Map<string, RestoreManga>();
   const history = new Map<string, RestoreHistory>();
   const categories = new Map<string, Array<{ source: string; slug: string }>>();
-  const trackers = new Map<string, MihonImportExtras['trackers'][number]>();
+  const trackers = new Map<string, TachiyomiImportExtras['trackers'][number]>();
   const byNumber = new Map<string, ChapterNumberState>();
 
-  const addTitleExtras = (title: MihonManga, source: string, slug: string) => {
+  const addTitleExtras = (title: TachiyomiManga, source: string, slug: string) => {
     for (const order of new Set(title.categories)) {
       const name = categoryNames.get(order)?.name.trim();
       if (!name) continue;
@@ -156,7 +160,7 @@ export function buildMihonImport(backup: MihonBackup, options: MihonImportOption
     }
   };
 
-  const baseEntry = (title: MihonManga, id: string, source: string, slug: string) => ({
+  const baseEntry = (title: TachiyomiManga, id: string, source: string, slug: string) => ({
     id,
     source,
     slug,
@@ -183,11 +187,11 @@ export function buildMihonImport(backup: MihonBackup, options: MihonImportOption
         continue;
       }
       // Kept under a source of its own: nothing can sync it, but migrate can move it.
-      const source = `mihon:${unmatchedSourceName(backup, title.source)}`;
+      const source = `${UNMATCHED_SOURCE_PREFIX}${unmatchedSourceName(backup, title.source)}`;
       const slug = title.url.slice(0, 512);
       if (manga.has(`${source}\0${slug}`)) continue;
       manga.set(`${source}\0${slug}`, {
-        ...baseEntry(title, `mihon-${index}`, source, slug),
+        ...baseEntry(title, `tachiyomi-${index}`, source, slug),
         chapters: [],
       });
       addTitleExtras(title, source, slug);
@@ -195,7 +199,7 @@ export function buildMihonImport(backup: MihonBackup, options: MihonImportOption
       continue;
     }
 
-    // A title found by search is on another site: Mihon's URLs mean nothing there, so its
+    // A title found by search is on another site: Tachiyomi's URLs mean nothing there, so its
     // chapter state goes by number.
     const keys = found ? undefined : options.keys.get(title.source);
     let slug = found?.slug ?? keys?.manga.get(title.url) ?? null;
@@ -214,7 +218,7 @@ export function buildMihonImport(backup: MihonBackup, options: MihonImportOption
     if (title.favorite) {
       let entry = manga.get(titleKey);
       if (!entry) {
-        entry = { ...baseEntry(title, `mihon-${index}`, sourceId, slug), chapters: [] };
+        entry = { ...baseEntry(title, `tachiyomi-${index}`, sourceId, slug), chapters: [] };
         // The old site's cover may not load from here; the new source's will.
         if (found?.thumbnailUrl) entry.thumbnail_url = found.thumbnailUrl;
         manga.set(titleKey, entry);
@@ -229,7 +233,7 @@ export function buildMihonImport(backup: MihonBackup, options: MihonImportOption
         if (!hasState(chapter)) continue;
         const key = chapterKey(chapter.url);
         if (!key) {
-          // Mihon uses -1 for "no number"; such a chapter cannot be matched later.
+          // Tachiyomi uses -1 for "no number"; such a chapter cannot be matched later.
           if (chapter.chapterNumber < 0) continue;
           if (chapter.read) numbered.read.push(chapter.chapterNumber);
           else if (chapter.lastPageRead > 0)

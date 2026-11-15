@@ -6,14 +6,17 @@ import prisma from '../../src/configs/prisma.config.js';
 import { replaceBackup } from '../../src/repositories/restore.repository.js';
 import chapterService from '../../src/services/chapter.service.js';
 // The payload under test is the one the web importer builds; its builder is pure TypeScript.
-import { buildMihonImport } from '../../../web/src/lib/mihon-backup/payload.js';
-import type { MihonBackup, MihonManga } from '../../../web/src/lib/mihon-backup/decode.js';
+import { buildTachiyomiImport } from '../../../web/src/lib/tachiyomi-backup/payload.js';
+import type {
+  TachiyomiBackup,
+  TachiyomiManga,
+} from '../../../web/src/lib/tachiyomi-backup/decode.js';
 
 const SOURCE = 'madara-test';
-const MIHON_ID = '6400665728063187402';
+const TACHIYOMI_ID = '6400665728063187402';
 
-const title = (url: string, name: string, extra: Partial<MihonManga> = {}): MihonManga => ({
-  source: MIHON_ID,
+const title = (url: string, name: string, extra: Partial<TachiyomiManga> = {}): TachiyomiManga => ({
+  source: TACHIYOMI_ID,
   url,
   title: name,
   author: 'Author',
@@ -31,7 +34,7 @@ const title = (url: string, name: string, extra: Partial<MihonManga> = {}): Miho
   ...extra,
 });
 
-const backup: MihonBackup = {
+const backup: TachiyomiBackup = {
   manga: [
     title('/manga/alpha/', 'Alpha', {
       chapters: [
@@ -89,7 +92,7 @@ const backup: MihonBackup = {
   ],
   categories: [{ name: 'Reading', order: 1 }],
   sources: [
-    { id: MIHON_ID, name: 'Madara Test' },
+    { id: TACHIYOMI_ID, name: 'Madara Test' },
     { id: '77', name: 'Gone' },
   ],
 };
@@ -98,7 +101,7 @@ const backup: MihonBackup = {
 const segment = (url: string, index: number) => url.split('/').filter(Boolean)[index] ?? null;
 const keys = new Map([
   [
-    MIHON_ID,
+    TACHIYOMI_ID,
     {
       supported: true,
       manga: new Map(backup.manga.map((m) => [m.url, segment(m.url, 1)])),
@@ -109,9 +112,9 @@ const keys = new Map([
   ],
 ]);
 
-const built = buildMihonImport(backup, {
+const built = buildTachiyomiImport(backup, {
   sources: new Map([
-    [MIHON_ID, SOURCE],
+    [TACHIYOMI_ID, SOURCE],
     ['77', null],
   ]),
   keys,
@@ -137,7 +140,7 @@ const listed = (id: string, chapter_number: number): Chapters =>
     pages: [],
   }) as Chapters;
 
-describe('Mihon import payload (real SQLite)', () => {
+describe('Tachiyomi import payload (real SQLite)', () => {
   it('restores an anonymous library, keeps read state through the first chapter sync', async () => {
     const result = await replaceBackup(restoreBody(null));
     expect(result).toMatchObject({ restoredManga: 2 });
@@ -149,7 +152,7 @@ describe('Mihon import payload (real SQLite)', () => {
     expect(alpha).toMatchObject({ title: 'Alpha', in_library: true, author: 'Author' });
     expect(alpha.manga_detail).toMatchObject({ status: 'ONGOING', genres: 'Action' });
 
-    const lost = await prisma.manga.findFirstOrThrow({ where: { source: 'mihon:Gone' } });
+    const lost = await prisma.manga.findFirstOrThrow({ where: { source: 'tachiyomi:Gone' } });
     expect(lost).toMatchObject({ slug: '/series/lost', in_library: true });
     expect(await prisma.manga.count({ where: { slug: 'browsed' } })).toBe(0);
 
@@ -193,7 +196,7 @@ describe('Mihon import payload (real SQLite)', () => {
 
   it("writes a signed-in account's overlay rows, and a second import adds nothing", async () => {
     const user = await prisma.user.create({
-      data: { email: 'mihon-import@example.com', password_hash: 'x' },
+      data: { email: 'tachiyomi-import@example.com', password_hash: 'x' },
     });
     await replaceBackup(restoreBody(user.id), user.id);
     await replaceBackup(restoreBody(user.id), user.id);

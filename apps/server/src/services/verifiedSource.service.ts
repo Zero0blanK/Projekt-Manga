@@ -325,7 +325,7 @@ const urlKeysResultSchema = z.object({
 });
 
 /**
- * Turns Mihon/Tachiyomi URLs into this app's title slugs and chapter keys through the
+ * Turns Tachiyomi URLs into this app's title slugs and chapter keys through the
  * source's own `keyFromUrl`, for a backup import. No network: the source only parses the
  * URLs. A source without `keyFromUrl` answers `supported: false`, and the importer then
  * falls back to matching read state by chapter number.

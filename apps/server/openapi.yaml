@@ -1325,9 +1325,9 @@ paths:
   /source/{source_id}/keys-from-urls:
     post:
       tags: [Sources]
-      summary: Turn Mihon/Tachiyomi URLs into this source's title slugs and chapter keys
+      summary: Turn Tachiyomi URLs into this source's title slugs and chapter keys
       description: >
-        Used by the Mihon/Tachiyomi backup import. Runs the source's optional keyFromUrl in
+        Used by the Tachiyomi backup import. Runs the source's optional keyFromUrl in
         its sandbox; no network request is made. At most 5,000 URLs per request. A source
         without keyFromUrl answers supported=false with every key null.
       parameters:

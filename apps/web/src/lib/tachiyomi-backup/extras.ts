@@ -11,25 +11,26 @@ import {
 } from '@projekt-manga/api-client';
 import { actions } from '@/lib/app-store';
 import { bulkPayload } from '@/lib/chapter-gaps';
-import type { ChapterNumberState, MihonImportExtras } from './payload';
+import type { ChapterNumberState, TachiyomiImportExtras } from './payload';
+import { CHAPTER_STATE_STORAGE_KEY, EXTRAS_STORAGE_KEY, readStored } from './stored-names';
 
 /**
- * What a Mihon import adds after its restore job succeeds. The restore payload has no
+ * What a Tachiyomi import adds after its restore job succeeds. The restore payload has no
  * room for categories (kept in this browser's app state), tracker links (their own
  * endpoint) or read state matched by chapter number, so they wait here, tied to the job.
  */
-const extrasKey = 'projekt-manga-mihon-import';
+const extrasKey = EXTRAS_STORAGE_KEY;
 /** Per-title read state still waiting for the title's first chapter sync. */
-const chapterStateKey = 'projekt-manga-mihon-chapter-state';
+const chapterStateKey = CHAPTER_STATE_STORAGE_KEY;
 
-interface PendingExtras extends MihonImportExtras {
+interface PendingExtras extends TachiyomiImportExtras {
   jobId: string;
   owner: string;
 }
 
 const read = <T>(key: string): T | null => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = readStored(key);
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
@@ -45,11 +46,15 @@ const write = (key: string, value: unknown) => {
   }
 };
 
-export function saveMihonImportExtras(jobId: string, owner: string, extras: MihonImportExtras) {
+export function saveTachiyomiImportExtras(
+  jobId: string,
+  owner: string,
+  extras: TachiyomiImportExtras,
+) {
   write(extrasKey, { jobId, owner, ...extras } satisfies PendingExtras);
 }
 
-export function clearMihonImportExtras(jobId: string) {
+export function clearTachiyomiImportExtras(jobId: string) {
   if (read<PendingExtras>(extrasKey)?.jobId === jobId) write(extrasKey, null);
 }
 
@@ -68,7 +73,7 @@ export interface AppliedExtras {
  * library has refreshed; does nothing for any other job. Each step is best-effort: a
  * tracker that refuses one link does not undo the categories.
  */
-export async function applyMihonImportExtras(
+export async function applyTachiyomiImportExtras(
   jobId: string,
   owner: string,
 ): Promise<AppliedExtras | null> {
@@ -135,7 +140,7 @@ function dropChapterState(id: string) {
  * once; a failed attempt (offline) keeps it for the next. Marking is idempotent, so two
  * callers meeting the same title (its page and the library sweep) do no harm.
  */
-export async function applyMihonChapterState(
+export async function applyTachiyomiChapterState(
   owner: string,
   manga: { id: string; slug: string; source: string },
   rows: MangaChapterRecord[],
@@ -197,7 +202,7 @@ export async function applyPendingImportedChapterStates(
     if (manga.chapters === 0 || !store[stateId(owner, manga.source, manga.slug)]) continue;
     try {
       const rows = await getMangaChapters(manga.id, manga.slug, manga.source, signal);
-      if (await applyMihonChapterState(owner, manga, rows)) marked += 1;
+      if (await applyTachiyomiChapterState(owner, manga, rows)) marked += 1;
     } catch {
       // Left saved: the next library load tries again.
     }

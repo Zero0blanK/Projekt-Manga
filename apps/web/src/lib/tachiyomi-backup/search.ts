@@ -5,7 +5,7 @@ import {
   type FoundTitle,
   type SearchSource,
 } from '@/lib/title-match';
-import type { MihonBackup } from './decode';
+import type { TachiyomiBackup } from './decode';
 
 export { bestTitleMatch };
 export type { FoundTitle, SearchSource };
@@ -28,13 +28,13 @@ export interface TitleSearchProgress {
 const CONCURRENCY = 3;
 
 /**
- * For each library title whose Mihon source has no direct match, searches the listed
+ * For each library title whose Tachiyomi source has no direct match, searches the listed
  * installed sources by the title's name, in the listed order, and stops at the first
  * source with a close enough result. A source that fails is treated as not having the
  * title, so the next one is tried.
  */
 export async function findTitlesInSources(
-  backup: MihonBackup,
+  backup: TachiyomiBackup,
   direct: ReadonlyMap<string, string | null>,
   orders: ReadonlyMap<string, readonly string[]>,
   search: SearchSource,

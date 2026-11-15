@@ -82,7 +82,7 @@ import { useChapterBookmarks } from '@/lib/chapter-bookmarks';
 import { useChapterFilterScroll } from '@/lib/chapter-filter-scroll';
 import { useCurrentUser } from '@/lib/session-resource';
 import { useNewSinceLastVisit } from '@/lib/chapter-visits';
-import { applyMihonChapterState } from '@/lib/mihon-backup/extras';
+import { applyTachiyomiChapterState } from '@/lib/tachiyomi-backup/extras';
 import { useDownloads } from '@/lib/shared-queries';
 
 type ChapterRow = {
@@ -421,9 +421,9 @@ export function ChapterList({ manga }: { manga: Manga }) {
         if (!controller.signal.aborted) {
           setRecords(rows);
           setRecordsOwner(owner);
-          // Read state from a Mihon import whose source could not name its chapters,
+          // Read state from a Tachiyomi import whose source could not name its chapters,
           // matched by number now that the chapter list exists.
-          void applyMihonChapterState(
+          void applyTachiyomiChapterState(
             owner,
             { id: manga.id, slug: manga.slug, source: manga.source },
             rows,
