@@ -16,6 +16,7 @@ import { useSetting } from '@/lib/app-store';
 import {
   applyAppearance,
   DEFAULT_FROST_THEME,
+  DEFAULT_INK_THEME,
   DEFAULT_THEME,
   DEFAULT_UI_SCALE,
   DEFAULT_UI_STYLE,
@@ -113,6 +114,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const uiStyle = useSetting('uiStyle', DEFAULT_UI_STYLE) as string;
   const frostTheme = useSetting('frostTheme', DEFAULT_FROST_THEME) as string;
   const frostGlass = useSetting('frostGlass', true) as boolean;
+  const inkTheme = useSetting('inkTheme', DEFAULT_INK_THEME) as string;
+  const inkTone = useSetting('inkTone', true) as boolean;
 
   // Settings > Appearance. The same values are already on <html> from the blocking init
   // script in the layout; this re-applies them when they change at runtime, and keeps
@@ -127,17 +130,16 @@ export function AppShell({ children }: { children: ReactNode }) {
         uiStyle,
         frostTheme,
         frostGlass,
+        inkTheme,
+        inkTone,
       });
     apply();
-    const followsSystem =
-      uiStyle === 'frost'
-        ? String(frostTheme).toLowerCase() === 'auto'
-        : String(theme).toLowerCase() === 'auto';
-    if (!followsSystem) return;
+    const palette = uiStyle === 'frost' ? frostTheme : uiStyle === 'ink' ? inkTheme : theme;
+    if (String(palette).toLowerCase() !== 'auto') return;
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
-  }, [theme, accent, uiScale, reduceMotion, uiStyle, frostTheme, frostGlass]);
+  }, [theme, accent, uiScale, reduceMotion, uiStyle, frostTheme, frostGlass, inkTheme, inkTone]);
 
   // Global shortcuts: "g" then l/d/h/s jumps between sections.
   useEffect(() => {
@@ -183,7 +185,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [router]);
 
   return (
-    <div className="min-h-screen w-full bg-background">
+    <div data-slot="app-page" className="min-h-screen w-full bg-background">
       {/* Always rendered, not gated behind client-only state, so its markup is part of the
           server-rendered HTML. It decides for itself whether this session skips straight
           through; see splash-intro.tsx and lib/splash.ts. */}

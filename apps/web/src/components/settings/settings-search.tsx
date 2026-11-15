@@ -16,6 +16,7 @@ const groups: Array<{ section: SectionId; description: string; labels: string[] 
       'Interface style',
       'Theme',
       'Glass effects',
+      'Screentone',
       'Accent color',
       'Interface scale',
       'Interface density',

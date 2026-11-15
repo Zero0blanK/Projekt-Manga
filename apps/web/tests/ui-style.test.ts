@@ -3,10 +3,12 @@ import {
   APP_STATE_STORAGE_KEY,
   DEFAULT_ACCENT,
   FROST_ACCENTS,
+  INK_ACCENTS,
   THEME_INIT_SCRIPT,
   applyAppearance,
   effectiveAccent,
   resolveFrostTheme,
+  resolveInkTheme,
   resolveUiStyle,
   shownAccent,
 } from '@/lib/theme';
@@ -15,7 +17,8 @@ const root = document.documentElement;
 
 afterEach(() => {
   root.className = '';
-  for (const name of ['data-theme', 'data-ui', 'data-frost', 'style']) root.removeAttribute(name);
+  for (const name of ['data-theme', 'data-ui', 'data-frost', 'data-ink', 'style'])
+    root.removeAttribute(name);
   localStorage.clear();
 });
 
@@ -78,6 +81,48 @@ describe('interface style', () => {
     expect(root.hasAttribute('data-frost')).toBe(false);
     expect(root.classList.contains('frost-off')).toBe(false);
     expect(root.style.fontSize).toBe('');
+  });
+
+  it("uses Ink's own palettes, Paper by default, with each palette's accent", () => {
+    expect(resolveUiStyle('ink')).toBe('ink');
+    expect(resolveInkTheme(undefined)).toBe('paper');
+    expect(resolveInkTheme('night')).toBe('night');
+    expect(resolveInkTheme('midnight')).toBe('paper');
+    expect(effectiveAccent('', 'ink')).toBeNull();
+    expect(shownAccent('', 'ink', 'midnight', 'blueprint')).toBe(INK_ACCENTS.blueprint);
+  });
+
+  it('marks <html> for Ink, light or dark by palette, and drops it again', () => {
+    applyAppearance({
+      theme: 'dark',
+      accent: undefined,
+      uiScale: '100%',
+      reduceMotion: false,
+      uiStyle: 'ink',
+      inkTheme: 'paper',
+      inkTone: false,
+    });
+    expect(root.dataset.ui).toBe('ink');
+    expect(root.dataset.ink).toBe('paper');
+    expect(root.dataset.theme).toBe('light');
+    expect(root.classList.contains('dark')).toBe(false);
+    expect(root.classList.contains('ink-tone-off')).toBe(true);
+    expect(root.style.getPropertyValue('--primary')).toBe('');
+    expect(root.style.fontSize).toBe('');
+
+    frost({ frostTheme: 'original' });
+    expect(root.hasAttribute('data-ink')).toBe(false);
+    expect(root.classList.contains('ink-tone-off')).toBe(false);
+  });
+
+  it('applies Ink before the first paint too', () => {
+    runInitScript({ uiStyle: 'ink', inkTheme: 'night' });
+    expect(root.dataset.ui).toBe('ink');
+    expect(root.dataset.ink).toBe('night');
+    expect(root.dataset.theme).toBe('dark');
+    expect(root.classList.contains('dark')).toBe(true);
+    expect(root.classList.contains('ink-tone-off')).toBe(false);
+    expect(root.style.getPropertyValue('--primary')).toBe('');
   });
 
   it('is applied before the first paint, the same way', () => {
