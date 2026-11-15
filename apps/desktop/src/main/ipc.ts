@@ -434,7 +434,9 @@ export function registerIpcHandlers(
     if (typeof text !== 'string') {
       throw new Error('Clipboard text must be a string');
     }
-    clipboard.writeText(text);
+    // Asynchronous since Electron 44: answer once the text is on the clipboard, and let a
+    // failed copy reach the caller instead of reporting success.
+    await clipboard.writeText(text);
     return ok(null);
   });
 
