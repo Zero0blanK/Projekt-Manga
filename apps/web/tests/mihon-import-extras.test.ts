@@ -3,6 +3,7 @@ import type { MangaChapterRecord } from '@projekt-manga/api-client';
 
 const api = vi.hoisted(() => ({
   getManga: vi.fn(),
+  getMangaChapters: vi.fn(),
   getConnectedTrackers: vi.fn(),
   linkMangaToTracker: vi.fn(),
   markPreviousChaptersAsRead: vi.fn(),
@@ -30,6 +31,7 @@ import { getAppState } from '@/lib/app-store';
 import {
   applyMihonChapterState,
   applyMihonImportExtras,
+  applyPendingImportedChapterStates,
   clearMihonImportExtras,
   saveMihonImportExtras,
 } from '@/lib/mihon-backup/extras';
@@ -144,5 +146,50 @@ describe('Mihon import extras', () => {
     ).toEqual(['key-1', 'key-2']);
     expect(api.markChapterByLastPage).toHaveBeenCalledWith('b', 'key-3', 4, expect.any(Object));
     expect(await applyMihonChapterState('anonymous', manga, rows)).toBeNull();
+  });
+
+  it('marks a title the library update synced, without waiting for its page to open', async () => {
+    saveMihonImportExtras('job-1', 'anonymous', extras);
+    await applyMihonImportExtras('job-1', 'anonymous');
+    const rows = [record('1', 1), record('2', 2), record('3', 3)];
+    api.getMangaChapters.mockResolvedValue(rows);
+    const library = [
+      { id: 'm-a', slug: 'a', source: 'src', chapters: 5 },
+      { id: 'm-b', slug: 'b', source: 'src', chapters: 3 },
+    ];
+
+    expect(await applyPendingImportedChapterStates('anonymous', library)).toBe(1);
+    // Asked only about the title with saved state.
+    expect(api.getMangaChapters).toHaveBeenCalledTimes(1);
+    expect(api.getMangaChapters).toHaveBeenCalledWith('m-b', 'b', 'src', undefined);
+    expect(
+      api.markPreviousChaptersAsRead.mock.calls[0][1].map((c: { id: string }) => c.id),
+    ).toEqual(['key-1', 'key-2']);
+    // Applied once.
+    expect(await applyPendingImportedChapterStates('anonymous', library)).toBe(0);
+  });
+
+  it('leaves a title with no chapters yet for later, without asking for them', async () => {
+    saveMihonImportExtras('job-1', 'anonymous', extras);
+    await applyMihonImportExtras('job-1', 'anonymous');
+    const unsynced = [{ id: 'm-b', slug: 'b', source: 'src', chapters: 0 }];
+    expect(await applyPendingImportedChapterStates('anonymous', unsynced)).toBe(0);
+    expect(api.getMangaChapters).not.toHaveBeenCalled();
+
+    api.getMangaChapters.mockResolvedValue([record('1', 1)]);
+    const synced = [{ ...unsynced[0], chapters: 1 }];
+    expect(await applyPendingImportedChapterStates('anonymous', synced)).toBe(1);
+  });
+
+  it('keeps the saved state when marking fails, and applies it on the next try', async () => {
+    saveMihonImportExtras('job-1', 'anonymous', extras);
+    await applyMihonImportExtras('job-1', 'anonymous');
+    api.getMangaChapters.mockResolvedValue([record('1', 1)]);
+    api.markPreviousChaptersAsRead.mockRejectedValueOnce(new Error('offline'));
+    const library = [{ id: 'm-b', slug: 'b', source: 'src', chapters: 1 }];
+
+    expect(await applyPendingImportedChapterStates('anonymous', library)).toBe(0);
+    expect(await applyPendingImportedChapterStates('anonymous', library)).toBe(1);
+    expect(api.markPreviousChaptersAsRead).toHaveBeenCalledTimes(2);
   });
 });

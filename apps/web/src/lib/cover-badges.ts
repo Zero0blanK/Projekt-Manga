@@ -14,7 +14,7 @@ export const COVER_BADGE_POSITIONS = [
 export type CoverBadgePosition = (typeof COVER_BADGE_POSITIONS)[number]['value'];
 export type CornerPosition = Exclude<CoverBadgePosition, 'below-title'>;
 
-/** Joined: one block split into coloured segments in a corner, as Mihon does. Pills: a
+/** Joined: one block split into coloured segments in a corner. Pills: a
  * separate rounded chip for each count, with its words ("3 unread"). */
 export const COVER_BADGE_STYLES = [
   { value: 'joined', label: 'Joined block' },
