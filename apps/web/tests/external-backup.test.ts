@@ -2,20 +2,20 @@ import { gzipSync } from 'node:zlib';
 import { describe, expect, it, vi } from 'vitest';
 import { replaceBackupBodySchema } from '@projekt-manga/schemas';
 import {
-  buildMihonImport,
-  decodeMihonBackup,
+  buildExternalImport,
+  decodeExternalBackup,
   guessSlug,
   mapStatus,
   mapTracking,
   matchSource,
   normaliseSourceName,
-  readMihonBackupFile,
-  resolveMihonKeys,
+  readExternalBackupFile,
+  resolveExternalKeys,
   summariseSources,
-  MihonBackupError,
-  type MihonBackup,
+  ExternalBackupError,
+  type ExternalBackup,
   type SourceKeys,
-} from '@/lib/mihon-backup';
+} from '@/lib/external-backup';
 import { parseBackup } from '@/lib/backup-validation';
 
 // A minimal protobuf writer, so every test builds its own backup bytes.
@@ -96,9 +96,9 @@ function sampleBackup(): Uint8Array {
   ]);
 }
 
-describe('decodeMihonBackup', () => {
+describe('decodeExternalBackup', () => {
   it('reads the imported fields and skips unknown ones', () => {
-    const backup = decodeMihonBackup(sampleBackup());
+    const backup = decodeExternalBackup(sampleBackup());
     expect(backup.sources).toEqual([
       { id: BIG_SOURCE.toString(), name: 'Madara Site' },
       { id: '77', name: 'Gone Source' },
@@ -140,31 +140,31 @@ describe('decodeMihonBackup', () => {
   });
 
   it('accepts unpacked repeated category orders', () => {
-    const backup = decodeMihonBackup(msg(1, str(3, 'A'), int(17, 3), int(17, 4)));
+    const backup = decodeExternalBackup(msg(1, str(3, 'A'), int(17, 3), int(17, 4)));
     expect(backup.manga[0].categories).toEqual([3, 4]);
   });
 
   it('rejects a truncated file at every cut point', () => {
     const full = sampleBackup();
     for (const cut of [1, 2, 10, Math.floor(full.length / 2), full.length - 1]) {
-      expect(() => decodeMihonBackup(full.subarray(0, cut))).toThrow(MihonBackupError);
+      expect(() => decodeExternalBackup(full.subarray(0, cut))).toThrow(ExternalBackupError);
     }
   });
 
   it('rejects data that is not a backup', () => {
-    expect(() => decodeMihonBackup(new TextEncoder().encode('{"version":2}'))).toThrow(
-      MihonBackupError,
+    expect(() => decodeExternalBackup(new TextEncoder().encode('{"version":2}'))).toThrow(
+      ExternalBackupError,
     );
-    expect(() => decodeMihonBackup(new Uint8Array())).toThrow(/no Mihon library/);
+    expect(() => decodeExternalBackup(new Uint8Array())).toThrow('no Tachiyomi/Mihon library');
   });
 
   it('gunzips a .tachibk file', async () => {
     const gzipped = new Uint8Array(gzipSync(sampleBackup()));
     const file = { arrayBuffer: async () => gzipped.buffer } as unknown as Blob;
-    const backup = await readMihonBackupFile(file);
+    const backup = await readExternalBackupFile(file);
     expect(backup.manga).toHaveLength(3);
     const damaged = { arrayBuffer: async () => gzipped.slice(0, 30).buffer } as unknown as Blob;
-    await expect(readMihonBackupFile(damaged)).rejects.toThrow(MihonBackupError);
+    await expect(readExternalBackupFile(damaged)).rejects.toThrow(ExternalBackupError);
   });
 });
 
@@ -200,7 +200,7 @@ describe('source mapping', () => {
   });
 
   it('summarises sources by title count, including ones missing from backupSources', () => {
-    const backup = decodeMihonBackup(concat([sampleBackup(), msg(1, int(1, 5), str(3, 'X'))]));
+    const backup = decodeExternalBackup(concat([sampleBackup(), msg(1, int(1, 5), str(3, 'X'))]));
     const summary = summariseSources(backup, installed);
     expect(summary.map((s) => [s.name, s.titles, s.match.kind])).toEqual([
       ['Madara Site', 2, 'matched'],
@@ -218,7 +218,7 @@ describe('tracker mapping', () => {
     title: '',
   });
 
-  it('maps every Mihon tracker id', () => {
+  it('maps every tracker id in the backup', () => {
     expect([1, 2, 3, 4, 5, 7].map((id) => mapTracking(row(id, '123'))?.tracker)).toEqual([
       'MYANIMELIST',
       'ANILIST',
@@ -262,7 +262,7 @@ describe('tracker mapping', () => {
   });
 });
 
-const madaraKeys = (backup: MihonBackup): Map<string, SourceKeys> => {
+const madaraKeys = (backup: ExternalBackup): Map<string, SourceKeys> => {
   const keys: SourceKeys = { supported: true, manga: new Map(), chapters: new Map() };
   for (const title of backup.manga) {
     keys.manga.set(title.url, title.url.split('/').filter(Boolean)[1] ?? null);
@@ -272,15 +272,15 @@ const madaraKeys = (backup: MihonBackup): Map<string, SourceKeys> => {
   return new Map([[BIG_SOURCE.toString(), keys]]);
 };
 
-describe('buildMihonImport', () => {
-  const backup = decodeMihonBackup(sampleBackup());
+describe('buildExternalImport', () => {
+  const backup = decodeExternalBackup(sampleBackup());
   const sources = new Map<string, string | null>([
     [BIG_SOURCE.toString(), 'madarasite'],
     ['77', null],
   ]);
 
   it('builds a payload the restore schema and backup validation accept', () => {
-    const built = buildMihonImport(backup, {
+    const built = buildExternalImport(backup, {
       sources,
       keys: madaraKeys(backup),
       unmatched: 'skip',
@@ -340,13 +340,17 @@ describe('buildMihonImport', () => {
   });
 
   it('adds unmatched titles without chapters when asked', () => {
-    const built = buildMihonImport(backup, {
+    const built = buildExternalImport(backup, {
       sources,
       keys: madaraKeys(backup),
       unmatched: 'import',
     });
     const lost = built.payload.manga.find((entry) => entry.title === 'Lost Title');
-    expect(lost).toMatchObject({ source: 'mihon:Gone Source', slug: '/series/abc', chapters: [] });
+    expect(lost).toMatchObject({
+      source: 'imported:Gone Source',
+      slug: '/series/abc',
+      chapters: [],
+    });
     expect(lost?.thumbnail_url).toBe('none');
     replaceBackupBodySchema.parse({
       ...built.payload,
@@ -357,7 +361,7 @@ describe('buildMihonImport', () => {
   });
 
   it('falls back to chapter numbers when the source has no keyFromUrl', () => {
-    const built = buildMihonImport(backup, {
+    const built = buildExternalImport(backup, {
       sources,
       keys: new Map([
         [BIG_SOURCE.toString(), { supported: false, manga: new Map(), chapters: new Map() }],
@@ -385,8 +389,8 @@ describe('buildMihonImport', () => {
   });
 });
 
-describe('resolveMihonKeys', () => {
-  const backup = decodeMihonBackup(sampleBackup());
+describe('resolveExternalKeys', () => {
+  const backup = decodeExternalBackup(sampleBackup());
   const sources = new Map<string, string | null>([[BIG_SOURCE.toString(), 'madarasite']]);
 
   it('sends only stateful chapter URLs and history, per matched source', async () => {
@@ -395,7 +399,7 @@ describe('resolveMihonKeys', () => {
       manga: urls.manga.map((url) => url.split('/')[2]),
       chapters: urls.chapters.map((url) => url.split('/')[3]),
     }));
-    const keys = await resolveMihonKeys(backup, sources, fetchKeys);
+    const keys = await resolveExternalKeys(backup, sources, fetchKeys);
     expect(fetchKeys).toHaveBeenCalledTimes(1);
     expect(fetchKeys.mock.calls[0][0]).toBe('madarasite');
     expect(fetchKeys.mock.calls[0][1].chapters).toEqual([
@@ -409,7 +413,7 @@ describe('resolveMihonKeys', () => {
   });
 
   it('falls back when the server cannot convert URLs', async () => {
-    const keys = await resolveMihonKeys(backup, sources, async () => {
+    const keys = await resolveExternalKeys(backup, sources, async () => {
       throw new Error('404');
     });
     expect(keys.get(BIG_SOURCE.toString())?.supported).toBe(false);

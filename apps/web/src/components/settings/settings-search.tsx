@@ -148,7 +148,7 @@ const groups: Array<{ section: SectionId; description: string; labels: string[] 
   {
     section: 'privacy',
     description:
-      'Backup, restore, Mihon and Tachiyomi import, resets, adult visibility, covers and notification privacy',
+      'Backup, restore, Tachiyomi/Mihon import, resets, adult visibility, covers and notification privacy',
     labels: [
       'Export your data',
       'Reset preferences',
@@ -157,7 +157,7 @@ const groups: Array<{ section: SectionId; description: string; labels: string[] 
       'Incognito mode',
       'Hide from screen capture',
       'App lock',
-      'Import from Mihon/Tachiyomi…',
+      'Import from Tachiyomi/Mihon…',
       'Delete account',
       'Hide adult sources',
       'Blur adult covers',

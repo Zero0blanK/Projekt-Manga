@@ -3,6 +3,7 @@
 import {
   getConnectedTrackers,
   getManga,
+  getMangaChapters,
   linkMangaToTracker,
   markChapterByLastPage,
   markPreviousChaptersAsRead,
@@ -10,25 +11,26 @@ import {
 } from '@projekt-manga/api-client';
 import { actions } from '@/lib/app-store';
 import { bulkPayload } from '@/lib/chapter-gaps';
-import type { ChapterNumberState, MihonImportExtras } from './payload';
+import type { ChapterNumberState, ExternalImportExtras } from './payload';
+import { CHAPTER_STATE_STORAGE_KEY, EXTRAS_STORAGE_KEY, readStored } from './stored-names';
 
 /**
- * What a Mihon import adds after its restore job succeeds. The restore payload has no
+ * What an external backup import adds after its restore job succeeds. The restore payload has no
  * room for categories (kept in this browser's app state), tracker links (their own
  * endpoint) or read state matched by chapter number, so they wait here, tied to the job.
  */
-const extrasKey = 'projekt-manga-mihon-import';
+const extrasKey = EXTRAS_STORAGE_KEY;
 /** Per-title read state still waiting for the title's first chapter sync. */
-const chapterStateKey = 'projekt-manga-mihon-chapter-state';
+const chapterStateKey = CHAPTER_STATE_STORAGE_KEY;
 
-interface PendingExtras extends MihonImportExtras {
+interface PendingExtras extends ExternalImportExtras {
   jobId: string;
   owner: string;
 }
 
 const read = <T>(key: string): T | null => {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = readStored(key);
     return raw ? (JSON.parse(raw) as T) : null;
   } catch {
     return null;
@@ -44,11 +46,15 @@ const write = (key: string, value: unknown) => {
   }
 };
 
-export function saveMihonImportExtras(jobId: string, owner: string, extras: MihonImportExtras) {
+export function saveExternalImportExtras(
+  jobId: string,
+  owner: string,
+  extras: ExternalImportExtras,
+) {
   write(extrasKey, { jobId, owner, ...extras } satisfies PendingExtras);
 }
 
-export function clearMihonImportExtras(jobId: string) {
+export function clearExternalImportExtras(jobId: string) {
   if (read<PendingExtras>(extrasKey)?.jobId === jobId) write(extrasKey, null);
 }
 
@@ -67,7 +73,7 @@ export interface AppliedExtras {
  * library has refreshed; does nothing for any other job. Each step is best-effort: a
  * tracker that refuses one link does not undo the categories.
  */
-export async function applyMihonImportExtras(
+export async function applyExternalImportExtras(
   jobId: string,
   owner: string,
 ): Promise<AppliedExtras | null> {
@@ -119,23 +125,30 @@ export async function applyMihonImportExtras(
   return applied;
 }
 
+/** Drops a title's saved read state once it has been applied. */
+function dropChapterState(id: string) {
+  const store = read<ChapterStateStore>(chapterStateKey);
+  if (!store?.[id]) return;
+  delete store[id];
+  write(chapterStateKey, Object.keys(store).length > 0 ? store : null);
+}
+
 /**
  * Applies read state saved by number for this title, once its chapters have been synced
  * (the list is not empty). Returns the rows with the marks applied, or null when there was
- * nothing to do. The saved state is dropped either way so it is only ever applied once.
+ * nothing to do. The saved state is dropped once the marks are saved, so it is applied
+ * once; a failed attempt (offline) keeps it for the next. Marking is idempotent, so two
+ * callers meeting the same title (its page and the library sweep) do no harm.
  */
-export async function applyMihonChapterState(
+export async function applyExternalChapterState(
   owner: string,
   manga: { id: string; slug: string; source: string },
   rows: MangaChapterRecord[],
 ): Promise<MangaChapterRecord[] | null> {
   if (rows.length === 0) return null;
-  const store = read<ChapterStateStore>(chapterStateKey);
   const id = stateId(owner, manga.source, manga.slug);
-  const state = store?.[id];
-  if (!store || !state) return null;
-  delete store[id];
-  write(chapterStateKey, Object.keys(store).length > 0 ? store : null);
+  const state = read<ChapterStateStore>(chapterStateKey)?.[id];
+  if (!state) return null;
 
   const readNumbers = new Set(state.read);
   const pages = new Map(state.lastPage);
@@ -157,6 +170,8 @@ export async function applyMihonChapterState(
       { ...bulkPayload(row, manga.source), source: manga.source },
     ).catch(() => undefined);
 
+  dropChapterState(id);
+
   const readIds = new Set(toRead.map((row) => row.id));
   return rows.map((row) =>
     readIds.has(row.id)
@@ -165,4 +180,32 @@ export async function applyMihonChapterState(
         ? { ...row, last_page_read: pages.get(row.chapter_number)! }
         : row,
   );
+}
+
+/**
+ * Applies the saved read state of every library title whose chapters have been synced
+ * since the import, by a library update as much as by opening the title. Without this a
+ * title kept counting every chapter as unread on its cover until its page was opened.
+ * Reads only stored chapters (titles with none yet are left for later); one title at a
+ * time. Resolves with how many titles were marked.
+ */
+export async function applyPendingImportedChapterStates(
+  owner: string,
+  library: readonly { id: string; slug: string; source: string; chapters: number }[],
+  signal?: AbortSignal,
+): Promise<number> {
+  const store = read<ChapterStateStore>(chapterStateKey);
+  if (!store) return 0;
+  let marked = 0;
+  for (const manga of library) {
+    if (signal?.aborted) break;
+    if (manga.chapters === 0 || !store[stateId(owner, manga.source, manga.slug)]) continue;
+    try {
+      const rows = await getMangaChapters(manga.id, manga.slug, manga.source, signal);
+      if (await applyExternalChapterState(owner, manga, rows)) marked += 1;
+    } catch {
+      // Left saved: the next library load tries again.
+    }
+  }
+  return marked;
 }

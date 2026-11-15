@@ -66,7 +66,7 @@ function countsLabel(counts: CoverCounts): string {
 }
 
 /**
- * The counts in a corner of the cover. Joined (the default, as Mihon has it): one block,
+ * The counts in a corner of the cover. Joined (the default): one block,
  * a coloured segment per count, numbers only: downloaded, then unread, then the
  * chapter count. Pills: a separate chip for each, with its words.
  */

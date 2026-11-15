@@ -203,10 +203,7 @@ export function ExtensionsPanel() {
         )}
       </Panel>
       <SourceHealthPanel />
-      <Panel
-        title="Suwayomi server"
-        subtitle="Use the Mihon sources installed on your Suwayomi server"
-      >
+      <Panel title="Suwayomi server" subtitle="Use the sources installed on your Suwayomi server">
         <SuwayomiServer />
       </Panel>
     </div>

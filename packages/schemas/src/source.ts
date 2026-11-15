@@ -79,7 +79,7 @@ export type SourceBrowserSessionBody = z.infer<typeof sourceBrowserSessionBodySc
 export const SOURCE_URL_KEYS_LIMIT = 5_000;
 const sourceUrl = z.string().min(1).max(2048);
 
-/** Mihon/Tachiyomi URLs to turn into this app's keys (see `Source.keyFromUrl`). */
+/** URLs from an external backup to turn into this app's keys (see `Source.keyFromUrl`). */
 export const sourceUrlKeysBodySchema = z
   .object({
     manga: z.array(sourceUrl).max(SOURCE_URL_KEYS_LIMIT).default([]),
