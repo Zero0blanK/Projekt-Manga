@@ -15,6 +15,39 @@ vi.mock('@/components/reader/manga-page', () => ({
   MangaPage: ({ pageNumber }: { pageNumber: number }) => <div>Page {pageNumber}</div>,
 }));
 
+// Settings > Appearance > Smooth scrolling. Off by default here: most of these tests are
+// about the browser's own scrolling; the Lenis ones turn it on.
+const scrolling = vi.hoisted(() => ({ behavior: 'auto' as ScrollBehavior }));
+vi.mock('@/lib/scroll', () => ({ useScrollBehavior: () => scrolling.behavior }));
+
+// A stand-in for Lenis that records what the strip asks of it.
+const lenis = vi.hoisted(() => ({
+  instances: [] as Array<{
+    options: Record<string, unknown>;
+    scrollTo: ReturnType<typeof vi.fn>;
+    destroyed: boolean;
+    isScrolling: false | 'smooth';
+    targetScroll: number;
+  }>,
+}));
+vi.mock('lenis', () => ({
+  default: class {
+    options: Record<string, unknown>;
+    scrollTo = vi.fn();
+    resize = vi.fn();
+    destroyed = false;
+    isScrolling: false | 'smooth' = false;
+    targetScroll = 0;
+    constructor(options: Record<string, unknown>) {
+      this.options = options;
+      lenis.instances.push(this as never);
+    }
+    destroy() {
+      this.destroyed = true;
+    }
+  },
+}));
+
 const manga = {
   id: 'm1',
   slug: 'm1',
@@ -84,6 +117,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  scrolling.behavior = 'auto';
+  lenis.instances.length = 0;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -322,6 +357,65 @@ describe('hands-free auto-scroll', () => {
     driver.advance(1000);
 
     expect(strip.scrollTop).toBe(0);
+  });
+});
+
+describe('smooth scrolling (Lenis)', () => {
+  it('drives the strip with the chosen wheel speed, instead of the jump-per-notch handler', async () => {
+    scrolling.behavior = 'smooth';
+    const { strip } = await renderStrip({ scrollSpeed: 2 });
+
+    expect(lenis.instances).toHaveLength(1);
+    const [instance] = lenis.instances;
+    expect(instance.options.wrapper).toBe(strip);
+    expect(instance.options.content).toBe(strip.firstElementChild);
+    expect(instance.options.wheelMultiplier).toBe(2);
+    expect(instance.options.syncTouch).toBe(false);
+    expect(instance.options.respectReducedMotion).toBe(true);
+
+    const event = new WheelEvent('wheel', { deltaY: 50, cancelable: true, bubbles: true });
+    strip.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('is not used, and goes away, when smooth scrolling is off', async () => {
+    scrolling.behavior = 'smooth';
+    const { rerender } = await renderStrip();
+    const [instance] = lenis.instances;
+
+    scrolling.behavior = 'auto';
+    rerender(stripElement());
+
+    expect(instance.destroyed).toBe(true);
+    expect(lenis.instances).toHaveLength(1);
+  });
+
+  it('glides a screen at a time from where the last press was heading', async () => {
+    scrolling.behavior = 'smooth';
+    const { strip } = await renderStrip();
+    Object.defineProperty(strip, 'clientHeight', { value: 1000 });
+    const [instance] = lenis.instances;
+    instance.targetScroll = 900;
+
+    fireEvent.keyDown(window, { key: 'PageDown' });
+
+    expect(instance.scrollTo).toHaveBeenLastCalledWith(1800);
+  });
+
+  it('moves hands-free through Lenis at once, and waits while the reader is wheeling', async () => {
+    scrolling.behavior = 'smooth';
+    const driver = frameDriver();
+    await renderStrip({ autoScrollPixelsPerSecond: 100 });
+    const [instance] = lenis.instances;
+
+    driver.advance(0);
+    driver.advance(200);
+    expect(instance.scrollTo).toHaveBeenLastCalledWith(20, { immediate: true, force: true });
+
+    instance.scrollTo.mockClear();
+    instance.isScrolling = 'smooth';
+    driver.advance(200);
+    expect(instance.scrollTo).not.toHaveBeenCalled();
   });
 });
 

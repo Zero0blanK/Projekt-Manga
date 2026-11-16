@@ -10,6 +10,8 @@ import '@fontsource-variable/dm-sans';
 import '@fontsource/dm-mono/400.css';
 import '@fontsource/dm-mono/500.css';
 import '@fontsource-variable/space-grotesk';
+// The reader's smooth wheel scrolling (components/reader/long-strip-viewer.tsx).
+import 'lenis/dist/lenis.css';
 import '@/styles.css';
 
 export const metadata: Metadata = {
