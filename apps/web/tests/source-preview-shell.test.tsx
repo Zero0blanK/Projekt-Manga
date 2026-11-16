@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 
 const params = vi.hoisted(() => ({ value: { sourceId: 'mangadex', mangaId: 'a/b' } }));
 vi.mock('next/navigation', () => ({
@@ -13,7 +13,8 @@ vi.mock('@/components/cover', () => ({
   ),
 }));
 
-const { SourcePreviewShell } = await import('@/components/discover/source-preview-shell');
+const { SourcePreviewShell, SLOW_DETAILS_MS } =
+  await import('@/components/discover/source-preview-shell');
 const { clearSourcePreviewSeeds, rememberSourcePreview, sourcePreviewSeed } =
   await import('@/lib/source-preview-seed');
 
@@ -39,9 +40,21 @@ describe('the source title page while its details load', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading details from the source');
   });
 
-  it('is the plain skeleton without a card to go on', () => {
+  it('is the plain skeleton without a card to go on, still saying it is loading', () => {
     render(<SourcePreviewShell />);
     expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading details from the source');
+  });
+
+  it('says the source or connection is slow when the details take a while', () => {
+    vi.useFakeTimers();
+    try {
+      render(<SourcePreviewShell />);
+      act(() => vi.advanceTimersByTime(SLOW_DETAILS_MS));
+      expect(screen.getByRole('status')).toHaveTextContent('your connection is slow');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the most recent cards and forgets the oldest', () => {

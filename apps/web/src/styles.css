@@ -326,6 +326,22 @@
   }
 }
 
+/* A link's "opening" hint (useLinkStatus). Hidden until the navigation has taken 120ms, so
+   a prefetched, instant open never flashes it; after that it fades in and stays. */
+.link-pending {
+  opacity: 0;
+  visibility: hidden;
+}
+.link-pending.is-pending {
+  visibility: visible;
+  animation: link-pending-in 0.2s ease 0.12s forwards;
+}
+@keyframes link-pending-in {
+  to {
+    opacity: 1;
+  }
+}
+
 /* Settings > Appearance > Reduce motion */
 .reduce-motion *,
 .reduce-motion *::before,

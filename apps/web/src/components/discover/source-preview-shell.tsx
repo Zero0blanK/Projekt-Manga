@@ -1,12 +1,34 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
 import { Cover } from '@/components/cover';
 import { MangaDetailBackLink } from '@/components/manga-detail/back-link';
 import { ChapterListSkeleton, MangaDetailHeaderSkeleton } from '@/components/skeletons';
 import { Skeleton } from '@/components/ui/skeleton';
 import { sourcePreviewSeed } from '@/lib/source-preview-seed';
 import { decodeSourceRouteId } from '@/lib/source-route-id';
+
+/** After this long, the page says the source or connection is slow, so a long wait doesn't
+ * look like a hang. */
+export const SLOW_DETAILS_MS = 8000;
+
+function LoadingStatus() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), SLOW_DETAILS_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+      {slow
+        ? 'Still loading. The source or your connection is slow; this can take up to a minute.'
+        : 'Loading details from the source…'}
+    </p>
+  );
+}
 
 /**
  * The source title page while its details are still being read from the source.
@@ -22,7 +44,16 @@ export function SourcePreviewShell() {
   const sourceId = params?.sourceId ? decodeSourceRouteId(params.sourceId) : '';
   const mangaId = params?.mangaId ? decodeSourceRouteId(params.mangaId) : '';
   const seed = sourceId && mangaId ? sourcePreviewSeed(sourceId, mangaId) : null;
-  if (!seed) return <MangaDetailHeaderSkeleton />;
+  if (!seed) {
+    return (
+      <>
+        <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-8">
+          <LoadingStatus />
+        </div>
+        <MangaDetailHeaderSkeleton />
+      </>
+    );
+  }
 
   return (
     <div className="relative" aria-busy="true">
@@ -51,9 +82,7 @@ export function SourcePreviewShell() {
           </div>
 
           <div className="col-span-2 min-w-0 space-y-3 md:col-span-1 md:col-start-2">
-            <p role="status" className="text-xs text-muted-foreground">
-              Loading details from the source…
-            </p>
+            <LoadingStatus />
             <div className="flex flex-wrap gap-1.5">
               {Array.from({ length: 5 }, (_, i) => (
                 <Skeleton key={i} className="h-5 w-16 rounded-full" />
