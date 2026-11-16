@@ -317,7 +317,10 @@ export function AppearancePanel() {
         <Field label="Reduce motion" hint="Near-instant transitions everywhere">
           <Toggle settingKey="reduceMotion" />
         </Field>
-        <Field label="Smooth scrolling" hint="Animate jumps to a page or chapter">
+        <Field
+          label="Smooth scrolling"
+          hint="Glide the long-strip reader with the wheel and keys, and animate jumps to a page or chapter"
+        >
           <Toggle settingKey="smoothScroll" defaultOn />
         </Field>
       </Panel>

@@ -1,5 +1,6 @@
 import { useLatest } from '@/lib/use-latest';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import Lenis from 'lenis';
 import { MangaPage } from '@/components/reader/manga-page';
 import type { Manga } from '@/lib/manga-data';
 import { READING_LINE, pageAtLine } from '@/lib/long-strip-position';
@@ -18,6 +19,12 @@ const DIRECTION_THRESHOLD_PX = 24;
  * synchronously would already be gone by the time the event it belongs to is dispatched.
  */
 const PROGRAMMATIC_SCROLL_WINDOW_MS = 150;
+
+/**
+ * How far Lenis closes the gap to the wheel's target each frame. Its default is 0.1; a
+ * touch quicker keeps the strip feeling attached to the wheel while still easing out.
+ */
+const SMOOTH_SCROLL_LERP = 0.12;
 
 /**
  * Seamless webtoon mode — pages butt edge-to-edge, and once the reader nears the bottom
@@ -94,7 +101,56 @@ export function LongStripViewer({
   /** Scroll events before this timestamp were caused by this component, not the reader. */
   const programmaticUntil = useRef(0);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  /** Smooth wheel scrolling, while Settings > Appearance > Smooth scrolling is on. */
+  const lenisRef = useRef<Lenis | null>(null);
+  const scrollBehavior = useScrollBehavior();
+  const smoothScroll = scrollBehavior === 'smooth';
   const prevZoomRef = useRef(zoom);
+
+  // Lenis eases the wheel instead of the browser's fixed steps. It drives this strip's own
+  // scroll container, so scroll events, the reading line and the chrome auto-hide all see
+  // ordinary scrolling. Touch stays native (syncTouch off): phones already have momentum.
+  // It honours the system's reduced-motion preference itself; the app's Reduce motion
+  // switches it off through useScrollBehavior.
+  useEffect(() => {
+    const wrapper = scrollRef.current;
+    const content = contentRef.current;
+    if (!smoothScroll || !wrapper || !content) return;
+    const lenis = new Lenis({
+      wrapper,
+      content,
+      autoRaf: true,
+      lerp: SMOOTH_SCROLL_LERP,
+      wheelMultiplier: scrollSpeed,
+      syncTouch: false,
+      respectReducedMotion: true,
+    });
+    lenisRef.current = lenis;
+    return () => {
+      lenis.destroy();
+      lenisRef.current = null;
+    };
+  }, [smoothScroll, scrollSpeed]);
+
+  /**
+   * Moves the strip at once, for the app's own moves (zoom, hands-free scrolling). Through
+   * Lenis when it runs, so it doesn't ease back to where it was heading; resized first, as
+   * the strip may have just grown past the limit Lenis last measured.
+   */
+  const jumpTo = (target: number | HTMLElement) => {
+    const el = scrollRef.current;
+    const lenis = lenisRef.current;
+    if (lenis) {
+      lenis.resize();
+      lenis.scrollTo(target, { immediate: true, force: true });
+    } else if (typeof target === 'number') {
+      if (el) el.scrollTop = target;
+    } else {
+      target.scrollIntoView({ block: 'start' });
+    }
+  };
+  const jumpToRef = useLatest(jumpTo);
   const fetchedIdentities = useRef(new Map<number, string>());
   const identityRef = useLatest(getChapterIdentity);
   // Whether a chapter still needs fetching is read when one is added, not on every update.
@@ -141,10 +197,10 @@ export function LongStripViewer({
       // Not the reader scrolling — pressing the zoom button in the header would otherwise
       // read as a scroll down and hide the very control that was just clicked.
       programmaticUntil.current = performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS;
-      el.scrollTop = (el.scrollTop * zoom) / prevZoom;
+      jumpToRef.current((el.scrollTop * zoom) / prevZoom);
     }
     prevZoomRef.current = zoom;
-  }, [zoom]);
+  }, [zoom, jumpToRef]);
 
   // Only reset the stream when the chapter changes to one we haven't already streamed into
   // (an explicit jump via the chapter list/link) — not when our own scroll-driven URL sync
@@ -180,7 +236,7 @@ export function LongStripViewer({
     // target isn't already on screen — otherwise every scroll would re-snap the view.
     const rect = el.getBoundingClientRect();
     const alreadyInView = rect.bottom > 0 && rect.top < window.innerHeight;
-    if (!alreadyInView) el.scrollIntoView({ block: 'start' });
+    if (!alreadyInView) jumpToRef.current(el);
     // Released on the next frame: scrollIntoView settles asynchronously, and reporting
     // the pre-scroll position would immediately undo the jump.
     requestAnimationFrame(() => {
@@ -188,7 +244,7 @@ export function LongStripViewer({
       // Nothing scrolls after a jump that was already in view, so read the position now.
       scheduleReport.current();
     });
-  }, [startChapter, startPage, pagesByChapter]);
+  }, [startChapter, startPage, pagesByChapter, jumpToRef]);
 
   // Auto-append the next chapter once the reader scrolls near the bottom — but only after
   // the last loaded chapter actually has pages on screen. Otherwise an empty strip leaves
@@ -297,8 +353,9 @@ export function LongStripViewer({
     const el = scrollRef.current;
     // Exactly 1 deliberately attaches nothing: intercepting the wheel replaces the
     // browser's own smooth/momentum scrolling with discrete jumps, which is a real
-    // downgrade to pay for a setting the reader left at its default.
-    if (!el || scrollSpeed === 1) return;
+    // downgrade to pay for a setting the reader left at its default. With smooth scrolling
+    // on, Lenis applies the speed itself (wheelMultiplier).
+    if (!el || scrollSpeed === 1 || smoothScroll) return;
     const onWheel = (event: WheelEvent) => {
       // Pinch-zoom and horizontal gestures are not ours to rescale.
       if (event.ctrlKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
@@ -311,7 +368,7 @@ export function LongStripViewer({
     // Not passive: the whole point is to replace the default scroll distance.
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [scrollSpeed]);
+  }, [scrollSpeed, smoothScroll]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -323,6 +380,13 @@ export function LongStripViewer({
     // at the slowest speeds.
     let carry = 0;
     const step = (now: number) => {
+      // While the reader is wheeling, Lenis is easing the strip: hands-free scrolling waits
+      // for it rather than snapping it back each frame, then carries on from there.
+      if (lenisRef.current?.isScrolling === 'smooth') {
+        previous = now;
+        frame = requestAnimationFrame(step);
+        return;
+      }
       if (previous !== null) {
         // Clamped so a backgrounded tab's long gap does not jump the reader down the page
         // all at once when it returns.
@@ -336,7 +400,7 @@ export function LongStripViewer({
           // not take the controls away — least of all while they are being used to change
           // its speed.
           programmaticUntil.current = performance.now() + PROGRAMMATIC_SCROLL_WINDOW_MS;
-          el.scrollTop = before + whole;
+          jumpToRef.current(before + whole);
           // Bottom reached and nothing more appended yet — stop pushing against the end.
           if (el.scrollTop === before) carry = 0;
         }
@@ -346,31 +410,45 @@ export function LongStripViewer({
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [autoScrollPixelsPerSecond]);
+  }, [autoScrollPixelsPerSecond, jumpToRef]);
 
   // Page keys move a screenful (less a little, so the line just read stays in view),
-  // which is also what Space does natively; rebinding them keeps that meaning.
-  const scrollBehavior = useScrollBehavior();
+  // which is also what Space does natively; rebinding them keeps that meaning. With Lenis
+  // they glide the same way the wheel does, and a second press while one is gliding goes
+  // a further screen from where the first was heading, not from where it has got to.
+  const scrollToSmoothly = (top: number) => {
+    const el = scrollRef.current;
+    const lenis = lenisRef.current;
+    if (lenis) {
+      lenis.resize();
+      lenis.scrollTo(top);
+    } else {
+      el?.scrollTo({ top, behavior: scrollBehavior });
+    }
+  };
   const scrollByScreen = (direction: 1 | -1) => {
     const el = scrollRef.current;
     if (!el) return false;
-    el.scrollBy({ top: direction * el.clientHeight * 0.9, behavior: scrollBehavior });
+    const from = lenisRef.current?.targetScroll ?? el.scrollTop;
+    scrollToSmoothly(from + direction * el.clientHeight * 0.9);
   };
   useReaderInput({
     nextPage: () => scrollByScreen(1),
     prevPage: () => scrollByScreen(-1),
-    firstPage: () => {
-      scrollRef.current?.scrollTo({ top: 0, behavior: scrollBehavior });
-    },
+    firstPage: () => scrollToSmoothly(0),
     lastPage: () => {
       const el = scrollRef.current;
-      el?.scrollTo({ top: el.scrollHeight, behavior: scrollBehavior });
+      if (el) scrollToSmoothly(el.scrollHeight);
     },
   });
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto">
-      <div className="mx-auto flex flex-col" style={{ maxWidth: `${36 * zoom}rem` }}>
+      <div
+        ref={contentRef}
+        className="mx-auto flex flex-col"
+        style={{ maxWidth: `${36 * zoom}rem` }}
+      >
         {loadedChapters.map((chapterNum) => {
           const entry = pagesByChapter[chapterNum];
           const pages = entry?.urls ?? [];
