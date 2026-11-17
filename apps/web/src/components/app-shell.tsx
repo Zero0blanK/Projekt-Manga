@@ -33,6 +33,8 @@ import { useRestorePending } from '@/lib/restore-job';
 import { RestoreStatusCard } from '@/components/restore-status-card';
 import { UpdatePrompt } from '@/components/update-prompt';
 import { CommandPalette } from '@/components/command-palette';
+import { SmoothScroll } from '@/components/smooth-scroll';
+import { useScrollBehavior } from '@/lib/scroll';
 import { DesktopIntegration } from '@/components/desktop-integration';
 import { ServerStartingScreen } from '@/components/server-starting-screen';
 
@@ -70,6 +72,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     pathname.startsWith('/reader/') ||
     pathname.startsWith('/local-reader/') ||
     (pathname.startsWith('/discover/preview/') && pathname.endsWith('/read'));
+
+  const smoothScroll = useScrollBehavior() === 'smooth';
 
   const appReady =
     documentReady && desktopInitReady && !libraryLoading && staticDataReady && !apiStarting;
@@ -193,6 +197,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <AutomaticLibraryUpdates suspended={restorePending} />
       <AutomaticDesktopSync ready={appReady && !restorePending} />
       <CommandPalette />
+      {/* The reader smooths its own strip; every other screen scrolls the page. */}
+      {smoothScroll && !isReaderPath && <SmoothScroll />}
       <DesktopIntegration />
       <RestoreJobMonitor />
       {/* A restore runs in the background: the app stays usable, and reading done meanwhile

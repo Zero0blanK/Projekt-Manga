@@ -33,6 +33,7 @@ vi.mock('@/lib/theme', () => ({
 }));
 vi.mock('@/components/floating-nav', () => ({ FloatingNav: () => null }));
 vi.mock('@/components/command-palette', () => ({ CommandPalette: () => null }));
+vi.mock('@/components/smooth-scroll', () => ({ SmoothScroll: () => null }));
 vi.mock('@/components/desktop-integration', () => ({ DesktopIntegration: () => null }));
 vi.mock('@/components/ui/toaster', () => ({ Toaster: () => null }));
 vi.mock('@/components/downloads/download-dial', () => ({ DownloadDial: () => null }));
