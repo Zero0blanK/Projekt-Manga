@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import { ApiError } from '@projekt-manga/api-client';
 vi.mock('@/lib/extensions-store', () => ({ useInstalledExtensions: () => ({ installed: [] }) }));
 vi.mock('@/lib/source-display-language', () => ({
   useSourceDisplayLanguage: () => ['all', vi.fn()],
@@ -30,6 +31,17 @@ const {
   filterState: { filters: [] as unknown[] },
 }));
 
+const defaultSources = [
+  { id: 'source-a', name: 'A', lang: 'en', base_url: 'https://a.example', isNSFW: false },
+  { id: 'source-b', name: 'B', lang: 'en', base_url: 'https://b.example', isNSFW: false },
+];
+const sourcesState: {
+  sources: typeof defaultSources;
+  loading: boolean;
+  error: unknown;
+  refresh: () => unknown;
+} = { sources: defaultSources, loading: false, error: null, refresh: () => undefined };
+
 vi.mock('next/navigation', () => ({
   useSearchParams: () => {
     const params = new URLSearchParams();
@@ -46,12 +58,7 @@ vi.mock('@/lib/browse-state', () => ({
 }));
 vi.mock('@/lib/library-store', () => ({
   useMangaLibrary: () => ({ manga: [], loading: false }),
-  useSources: () => ({
-    sources: [
-      { id: 'source-a', name: 'A', lang: 'en', base_url: 'https://a.example', isNSFW: false },
-      { id: 'source-b', name: 'B', lang: 'en', base_url: 'https://b.example', isNSFW: false },
-    ],
-  }),
+  useSources: () => sourcesState,
   useSourceFilters: () => ({ filters: filterState.filters }),
   useSourceCapabilities: () => ({ capabilities: capabilityState }),
   useSourceBrowsePaged,
@@ -84,6 +91,7 @@ beforeEach(() => {
   getRequestedSource.mockReturnValue(null);
   getRequestedGenre.mockReturnValue(null);
   filterState.filters = [];
+  Object.assign(sourcesState, { sources: defaultSources, loading: false, error: null });
   readBrowseSnapshot.mockReturnValue(null);
   useSourceBrowsePaged.mockReturnValue({
     items: [],
@@ -277,5 +285,37 @@ describe('Discover browse state', () => {
     getRequestedGenre.mockReturnValue('Murim');
     render(page());
     await waitFor(() => expect(useSourceBrowsePaged.mock.calls.at(-1)?.[5]).toBe('Murim'));
+  });
+});
+
+describe('Discover browse without a source', () => {
+  it("says the sources didn't load, with a retry, instead of showing 0 titles", async () => {
+    const refresh = vi.fn();
+    Object.assign(sourcesState, {
+      sources: [],
+      error: new ApiError('Unable to reach the server.', 0, 'network'),
+      refresh,
+    });
+    render(page());
+    expect(screen.getByRole('alert')).toHaveTextContent("Your sources didn't load.");
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it('points to Discover when no source is installed', () => {
+    Object.assign(sourcesState, { sources: [] });
+    render(page());
+    expect(screen.getByText('Install a source to start browsing.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Browse sources' })).toHaveAttribute(
+      'href',
+      '/discover',
+    );
+  });
+
+  it('shows nothing extra while the sources are still loading', () => {
+    Object.assign(sourcesState, { sources: [], loading: true });
+    render(page());
+    expect(screen.queryByText('Install a source to start browsing.')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

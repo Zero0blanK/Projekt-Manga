@@ -57,6 +57,8 @@ export function RouteError({
       role="alert"
       className="mx-auto flex min-h-[60vh] max-w-md flex-col justify-center px-4 py-16 text-center"
     >
+      {/* The route's own metadata failed with it, so the tab would otherwise have no title. */}
+      <title>{`${title} — Projekt Manga`}</title>
       <Icon className="mx-auto mb-3 h-8 w-8 text-muted-foreground" aria-hidden />
       <h1 className="text-xl font-semibold tracking-tight text-foreground">{title}</h1>
       <p className="mt-2 text-sm text-muted-foreground">

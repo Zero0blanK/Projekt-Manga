@@ -29,6 +29,7 @@ import {
 import { ArrowLeft, Search, Filter, X, ChevronDown } from 'lucide-react';
 import { MangaGrid } from '@/components/manga-grid';
 import { MangaGridSkeleton } from '@/components/skeletons';
+import { LoadError } from '@/components/load-error';
 import { useInstalledExtensions } from '@/lib/extensions-store';
 import { installedExtensionFor } from '@projekt-manga/types';
 import { useContentPrivacy, isAdultSource } from './content-privacy';
@@ -64,7 +65,12 @@ export function DiscoverBrowsePage({
   /** Numbers the first three unfiltered results — only meaningful for a ranking. */
   showRankBadges?: boolean;
 }) {
-  const { sources } = useSources();
+  const {
+    sources,
+    loading: sourcesLoading,
+    error: sourcesError,
+    refresh: refreshSources,
+  } = useSources();
   const { installed } = useInstalledExtensions();
   const [privacy] = useContentPrivacy();
   const displaySources: DisplaySource[] = sources
@@ -541,6 +547,30 @@ export function DiscoverBrowsePage({
             {hiddenCount === 1 ? '1 title' : `${hiddenCount} titles`} already in your library{' '}
             {hiddenCount === 1 ? 'is' : 'are'} hidden.
           </p>
+        )}
+        {/* Without a source there is nothing to browse: say why, rather than "0 titles". */}
+        {!sourcesLoading && displaySources.length === 0 && (
+          <div className="mt-6">
+            {sourcesError !== null && sources.length === 0 ? (
+              <LoadError error={sourcesError} onRetry={refreshSources}>
+                Your sources didn&apos;t load.
+              </LoadError>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-border p-10 text-center">
+                <p className="text-sm text-muted-foreground">
+                  {sources.length
+                    ? 'Your installed sources are hidden by your content preferences.'
+                    : 'Install a source to start browsing.'}
+                </p>
+                <Link
+                  href="/discover"
+                  className="mt-4 inline-block text-sm text-primary pointer-coarse:min-h-11"
+                >
+                  {sources.length ? 'Back to Discover' : 'Browse sources'}
+                </Link>
+              </div>
+            )}
+          </div>
         )}
         {(loading || capabilitiesLoading) && items.length === 0 ? (
           <MangaGridSkeleton />
