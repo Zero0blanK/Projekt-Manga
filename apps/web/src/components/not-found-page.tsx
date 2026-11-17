@@ -36,6 +36,22 @@ export function NotFoundPage({
   );
 }
 
+/** A source title whose source isn't installed (any more). */
+export function SourceNotInstalled() {
+  return (
+    <NotFoundPage
+      title="This source isn't installed"
+      links={[
+        { href: '/discover', label: 'Back to Discover' },
+        { href: '/', label: 'Library' },
+      ]}
+    >
+      The link is for a source that was removed, or was never added here. Install it again from
+      Discover, or search for the title there; another source may have it.
+    </NotFoundPage>
+  );
+}
+
 /** A library title that isn't there: removed, or a link from before it was. */
 export function TitleNotFound() {
   return (
