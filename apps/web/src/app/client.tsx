@@ -24,6 +24,7 @@ import {
 import { useDownloadRows } from '@/components/downloads/row-data';
 import { RecentlyUpdatedRail } from '@/components/library/recently-updated-rail';
 import { EmptyState } from '@/components/page-shell';
+import { LoadError } from '@/components/load-error';
 import { MangaGridSkeleton } from '@/components/skeletons';
 import { creditLinkedReading, mostRecentlyReadLibraryManga } from '@/lib/recent-reading';
 import { LibrarySelectionBar, parseDensity } from '@/components/library/library-tools';
@@ -71,7 +72,7 @@ export function LibraryPageClient() {
   const sortDir = useAppState((s) => s.sortDir);
   const view = useAppState((s) => s.view);
   const categoryMembers = useAppState((s) => s.categoryMembers);
-  const { manga: mangaLibrary, loading, refresh } = useMangaLibrary();
+  const { manga: mangaLibrary, loading, error: libraryError, refresh } = useMangaLibrary();
   const { shelf, bookmarks } = useLibraryState();
 
   const shelfOf = (m: Manga) => resolveShelf(m, shelf);
@@ -309,6 +310,10 @@ export function LibraryPageClient() {
 
           {loading && mangaLibrary.length === 0 ? (
             <MangaGridSkeleton />
+          ) : libraryError && mangaLibrary.length === 0 ? (
+            <LoadError error={libraryError} onRetry={refresh}>
+              Your library didn&apos;t load.
+            </LoadError>
           ) : !loading && mangaLibrary.length === 0 ? (
             <EmptyState>
               Your library is empty — add a title from{' '}

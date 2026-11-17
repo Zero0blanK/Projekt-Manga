@@ -74,7 +74,7 @@ export function useMangaLibrary() {
 
 export function useSources() {
   const hydrated = useHydrated();
-  const { data, isPending, error } = useQuery({
+  const { data, isPending, error, refetch } = useQuery({
     ...staticDataQueries.sources,
   });
 
@@ -82,6 +82,7 @@ export function useSources() {
     sources: hydrated ? (data ?? EMPTY_SOURCES) : EMPTY_SOURCES,
     loading: !hydrated || isPending,
     error,
+    refresh: () => refetch(),
   };
 }
 
@@ -482,7 +483,15 @@ export function useLibraryState() {
     if (s.notification_read) readNotifications.push(s.manga_id);
   }
 
-  return { bookmarks, shelf, score, readNotifications, loading, error };
+  return {
+    bookmarks,
+    shelf,
+    score,
+    readNotifications,
+    loading,
+    error,
+    refresh: () => query.refetch(),
+  };
 }
 
 /**

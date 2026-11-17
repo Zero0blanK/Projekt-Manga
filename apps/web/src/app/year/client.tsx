@@ -6,6 +6,7 @@ import { Download, Sparkles } from 'lucide-react';
 import { type HistoryEntry } from '@projekt-manga/api-client';
 import { EmptyState, PageHeader, PageShell } from '@/components/page-shell';
 import { useMangaLibrary } from '@/lib/library-store';
+import { LoadError } from '@/components/load-error';
 import { historyYears, yearInManga, type YearInManga } from '@/lib/reading-stats';
 import { useHistory } from '@/lib/shared-queries';
 
@@ -68,7 +69,7 @@ function drawCard(stats: YearInManga): Promise<Blob | null> {
 /** "Your year in manga": a yearly summary of the reading history, made on this device. */
 export function YearInMangaClient() {
   const { manga: library } = useMangaLibrary();
-  const { data, isError: failed } = useHistory();
+  const { data, error: historyError, refetch } = useHistory();
   const history: HistoryEntry[] | null = data ?? null;
   const [year, setYear] = useState<number | null>(null);
 
@@ -135,9 +136,11 @@ export function YearInMangaClient() {
           ) : undefined
         }
       />
-      {failed ? (
+      {historyError ? (
         <div className="mt-8">
-          <EmptyState icon={Sparkles}>Your reading history couldn&apos;t be loaded.</EmptyState>
+          <LoadError error={historyError} onRetry={() => refetch()}>
+            Your reading history didn&apos;t load.
+          </LoadError>
         </div>
       ) : !stats ? (
         <p role="status" className="mt-8 text-sm text-muted-foreground">

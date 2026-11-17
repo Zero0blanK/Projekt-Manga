@@ -20,6 +20,7 @@ import {
 import { RowListSkeleton, MangaGridSkeleton } from '@/components/skeletons';
 import { Clock3, Play, RefreshCw, ChevronRight } from 'lucide-react';
 import { reportError } from '@/lib/report-error';
+import { LoadError } from '@/components/load-error';
 import { historyResumeHref, historyTitleHref } from '@/lib/history-navigation';
 import { useHistory } from '@/lib/shared-queries';
 
@@ -70,7 +71,12 @@ function toRecentRead(e: ApiHistoryEntry): RecentRead {
  * rather than one merged, ambiguous list.
  */
 export function RecentsPageClient() {
-  const { manga, loading: libraryLoading } = useMangaLibrary();
+  const {
+    manga,
+    loading: libraryLoading,
+    error: libraryError,
+    refresh: refreshLibrary,
+  } = useMangaLibrary();
   const { data, isPending: historyLoading, error: historyFailure, refetch } = useHistory();
   const historyError = historyFailure !== null;
   const reads = useMemo(() => (data ?? []).map(toRecentRead), [data]);
@@ -191,6 +197,10 @@ export function RecentsPageClient() {
         >
           {libraryLoading && recentlyUpdated.length === 0 ? (
             <MangaGridSkeleton count={UPDATED_PREVIEW} />
+          ) : libraryError && manga.length === 0 ? (
+            <LoadError error={libraryError} onRetry={refreshLibrary}>
+              Your library didn&apos;t load.
+            </LoadError>
           ) : !libraryLoading && recentlyUpdated.length === 0 ? (
             <EmptyState icon={RefreshCw}>
               No chapters yet — run Update Library from your library to check your sources.

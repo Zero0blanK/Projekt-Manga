@@ -21,6 +21,7 @@ import { toDisplaySource } from '@/lib/manga-data';
 import { SourceSearchCarousel } from '@/components/discover/source-search-carousel';
 import { SourceCardsSkeleton } from '@/components/skeletons';
 import { NoSourcesEmptyState } from '@/components/discover/no-sources-empty-state';
+import { LoadError } from '@/components/load-error';
 import { SourceCatalog } from '@/components/discover/source-catalog';
 import {
   SuwayomiExtensions,
@@ -51,7 +52,19 @@ const EXTENSION_FILTER_PREFIX = 'x';
 export function DiscoverPageClient() {
   const params = useSearchParams(),
     query = params.get('q')?.trim() ?? '';
-  const { sources: apiSources, loading } = useSources();
+  const {
+    sources: apiSources,
+    loading,
+    error: sourcesError,
+    refresh: refreshSources,
+  } = useSources();
+  // The source list failing to load must not read as "no sources installed".
+  const sourcesFailed = !loading && sourcesError !== null && apiSources.length === 0;
+  const sourcesLoadError = (
+    <LoadError error={sourcesError} onRetry={refreshSources}>
+      Your sources didn&apos;t load.
+    </LoadError>
+  );
   const { installed } = useInstalledExtensions();
   const { entries: catalogueEntries = [], repositories = [] } = useSourceCatalog();
   const suwayomi = useSuwayomiExtensions();
@@ -265,7 +278,9 @@ export function DiscoverPageClient() {
             query={query}
           />
         ))}
-        {!loading && !allSources.length && <NoSourcesEmptyState />}
+        {sourcesFailed
+          ? sourcesLoadError
+          : !loading && !allSources.length && <NoSourcesEmptyState />}
         {!loading && allSources.length > 0 && !visible.length && (
           <p className="mt-6 text-sm text-muted-foreground">
             No sources are visible. Adjust content visibility in Settings.
@@ -322,6 +337,8 @@ export function DiscoverPageClient() {
           />
           {loading && !sources.length ? (
             <SourceCardsSkeleton />
+          ) : sourcesFailed ? (
+            sourcesLoadError
           ) : !sources.length ? (
             <div className="rounded-2xl border border-dashed border-border p-10 text-center">
               <p className="text-sm text-muted-foreground">

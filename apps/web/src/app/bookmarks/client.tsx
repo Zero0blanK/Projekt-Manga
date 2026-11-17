@@ -6,6 +6,7 @@ import { MangaCard } from '@/components/manga-card';
 import { MangaGrid } from '@/components/manga-grid';
 import { useMangaLibrary, useLibraryState } from '@/lib/library-store';
 import { MangaGridSkeleton } from '@/components/skeletons';
+import { LoadError } from '@/components/load-error';
 import { Bookmark, ArrowUpDown } from 'lucide-react';
 
 const sorts = [
@@ -15,9 +16,23 @@ const sorts = [
 ] as const;
 
 export function BookmarksPageClient() {
-  const { manga: library, loading: libraryLoading } = useMangaLibrary();
-  const { bookmarks, loading: stateLoading } = useLibraryState();
+  const {
+    manga: library,
+    loading: libraryLoading,
+    error: libraryError,
+    refresh: refreshLibrary,
+  } = useMangaLibrary();
+  const {
+    bookmarks,
+    loading: stateLoading,
+    error: stateError,
+    refresh: refreshState,
+  } = useLibraryState();
   const loading = libraryLoading || stateLoading;
+  // Bookmarks are the library joined with its saved state, so either failing leaves
+  // nothing to show — and must not read as "nothing bookmarked".
+  const loadError = libraryError ?? stateError;
+  const retry = () => Promise.all([libraryError && refreshLibrary(), stateError && refreshState()]);
   const [sort, setSort] = useState<(typeof sorts)[number]['value']>('recent');
   const [sortOpen, setSortOpen] = useState(false);
 
@@ -91,6 +106,12 @@ export function BookmarksPageClient() {
       {loading && manga.length === 0 ? (
         <div className="mt-10">
           <MangaGridSkeleton count={6} />
+        </div>
+      ) : loadError && manga.length === 0 ? (
+        <div className="mt-12">
+          <LoadError error={loadError} onRetry={retry}>
+            Your bookmarks didn&apos;t load.
+          </LoadError>
         </div>
       ) : manga.length === 0 ? (
         <div className="mt-12 rounded-2xl border border-dashed border-border/60 p-12 text-center">

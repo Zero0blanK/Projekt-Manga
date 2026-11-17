@@ -16,6 +16,10 @@ const POLL_INTERVAL_MS = 30_000;
 
 let chapters: RecentChapter[] = [];
 let loading = true;
+/** Why the list hasn't loaded, while it never has. A later failed poll keeps the list it
+ * already has instead, so this is only set when there is nothing to show. */
+let failure: unknown = null;
+let loadedOnce = false;
 let inFlight = false;
 const listeners = new Set<() => void>();
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -28,9 +32,13 @@ function load() {
   getChapterFetchDate()
     .then((next) => {
       chapters = next;
+      loadedOnce = true;
+      failure = null;
     })
-    .catch(() => {
-      /* a failed poll just leaves the previous list in place */
+    .catch((error: unknown) => {
+      // A failed poll leaves the previous list in place; only a list that never loaded
+      // reports the failure, so it isn't mistaken for "no new chapters".
+      if (!loadedOnce) failure = error;
     })
     .finally(() => {
       inFlight = false;
@@ -87,7 +95,12 @@ export function useRecentChapters() {
     () => loading,
     () => true,
   );
-  return { chapters: data, loading: isLoading, refresh: load };
+  const error = useSyncExternalStore(
+    subscribe,
+    () => failure,
+    () => null,
+  );
+  return { chapters: data, loading: isLoading, error, refresh: load };
 }
 
 /** Re-reads the list now. Called by the library-update run so chapters it just pulled in
