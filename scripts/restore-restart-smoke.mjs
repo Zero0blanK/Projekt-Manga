@@ -346,7 +346,7 @@ try {
   webServer = startWeb(rendererRoot, webPort, port);
   await waitForWeb(webServer, `${webUrl}/settings`);
 
-  browser = await chromium.launch();
+  browser = await chromium.launch({ executablePath: process.env.SMOKE_CHROMIUM_PATH || undefined });
   const context = await browser.newContext();
   const page = await context.newPage();
   const browserRestore = await submitRestoreFromPrivacy(page, 'browser', webUrl);
