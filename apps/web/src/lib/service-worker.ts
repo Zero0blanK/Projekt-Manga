@@ -13,7 +13,7 @@ import { desktopBridge } from './desktop-bridge';
  */
 
 /** Keep in step with DATA_CACHE in public/sw.js. */
-const DATA_CACHES = ['pm-data-v1', 'pm-images-v1'];
+const DATA_CACHES = ['pm-data-v1', 'pm-images-v1', 'pm-chapters-v1'];
 
 function supported(): boolean {
   return (

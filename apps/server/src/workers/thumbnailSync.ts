@@ -1,4 +1,5 @@
 import cacheService from '../services/cache.service.js';
+import cacheRepository from '../repositories/cache.repository.js';
 
 /** How long a title's cover is left alone after a background attempt to cache it. */
 const RETRY_AFTER_MS = 30 * 60 * 1000;
@@ -66,5 +67,24 @@ class ThumbnailQueue {
 }
 
 const thumbnailQueue = new ThumbnailQueue();
+
+/** Titles looked at per backfill; the queue spaces them out, so this is minutes of work. */
+const BACKFILL_BATCH = 2000;
+
+/**
+ * Stores the cover of every library title that has none yet, in the background.
+ *
+ * Covers were stored when a title was added, or when it was first shown. Titles restored,
+ * imported or added before that existed had none until scrolled to, so a large library
+ * kept going to the sources for covers, and showed none without the internet. One pass
+ * after start-up fills them in, through the same rate-limited queue as everything else.
+ */
+export async function backfillLibraryCovers(): Promise<number> {
+  const titles = await cacheRepository.listLibraryTitlesWithoutCover(BACKFILL_BATCH);
+  for (const title of titles) {
+    thumbnailQueue.enqueue(title.id, title.thumbnail_url, { sourceId: title.source });
+  }
+  return titles.length;
+}
 
 export default thumbnailQueue;

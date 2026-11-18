@@ -60,3 +60,11 @@ export async function resizedThumbnail(file: string, width: number): Promise<str
     return file;
   }
 }
+
+/** The widths library grids and lists ask for; 800 is only for a title's own page. */
+const GRID_WIDTHS = [200, 400] as const;
+
+/** Makes the grid sizes of a newly stored cover ahead of its first view. */
+export async function prewarmThumbnailSizes(file: string): Promise<void> {
+  for (const width of GRID_WIDTHS) await resizedThumbnail(file, width);
+}

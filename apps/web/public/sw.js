@@ -18,14 +18,17 @@ const PAGES_CACHE = `pm-pages-${VERSION}`;
 /** Keep in step with DATA_CACHES in src/lib/service-worker.ts, which clears them when the account changes. */
 const DATA_CACHE = `pm-data-${VERSION}`;
 const IMAGES_CACHE = `pm-images-${VERSION}`;
-const CURRENT = [STATIC_CACHE, PAGES_CACHE, DATA_CACHE, IMAGES_CACHE];
+/** Pages of downloaded chapters, kept apart so covers never push them out (or the reverse). */
+const CHAPTERS_CACHE = `pm-chapters-${VERSION}`;
+const CURRENT = [STATIC_CACHE, PAGES_CACHE, DATA_CACHE, IMAGES_CACHE, CHAPTERS_CACHE];
 const OFFLINE_PAGE = '/offline.html';
 
 const MAX_ENTRIES = {
   [STATIC_CACHE]: 600,
   [PAGES_CACHE]: 60,
   [DATA_CACHE]: 400,
-  [IMAGES_CACHE]: 1500,
+  [IMAGES_CACHE]: 3000,
+  [CHAPTERS_CACHE]: 3000,
 };
 
 /** The API's base URL ("https://host/api"), from the registration URL. */
@@ -36,7 +39,9 @@ const API_BASE = (() => {
 
 /** API paths that must always go to the network. */
 const NETWORK_ONLY_API = [
-  /^\/source\/(?!image-proxy)/,
+  // Except covers and pages through the image proxy, and a chapter's page list: a chapter
+  // read before should open again offline.
+  /^\/source\/(?!image-proxy|[^/]+\/chapter\/[^/]+\/pages$)/,
   /^\/auth\/(?!me$)/,
   /^\/extension/,
   /^\/suwayomi/,
@@ -72,9 +77,13 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// The page lists the code it loaded before this worker took control (first visit).
 self.addEventListener('message', (event) => {
   const data = event.data;
+  if (data && data.type === 'cache-covers' && Array.isArray(data.urls)) {
+    event.waitUntil(cacheCovers(data.urls.filter((url) => typeof url === 'string')));
+    return;
+  }
+  // The page lists the code it loaded before this worker took control (first visit).
   if (!data || data.type !== 'cache-assets' || !Array.isArray(data.urls)) return;
   event.waitUntil(
     caches
@@ -101,8 +110,17 @@ self.addEventListener('fetch', (event) => {
   if (API_BASE && (request.url === API_BASE || request.url.startsWith(`${API_BASE}/`))) {
     const path = request.url.slice(API_BASE.length).split('?')[0];
     if (request.headers.get('accept')?.includes('text/event-stream')) return;
-    if (/^\/source\/image-proxy|^\/cache\/thumbnail/.test(path)) {
+    if (/^\/cache\/thumbnail\//.test(path)) {
+      event.respondWith(cover(request));
+      return;
+    }
+    if (/^\/source\/image-proxy/.test(path)) {
       event.respondWith(cacheFirst(request, IMAGES_CACHE));
+      return;
+    }
+    // A downloaded chapter's page never changes at its URL.
+    if (/^\/downloads\/chapter\/[^/]+\/page\//.test(path)) {
+      event.respondWith(cacheFirst(request, CHAPTERS_CACHE));
       return;
     }
     if (NETWORK_ONLY_API.some((rule) => rule.test(path))) return;
@@ -128,13 +146,85 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
+/** Library covers come in widths (`?w=200|400|800`, see src/components/cover.tsx). */
+const COVER_WIDTHS = [200, 400, 800];
+
+function atWidth(url, width) {
+  const next = new URL(url);
+  if (width === null) next.searchParams.delete('w');
+  else next.searchParams.set('w', String(width));
+  return next.href;
+}
+
+/**
+ * A library cover from this device when there is one: the exact width, or failing that a
+ * larger one of the same cover (sharper than needed, never blurrier), or offline, any.
+ * Covers are versioned in their URL, so a cached one is never out of date.
+ */
+async function cover(request) {
+  const cache = await caches.open(IMAGES_CACHE);
+  const exact = await cache.match(request, { ignoreVary: true });
+  if (exact) return exact;
+  const wanted = Number(new URL(request.url).searchParams.get('w')) || null;
+  const larger = wanted ? COVER_WIDTHS.filter((w) => w > wanted) : [];
+  for (const width of [...larger, null]) {
+    const hit = await cache.match(atWidth(request.url, width), { ignoreVary: true });
+    if (hit) return hit;
+  }
+  try {
+    const response = await fetch(readable(request));
+    if (response.ok) void put(cache, IMAGES_CACHE, request, response.clone());
+    return response;
+  } catch (error) {
+    for (const width of COVER_WIDTHS) {
+      const hit = await cache.match(atWidth(request.url, width), { ignoreVary: true });
+      if (hit) return hit;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Keeps a small copy of every library cover on this device (asked for by
+ * src/lib/cover-cache.ts once the library has loaded), so the whole library shows its
+ * covers at once, and offline. Four at a time, skipping any already here.
+ */
+async function cacheCovers(urls) {
+  const cache = await caches.open(IMAGES_CACHE);
+  const queue = urls.slice();
+  const worker = async () => {
+    for (let url = queue.shift(); url; url = queue.shift()) {
+      try {
+        if (await cache.match(url, { ignoreVary: true })) continue;
+        const response = await fetch(url, { credentials: 'include', mode: 'cors' });
+        if (response.ok) await cache.put(url, response);
+      } catch {
+        // Offline again, or one cover refused: the rest still get their turn.
+      }
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+}
+
 async function cacheFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
-  const hit = await cache.match(request);
+  const hit = await cache.match(request, { ignoreVary: true });
   if (hit) return hit;
-  const response = await fetch(request);
+  const response = await fetch(readable(request));
   if (response.ok) void put(cache, cacheName, request, response.clone());
   return response;
+}
+
+/**
+ * An <img> from another origin (the API, when it isn't served from this one) is fetched
+ * "no-cors", and its answer is opaque: no status to check, so it was never kept, and the
+ * pages of a chapter read before couldn't open offline. The API allows this origin, so
+ * the same URL is fetched with CORS instead, which an <img> accepts just as well.
+ */
+function readable(request) {
+  if (request.mode !== 'no-cors' || new URL(request.url).origin === self.location.origin)
+    return request;
+  return new Request(request.url, { mode: 'cors', credentials: 'include' });
 }
 
 /** The network's answer when there is one; the cache's when it fails or the server errs. */

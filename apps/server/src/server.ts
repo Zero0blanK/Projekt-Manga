@@ -11,6 +11,10 @@ import trackerService from './services/tracker.service.js';
 import downloadWorker from './workers/download.worker.js';
 import extensionRepositoryService from './services/extensionRepository.service.js';
 import cacheService from './services/cache.service.js';
+import { backfillLibraryCovers } from './workers/thumbnailSync.js';
+
+/** How long after start-up missing library covers start being stored. */
+const COVER_BACKFILL_DELAY_MS = 60_000;
 import { applySqlitePragmas } from './configs/prisma.config.js';
 import { migrateWithBackup } from './configs/migrate.js';
 import { resolveDatabaseConfig } from './configs/env.js';
@@ -150,6 +154,17 @@ async function main() {
   void cacheService.pruneOrphanedThumbnails().catch((error) => {
     console.error('Failed to prune orphaned thumbnails', error);
   });
+  // Covers for library titles that have none stored yet, a while after start-up so it never
+  // competes with it. Not under test, where titles are fixtures with no real covers.
+  if (process.env.NODE_ENV !== 'test') {
+    setTimeout(() => {
+      void backfillLibraryCovers()
+        .then((count) => {
+          if (count > 0) console.log(`[covers] Storing ${count} library covers in the background`);
+        })
+        .catch((error) => console.warn('[covers] Could not look for missing covers', error));
+    }, COVER_BACKFILL_DELAY_MS).unref();
+  }
 
   trackerService.initializeTrackerPolling();
   startExtensionUpdateChecks();

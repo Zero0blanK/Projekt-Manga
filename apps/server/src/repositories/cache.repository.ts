@@ -21,10 +21,23 @@ const upsertByMangaId = async (manga_id: string, thumbnail_url: string, sha256: 
   });
 };
 
+/** Library titles (anyone's) whose cover isn't stored here yet, and can be fetched. */
+const listLibraryTitlesWithoutCover = async (limit: number) =>
+  prisma.manga.findMany({
+    where: {
+      cache: null,
+      thumbnail_url: { startsWith: 'http' },
+      OR: [{ in_library: true }, { user_library: { some: { deleted_at: null } } }],
+    },
+    select: { id: true, thumbnail_url: true, source: true },
+    take: limit,
+  });
+
 const cacheRepository = {
   findByMangaId,
   findBySha,
   listPrivateUrls,
+  listLibraryTitlesWithoutCover,
   upsertByMangaId,
 };
 
