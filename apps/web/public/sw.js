@@ -125,6 +125,11 @@ self.addEventListener('fetch', (event) => {
       event.respondWith(cover(request));
       return;
     }
+    // Installed sources' icons: shown in Discover and the library, offline too.
+    if (/^\/extensions\/installed\/[^/]+\/icon$/.test(path)) {
+      event.respondWith(cacheFirst(request, IMAGES_CACHE));
+      return;
+    }
     if (/^\/source\/image-proxy/.test(path)) {
       event.respondWith(cacheFirst(request, IMAGES_CACHE));
       return;

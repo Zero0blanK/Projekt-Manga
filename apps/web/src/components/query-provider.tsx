@@ -68,8 +68,10 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         noteFreshLibrary();
         keepLibraryCovers((event.query.state.data as Manga[] | undefined) ?? []);
       } else if (key === queryKeys.downloads[0]) {
-        // Downloaded chapters, readable here offline (lib/offline-downloads.ts).
-        void keepDownloadsOffline((event.query.state.data as DownloadSummary[] | undefined) ?? []);
+        // Downloaded chapters, readable here offline (lib/offline-downloads.ts). Only the
+        // list itself: other queries share the prefix (the statistics' download totals).
+        const data = event.query.state.data;
+        if (Array.isArray(data)) void keepDownloadsOffline(data as DownloadSummary[]);
         return;
       } else if (key !== queryKeys.libraryState[0]) {
         return;

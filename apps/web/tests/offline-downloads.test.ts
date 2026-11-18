@@ -89,6 +89,12 @@ describe('keeping downloads for offline reading', () => {
     expect(messages.filter((m) => m.kind === 'chapters')).toHaveLength(1);
   });
 
+  it('ignores anything that is not the downloads list', async () => {
+    // The statistics' download totals share the downloads query prefix.
+    await run({ total: 2, completed: 2 } as unknown as DownloadSummary[]);
+    expect(messages).toHaveLength(0);
+  });
+
   it('stops when the device is nearly out of room', async () => {
     Object.defineProperty(navigator, 'storage', {
       configurable: true,

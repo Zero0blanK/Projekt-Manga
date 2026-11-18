@@ -7,6 +7,7 @@ import {
   getMangaLinks,
   type DownloadSummary,
 } from '@projekt-manga/api-client';
+import { desktopBridge } from './desktop-bridge';
 
 /**
  * Downloaded chapters, readable in this browser with no connection.
@@ -54,6 +55,8 @@ function keep(active: ServiceWorker, kind: 'pages' | 'chapters', urls: string[])
 
 export async function keepDownloadsOffline(downloads: DownloadSummary[]): Promise<void> {
   if (typeof navigator === 'undefined' || !navigator.serviceWorker || !navigator.onLine) return;
+  // The desktop app reads downloads from disk, and has no offline worker.
+  if (!Array.isArray(downloads) || desktopBridge()) return;
   const completed = downloads.filter(
     (download) => download.status === 'COMPLETED' && !kept.has(download.chapter_id),
   );
