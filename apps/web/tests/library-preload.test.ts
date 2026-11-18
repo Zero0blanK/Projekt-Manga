@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getServerManga } from '@projekt-manga/api-client';
-import { FIRST_LIBRARY_PAGE, libraryPreloadScript } from '@/lib/library-preload';
+import { FIRST_LIBRARY_PAGE, libraryPreloadScript, scriptString } from '@/lib/library-preload';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -38,5 +38,13 @@ describe('preloading the library', () => {
   it('does nothing in the desktop app, which reads its own database', () => {
     (window as { desktop?: unknown }).desktop = {};
     expect(runScript()).toBeNull();
+  });
+
+  it('writes a URL into the inline script so it can never end the element', () => {
+    const hostile = 'https://x.test/api/</script><script>alert(1)</script><!--';
+    const literal = scriptString(hostile);
+    expect(literal).not.toMatch(/[<>]/);
+    // It reads back as exactly the same string.
+    expect(new Function(`return ${literal}`)()).toBe(hostile);
   });
 });

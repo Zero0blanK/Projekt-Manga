@@ -16,6 +16,18 @@ export const FIRST_LIBRARY_PAGE = 60;
  * Browser only: the desktop app reads its library from its own database.
  */
 export const libraryPreloadScript = () =>
-  `(function(){try{if(window.desktop)return;var l=document.createElement('link');l.rel='preload';l.as='fetch';l.crossOrigin='use-credentials';l.href=${JSON.stringify(
+  `(function(){try{if(window.desktop)return;var l=document.createElement('link');l.rel='preload';l.as='fetch';l.crossOrigin='use-credentials';l.href=${scriptString(
     buildApiUrl('/manga', { limit: FIRST_LIBRARY_PAGE, offset: 0 }),
   )};document.head.appendChild(l);}catch(e){}})();`;
+
+/**
+ * `value` as a JavaScript string literal that is safe inside an inline <script>. JSON alone
+ * isn't: a `</script>` or `<!--` in it would end or break the element. Every character that
+ * can do that is written as an escape, which reads back as the same string.
+ */
+export function scriptString(value: string): string {
+  return JSON.stringify(value).replace(
+    /[<>&\u2028\u2029]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+}

@@ -14,6 +14,20 @@ describe('SVG icons through the image proxy', () => {
     expect(looksLikeSvg(Buffer.from('not an image'))).toBe(false);
   });
 
+  it('takes linear time on many comments, with no catastrophic backtracking', () => {
+    const hostile = Buffer.from('<!---->'.repeat(70) + 'x');
+    const started = Date.now();
+    expect(looksLikeSvg(hostile)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(50);
+    expect(
+      looksLikeSvg(
+        Buffer.from(
+          '<?xml version="1.0"?><!-- a --><!-- b --><!DOCTYPE svg PUBLIC "x"><svg></svg>',
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it('draws it to a PNG, so the SVG itself is never served', async () => {
     const png = await rasterizeSvg(icon);
     expect(png?.subarray(0, 8)).toEqual(

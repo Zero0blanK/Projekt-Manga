@@ -20,7 +20,20 @@ export function looksLikeSvg(head: Buffer): boolean {
     .toString('utf8')
     .replace(/^\uFEFF/, '')
     .trimStart();
-  return /^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE svg[^>]*>\s*)?<svg[\s>]/i.test(text);
+  // Step by step rather than one regex: a pattern with repeated comment groups backtracks
+  // exponentially on input like `<!----><!---->…`, and this reads bytes from the internet.
+  let rest = text;
+  const skip = (open: string, close: string): boolean => {
+    if (!rest.toLowerCase().startsWith(open)) return false;
+    const end = rest.indexOf(close, open.length);
+    if (end === -1) return false;
+    rest = rest.slice(end + close.length).trimStart();
+    return true;
+  };
+  skip('<?xml', '>');
+  while (skip('<!--', '-->'));
+  skip('<!doctype svg', '>');
+  return /^<svg[\s>]/i.test(rest);
 }
 
 type Sharp = (input: Buffer, options?: { limitInputPixels?: number }) => import('sharp').Sharp;
