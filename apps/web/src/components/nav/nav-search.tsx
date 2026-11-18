@@ -3,7 +3,13 @@ import { Search, X } from 'lucide-react';
 import type { Manga } from '@/lib/manga-data';
 import { authorLine } from '@/lib/manga-data';
 import { Cover } from '@/components/cover';
-import { SettingsSearch } from '@/components/settings/settings-search';
+import dynamic from 'next/dynamic';
+
+// The settings index is only needed once someone searches settings from here.
+const SettingsSearch = dynamic(
+  () => import('@/components/settings/settings-search').then((m) => m.SettingsSearch),
+  { ssr: false },
+);
 import type { SectionId } from '@/components/settings/settings-nav';
 
 export type SearchScope = 'library' | 'sources' | 'settings';
