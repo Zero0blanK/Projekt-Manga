@@ -167,6 +167,14 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     preferredGroup,
     requestedChapterId,
   });
+  // A chapter number the title doesn't have (a stale or mistyped link): nothing to retry.
+  const missingChapter = chaptersLoaded && chapters.length > 0 && !chapterByNumber.has(chapter);
+  // The closest chapter it does have, to offer instead.
+  const nearestChapter = missingChapter
+    ? sortedChapterNumbers.reduce((best, n) =>
+        Math.abs(n - chapter) < Math.abs(best - chapter) ? n : best,
+      )
+    : null;
   const invalidChapterId =
     chaptersLoaded &&
     requestedChapterId !== null &&
@@ -237,6 +245,11 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     currentRecord?.page_count ||
     0;
   const totalPages = knownTotal || 1;
+  // A link past the end (a stale `page=`, or a chapter re-uploaded with fewer pages) opens
+  // on the last page rather than on a page that doesn't exist.
+  useEffect(() => {
+    if (knownTotal > 0 && page > knownTotal) setPage(knownTotal);
+  }, [knownTotal, page]);
 
   usePagePrefetch(pageUrls, page, pagePrefetchAhead);
 
@@ -811,7 +824,31 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
             </button>
           </div>
         )}
-        {pagesError && effectiveLayout !== 'Long strip' && (
+        {missingChapter && nearestChapter !== null && (
+          <div
+            role="alert"
+            className="fixed inset-x-4 top-20 z-40 mx-auto max-w-md rounded-xl border border-border/60 bg-black/90 p-4 text-center text-sm text-white"
+          >
+            <p>This title has no chapter {chapter}.</p>
+            <div className="mt-3 flex flex-wrap justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => router.replace(`/reader/${manga.id}?ch=${nearestChapter}`)}
+                className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+              >
+                Read chapter {nearestChapter}
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push(`/manga/${manga.id}`)}
+                className="rounded-lg border border-white/30 px-3 py-1.5 text-xs font-medium"
+              >
+                See all chapters
+              </button>
+            </div>
+          </div>
+        )}
+        {pagesError && !missingChapter && effectiveLayout !== 'Long strip' && (
           <div
             role="alert"
             className="fixed inset-x-4 top-20 z-40 mx-auto max-w-md rounded-xl border border-destructive/40 bg-black/90 p-4 text-center text-sm text-white"
