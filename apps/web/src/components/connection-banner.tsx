@@ -48,7 +48,7 @@ export function ConnectionBanner() {
       {unreachable ? (
         <span>
           {saved
-            ? "Can't reach the library server. Showing your library as saved on this device; reading progress can't be saved until it's back."
+            ? "Can't reach the library server. Showing your library as saved on this device. Reading progress is kept here and sent once it's back."
             : "Can't reach the library server. Retrying."}
         </span>
       ) : (

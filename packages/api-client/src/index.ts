@@ -1,5 +1,6 @@
 export * from './client.js';
 export * from './progressHold.js';
+export * from './progressOutbox.js';
 export * from './auth.js';
 export * from './runtime.js';
 export * from './category.js';

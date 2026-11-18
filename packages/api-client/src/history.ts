@@ -1,6 +1,7 @@
 import type { MangaHistory } from '@projekt-manga/types';
 import { fetchAllPages, request } from './client.js';
 import { awaitProgressWrite } from './progressHold.js';
+import { sendOrKeep } from './progressOutbox.js';
 import { localInvoke, usesLocalFirstData } from './runtime.js';
 import type { HistoryEntry, HistoryRecord, HistoryByMangaSlugEntry } from '@projekt-manga/types';
 export type { HistoryEntry, HistoryRecord, HistoryByMangaSlugEntry } from '@projekt-manga/types';
@@ -25,7 +26,11 @@ export const addHistory = async (historyData: MangaHistory) => {
   }
   const key = `history:${historyData.source}:${historyData.manga_slug}:${historyData.source_chapter_key ?? ''}`;
   if (!(await awaitProgressWrite(key))) return null;
-  return request<HistoryRecord>('/history/add', { method: 'POST', body: historyData });
+  // Kept on this device if the server can't be reached (progressOutbox.ts).
+  return sendOrKeep<HistoryRecord | null>(
+    { key, path: '/history/add', body: historyData as unknown as Record<string, unknown> },
+    null,
+  );
 };
 
 export const getHistoryByMangaSlug = (mangaSlug: string, signal?: AbortSignal, source?: string) =>

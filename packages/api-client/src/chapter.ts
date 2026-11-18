@@ -3,6 +3,7 @@ import { request } from './client.js';
 import { localInvoke, usesLocalFirstData } from './runtime.js';
 import { addHistory } from './history.js';
 import { awaitProgressWrite } from './progressHold.js';
+import { sendOrKeep, withPendingProgress } from './progressOutbox.js';
 import type { MangaChapterRecord, MangaWithDetails } from './manga.js';
 import type {
   ChapterBulkPayload,
@@ -51,9 +52,15 @@ export const markChapterAsRead = async (
   }
   // Held while a restore runs (progressHold.ts); a newer save for the chapter replaces it.
   if (!(await awaitProgressWrite(`chapter:${mangaSlug}:${sourceChapterKey}`))) return { count: 0 };
-  return request<UpdateResult>(
-    `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/mark-read`,
-    { method: 'POST', body: chapterMeta },
+  // Kept on this device if the server can't be reached (progressOutbox.ts).
+  return sendOrKeep<UpdateResult>(
+    {
+      key: `chapter:${mangaSlug}:${sourceChapterKey}`,
+      path: `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/mark-read`,
+      body: chapterMeta,
+      chapter: { source: chapterMeta.source, mangaSlug, sourceChapterKey, isRead: true },
+    },
+    { count: 1 },
   );
 };
 
@@ -69,9 +76,20 @@ export const markChapterAsUnread = async (
     }).then(() => ({ count: 1 }));
   }
   if (!(await awaitProgressWrite(`chapter:${mangaSlug}:${sourceChapterKey}`))) return { count: 0 };
-  return request<UpdateResult>(
-    `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/mark-unread`,
-    { method: 'POST', body: chapterMeta },
+  return sendOrKeep<UpdateResult>(
+    {
+      key: `chapter:${mangaSlug}:${sourceChapterKey}`,
+      path: `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/mark-unread`,
+      body: chapterMeta,
+      chapter: {
+        source: chapterMeta.source,
+        mangaSlug,
+        sourceChapterKey,
+        isRead: false,
+        lastPageRead: 0,
+      },
+    },
+    { count: 1 },
   );
 };
 
@@ -88,9 +106,14 @@ export const markChapterByLastPage = async (
     }).then(() => ({ count: 1 }));
   }
   if (!(await awaitProgressWrite(`chapter:${mangaSlug}:${sourceChapterKey}`))) return { count: 0 };
-  return request<UpdateResult>(
-    `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/${lastPageRead}/mark-by-page`,
-    { method: 'POST', body: chapterMeta },
+  return sendOrKeep<UpdateResult>(
+    {
+      key: `chapter:${mangaSlug}:${sourceChapterKey}`,
+      path: `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/${lastPageRead}/mark-by-page`,
+      body: chapterMeta,
+      chapter: { source: chapterMeta.source, mangaSlug, sourceChapterKey, lastPageRead },
+    },
+    { count: 1 },
   );
 };
 
@@ -169,8 +192,16 @@ export const getChapterFetchDate = (signal?: AbortSignal) =>
 export const getChapterReadStatusById = (chapterId: string, signal?: AbortSignal) =>
   request<ChapterReadStatus | null>(`/chapter/status/${encode(chapterId)}`, { signal });
 
-export const getChapter = (mangaSlug: string, signal?: AbortSignal, source?: string) =>
-  request<MangaChapterRecord[]>(`/chapter/${encode(mangaSlug)}`, { signal, query: { source } });
+export const getChapter = async (mangaSlug: string, signal?: AbortSignal, source?: string) =>
+  // With progress read offline and not yet sent applied (progressOutbox.ts).
+  withPendingProgress(
+    await request<MangaChapterRecord[]>(`/chapter/${encode(mangaSlug)}`, {
+      signal,
+      query: { source },
+    }),
+    mangaSlug,
+    source,
+  );
 
 /** A signed-in desktop reader writes chapter state locally, so its chapter list must read that
  * same state instead of asking the server for an older snapshot. */

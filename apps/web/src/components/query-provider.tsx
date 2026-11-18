@@ -9,6 +9,7 @@ import { CategorySync } from '@/components/category-sync';
 import { SourceChallengeAutoOpen } from '@/components/source-challenge-auto-open';
 import { ImportedReadStateSync } from '@/components/imported-read-state-sync';
 import { applyRuntimeApiBaseUrl } from '@/lib/api-config';
+import { installProgressOutbox } from '@/lib/progress-outbox';
 import { installClientDiagnostics, recordPageVisit } from '@/lib/client-diagnostics';
 import {
   isStaticDataQuery,
@@ -22,6 +23,8 @@ import {
   saveLibrary,
 } from '@/lib/offline-library';
 import { queryKeys } from '@/lib/query-client';
+import { keepLibraryCovers } from '@/lib/cover-cache';
+import type { Manga } from '@/lib/manga-data';
 import type { PublicUser } from '@projekt-manga/api-client';
 
 // At module scope, not in an effect: this has to run before the first request, and every
@@ -30,6 +33,8 @@ import type { PublicUser } from '@projekt-manga/api-client';
 applyRuntimeApiBaseUrl();
 // Same reason: a request that fails during the first render is the one most worth seeing.
 installClientDiagnostics();
+// And progress read offline must have somewhere to wait before the reader first saves.
+installProgressOutbox();
 
 /** Wraps the app in the shared client from lib/query-client. Split into its own file so
  * the root layout stays a Server Component. */
@@ -60,6 +65,7 @@ export function QueryProvider({ children }: { children: ReactNode }) {
         checkSavedLibraryOwner(queryClient, (event.query.state.data as PublicUser | null) ?? null);
       } else if (key === queryKeys.mangaLibrary[0]) {
         noteFreshLibrary();
+        keepLibraryCovers((event.query.state.data as Manga[] | undefined) ?? []);
       } else if (key !== queryKeys.libraryState[0]) {
         return;
       }

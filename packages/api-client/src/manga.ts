@@ -1,6 +1,7 @@
 import type { GetMangaOptions, AddMangaPayload } from '@projekt-manga/types';
 import { SESSION_COOKIE_NAME } from '@projekt-manga/types';
 import { ApiError, fetchAllPages, request, type PageProgress } from './client.js';
+import { withPendingProgress } from './progressOutbox.js';
 import { localInvoke, usesLocalFirstData } from './runtime.js';
 import type {
   Manga,
@@ -77,13 +78,21 @@ export const getMangaDetailsById = async (
   if (await usesLocalFirstData()) {
     return localInvoke<MangaWithDetails>('manga', 'getDetails', { mangaId });
   }
-  return request<MangaWithDetails>(`/manga/details/${encodeURIComponent(mangaId)}`, {
+  const details = await request<MangaWithDetails>(`/manga/details/${encodeURIComponent(mangaId)}`, {
     signal,
     headers: sessionToken
       ? { Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionToken)}` }
       : undefined,
     cache: 'no-store',
   });
+  // With progress read offline and not yet sent applied (progressOutbox.ts). Inert on the
+  // server, which has no outbox.
+  return details?.chapters
+    ? {
+        ...details,
+        chapters: withPendingProgress(details.chapters, details.slug, details.source),
+      }
+    : details;
 };
 
 /**

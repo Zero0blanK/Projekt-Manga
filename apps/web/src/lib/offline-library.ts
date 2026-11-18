@@ -63,7 +63,8 @@ async function withStore<T>(
   }
 }
 
-function storedOwner(): string | null {
+/** The account the saved library belongs to: the last one the server named here. */
+export function storedOwner(): string | null {
   try {
     return window.localStorage.getItem(OWNER_KEY);
   } catch {
@@ -80,7 +81,7 @@ function setStoredOwner(owner: string | null): void {
   }
 }
 
-const ownerOf = (user: PublicUser | null | undefined) => user?.id ?? ANONYMOUS;
+export const ownerOf = (user: PublicUser | null | undefined) => user?.id ?? ANONYMOUS;
 
 /** Whether the library on screen is part of a first load still arriving page by page. */
 let libraryFilling = false;
