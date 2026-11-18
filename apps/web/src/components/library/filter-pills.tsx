@@ -37,7 +37,9 @@ export function FilterPills({
   filter: string;
   onChange: (value: string) => void;
 }) {
-  const { manga: mangaLibrary } = useMangaLibrary();
+  const { manga: mangaLibrary, loading } = useMangaLibrary();
+  // No counts until the library has arrived: 0 would read as an empty shelf.
+  const counting = loading && mangaLibrary.length === 0;
   const { shelf } = useLibraryState();
   const customCategories = useAppState((s) => s.customCategories);
   const categoryMembers = useAppState((s) => s.categoryMembers);
@@ -106,9 +108,11 @@ export function FilterPills({
             }`}
           >
             {f.label}
-            <span className={`ml-1.5 tabular-nums ${on ? 'opacity-80' : 'opacity-60'}`}>
-              {count}
-            </span>
+            {!counting && (
+              <span className={`ml-1.5 tabular-nums ${on ? 'opacity-80' : 'opacity-60'}`}>
+                {count}
+              </span>
+            )}
           </button>
         );
       })}
