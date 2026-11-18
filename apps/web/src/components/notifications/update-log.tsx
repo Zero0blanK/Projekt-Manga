@@ -31,7 +31,8 @@ import {
   CircleHelp,
   type LucideIcon,
 } from 'lucide-react';
-import { reportError } from '@/lib/report-error';
+import { isAborted } from '@/lib/report-error';
+import { LoadError } from '@/components/load-error';
 
 const CATEGORY_ICONS: Record<UpdateLogCategory, LucideIcon> = {
   NETWORK_ERROR: WifiOff,
@@ -197,15 +198,25 @@ export function UpdateLog() {
   const { sources: apiSources } = useSources();
   const sources = useMemo(() => apiSources.map(toDisplaySource), [apiSources]);
 
+  const [failure, setFailure] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
     const controller = new AbortController();
+    setFailure(null);
+    setLoading(true);
     getUpdateLog(undefined, controller.signal)
       .then((entries) => setLog(entries.map(decode)))
       // This log is the whole screen; empty otherwise reads as "nothing has happened".
-      .catch((error) => reportError(error, "Couldn't load the update log."))
-      .finally(() => setLoading(false));
+      // Said on the screen itself, so a toast would only repeat it.
+      .catch((error: unknown) => {
+        if (!isAborted(error)) setFailure(error);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
     return () => controller.abort();
-  }, []);
+  }, [attempt]);
 
   const keyOf = (entry: DecodedEntry): FilterKey =>
     entry.diagnostic ? entry.diagnostic.category : SUCCESS_KEY;
@@ -245,11 +256,19 @@ export function UpdateLog() {
     return <RowListSkeleton count={6} thumbnail={false} />;
   }
 
+  if (!loading && failure && log.length === 0) {
+    return (
+      <LoadError error={failure} onRetry={() => setAttempt((n) => n + 1)}>
+        The update log didn&apos;t load.
+      </LoadError>
+    );
+  }
+
   if (!loading && log.length === 0) {
     return (
       <EmptyState>
-        No update checks yet — run &ldquo;Update Library&rdquo; from your library to check sources
-        for new chapters.
+        Nothing logged yet. New chapters and failed checks show up here after &ldquo;Update
+        Library&rdquo; runs; a check that finds nothing new isn&apos;t logged.
       </EmptyState>
     );
   }

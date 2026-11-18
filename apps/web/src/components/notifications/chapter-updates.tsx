@@ -13,6 +13,7 @@ import {
 } from '@/lib/notifications-store';
 import { Cover } from '@/components/cover';
 import { EmptyState, RowList } from '@/components/page-shell';
+import { LoadError } from '@/components/load-error';
 import { RowListSkeleton } from '@/components/skeletons';
 import { BookOpen, Check, ChevronDown } from 'lucide-react';
 
@@ -134,7 +135,7 @@ function UpdateRow({ update, unread }: { update: MangaUpdate; unread: boolean })
  * be years old the first time a source is scraped.
  */
 export function ChapterUpdates() {
-  const { chapters, loading } = useRecentChapters();
+  const { chapters, loading, error, refresh } = useRecentChapters();
   const { readNotifications } = useLibraryState();
 
   const updates = groupChaptersByManga(chapters);
@@ -145,6 +146,14 @@ export function ChapterUpdates() {
 
   if (loading && updates.length === 0) {
     return <RowListSkeleton count={6} />;
+  }
+
+  if (!loading && error && updates.length === 0) {
+    return (
+      <LoadError error={error} onRetry={refresh}>
+        New chapters didn&apos;t load.
+      </LoadError>
+    );
   }
 
   if (!loading && updates.length === 0) {

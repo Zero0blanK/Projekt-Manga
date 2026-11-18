@@ -119,7 +119,10 @@ describe('RestoreStatusCard', () => {
 
     expect(screen.getByRole('alert', { name: 'Restore belongs to another account' })).toBeTruthy();
     expect(screen.queryByText(/4 of 10 records/)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Sign out to switch accounts' })).toBeTruthy();
+    // Loaded on demand: it brings the sign-in forms with it.
+    expect(
+      await screen.findByRole('button', { name: 'Sign out to switch accounts' }, { timeout: 5000 }),
+    ).toBeTruthy();
     // Its account may be gone for good; this used to leave the app blocked forever.
     fireEvent.click(screen.getByRole('button', { name: 'Stop tracking this restore' }));
     await waitFor(() => expect(container.querySelector('section')).toBeNull());

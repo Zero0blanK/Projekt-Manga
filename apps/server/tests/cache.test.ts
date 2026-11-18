@@ -403,3 +403,29 @@ describe('caching a library cover the first time it is shown', () => {
     expect(storage.uploadBuffer).not.toHaveBeenCalled();
   });
 });
+
+describe('backfillLibraryCovers', () => {
+  it('queues every library title without a stored cover, with its source', async () => {
+    const { backfillLibraryCovers } = await import('../src/workers/thumbnailSync.js');
+    prismaMock.manga.findMany.mockResolvedValueOnce([
+      { id: 'm1', thumbnail_url: 'https://covers.example/1.jpg', source: 's1' },
+      { id: 'm2', thumbnail_url: 'https://covers.example/2.jpg', source: 's2' },
+    ] as never);
+    const enqueue = vi.spyOn(thumbnailQueue, 'enqueue').mockImplementation(() => {});
+
+    await expect(backfillLibraryCovers()).resolves.toBe(2);
+
+    expect(enqueue).toHaveBeenCalledWith('m1', 'https://covers.example/1.jpg', { sourceId: 's1' });
+    expect(enqueue).toHaveBeenCalledWith('m2', 'https://covers.example/2.jpg', { sourceId: 's2' });
+    // Library titles only, missing a cover, with one that can be fetched.
+    expect(prismaMock.manga.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          cache: null,
+          thumbnail_url: { startsWith: 'http' },
+        }),
+      }),
+    );
+    enqueue.mockRestore();
+  });
+});

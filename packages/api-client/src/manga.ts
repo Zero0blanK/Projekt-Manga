@@ -1,6 +1,7 @@
 import type { GetMangaOptions, AddMangaPayload } from '@projekt-manga/types';
 import { SESSION_COOKIE_NAME } from '@projekt-manga/types';
-import { ApiError, fetchAllPages, request } from './client.js';
+import { ApiError, fetchAllPages, request, type PageProgress } from './client.js';
+import { withPendingProgress } from './progressOutbox.js';
 import { localInvoke, usesLocalFirstData } from './runtime.js';
 import type {
   Manga,
@@ -38,22 +39,32 @@ export type {
 // replicating yet — see apps/desktop/src/main/db/local-store.ts's listLibrary(), which
 // always orders by title. Revisit if that stops being true.
 /** HTTP-only view of this session's server library, including on desktop. */
-export const getServerManga = (options: GetMangaOptions = {}, signal?: AbortSignal) =>
-  fetchAllPages((page) =>
-    request<MangaListItem[]>('/manga', {
-      query: { sortBy: options.sortBy, sortOrder: options.sortOrder, ...page },
-      signal,
-    }),
+export const getServerManga = (
+  options: GetMangaOptions = {},
+  signal?: AbortSignal,
+  progress?: PageProgress<MangaListItem>,
+) =>
+  fetchAllPages(
+    (page) =>
+      request<MangaListItem[]>('/manga', {
+        query: { sortBy: options.sortBy, sortOrder: options.sortOrder, ...page },
+        signal,
+      }),
+    progress,
   );
 
-export const getManga = async (options: GetMangaOptions = {}, signal?: AbortSignal) => {
+export const getManga = async (
+  options: GetMangaOptions = {},
+  signal?: AbortSignal,
+  progress?: PageProgress<MangaListItem>,
+) => {
   if (await usesLocalFirstData()) {
     // localInvoke has no AbortSignal parameter — `signal` is silently dropped on this
     // branch, so cancellation is only honoured on the HTTP path below. A caller relying on
     // abort here keeps waiting on desktop.
     return localInvoke<MangaListItem[]>('manga', 'listLibrary');
   }
-  return getServerManga(options, signal);
+  return getServerManga(options, signal, progress);
 };
 
 export const getMangaById = (mangaId: string, signal?: AbortSignal) =>
@@ -67,13 +78,21 @@ export const getMangaDetailsById = async (
   if (await usesLocalFirstData()) {
     return localInvoke<MangaWithDetails>('manga', 'getDetails', { mangaId });
   }
-  return request<MangaWithDetails>(`/manga/details/${encodeURIComponent(mangaId)}`, {
+  const details = await request<MangaWithDetails>(`/manga/details/${encodeURIComponent(mangaId)}`, {
     signal,
     headers: sessionToken
       ? { Cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionToken)}` }
       : undefined,
     cache: 'no-store',
   });
+  // With progress read offline and not yet sent applied (progressOutbox.ts). Inert on the
+  // server, which has no outbox.
+  return details?.chapters
+    ? {
+        ...details,
+        chapters: withPendingProgress(details.chapters, details.slug, details.source),
+      }
+    : details;
 };
 
 /**

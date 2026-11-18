@@ -37,6 +37,7 @@ import { HostLimiter } from '../utils/hostLimiter.js';
 import { ValidationError } from '../utils/customErrors.js';
 import { createByteLimitStream } from '../utils/byteLimitStream.js';
 import { MAX_IMAGE_BYTES, detectRasterImageType } from '../utils/imageContent.js';
+import { MAX_SVG_BYTES, looksLikeSvg, rasterizeSvg } from '../utils/svgRaster.js';
 import {
   isSuwayomiImageUrl,
   openSuwayomiImage,
@@ -495,6 +496,31 @@ const proxyImage = async (req: Request, res: Response, next: NextFunction) => {
       }
       const contentType = detectRasterImageType(Buffer.concat(prefixChunks, prefixSize));
       if (!contentType) {
+        // An SVG (some sources' icons) is drawn to a PNG rather than refused: the SVG itself
+        // is never served from this origin (utils/svgRaster.ts).
+        if (looksLikeSvg(Buffer.concat(prefixChunks, prefixSize))) {
+          const chunks = [...prefixChunks];
+          let size = prefixSize;
+          for (;;) {
+            const part = await iterator.next();
+            if (part.done) break;
+            const bytes = Buffer.isBuffer(part.value)
+              ? part.value
+              : Buffer.from(part.value as Uint8Array);
+            size += bytes.length;
+            if (size > MAX_SVG_BYTES) {
+              upstreamStream.destroy();
+              return proxyError(req, res, 413, 'Image response is too large');
+            }
+            chunks.push(bytes);
+          }
+          const png = await rasterizeSvg(Buffer.concat(chunks, size));
+          if (png) {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'public, max-age=86400');
+            return res.status(200).send(png);
+          }
+        }
         upstreamStream.destroy();
         return proxyError(req, res, 502, 'The source did not return a valid image');
       }

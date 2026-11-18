@@ -8,6 +8,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Cover } from '@/components/cover';
 import { EmptyState, PageHeader, PageShell, RowList } from '@/components/page-shell';
 import { useMangaLibrary } from '@/lib/library-store';
+import { LoadError } from '@/components/load-error';
 import { isAborted } from '@/lib/report-error';
 import { dayKey, groupUpcoming } from '@/lib/upcoming';
 
@@ -20,20 +21,35 @@ const cadence = (days: number) =>
   days === 1 ? 'Daily' : days === 7 ? 'Weekly' : `About every ${Math.round(days)} days`;
 
 export function UpcomingPageClient() {
-  const { manga: library, loading: libraryLoading } = useMangaLibrary();
+  const {
+    manga: library,
+    loading: libraryLoading,
+    error: libraryError,
+    refresh: refreshLibrary,
+  } = useMangaLibrary();
   const [estimates, setEstimates] = useState<ReleaseEstimate[] | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
+    setFailure(null);
     getReleaseEstimates(controller.signal)
       .then(setEstimates)
       .catch((error) => {
         // The page explains the failure itself; a toast would say it twice.
-        if (!isAborted(error)) setFailed(true);
+        if (!isAborted(error)) setFailure(error);
       });
     return () => controller.abort();
-  }, []);
+  }, [attempt]);
+
+  // Estimates are matched to library titles, so a library that didn't load leaves
+  // nothing to show either way — that must not read as "nothing to predict".
+  const loadError = failure ?? (library.length === 0 ? libraryError : null);
+  const retry = () => {
+    if (failure) setAttempt((n) => n + 1);
+    if (libraryError) return refreshLibrary();
+  };
 
   const days = useMemo(
     () => (estimates ? groupUpcoming(library, estimates) : []),
@@ -50,12 +66,12 @@ export function UpcomingPageClient() {
         description="Expected release days, estimated from each title's recent chapters."
       />
 
-      {failed ? (
+      {loadError ? (
         <div className="mt-8">
-          <EmptyState icon={CalendarDays}>
-            Release estimates couldn&apos;t be loaded. They need the server, so they aren&apos;t
+          <LoadError error={loadError} onRetry={retry}>
+            Release estimates didn&apos;t load. They need the library server, so they aren&apos;t
             available offline.
-          </EmptyState>
+          </LoadError>
         </div>
       ) : estimates === null || libraryLoading ? (
         <p role="status" className="mt-8 text-sm text-muted-foreground">

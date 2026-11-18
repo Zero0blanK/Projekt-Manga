@@ -84,6 +84,21 @@ const nextConfig: NextConfig = {
         outputFileTracingRoot: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..'),
       }
     : {}),
+  /**
+   * The offline service worker (public/sw.js) must never be served from a cache, or a fixed
+   * worker could take days to reach browsers that already have the old one.
+   */
+  async headers() {
+    return [
+      {
+        source: '/sw.js',
+        headers: [
+          { key: 'Content-Type', value: 'application/javascript; charset=utf-8' },
+          { key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' },
+        ],
+      },
+    ];
+  },
   transpilePackages: [
     '@projekt-manga/api-client',
     '@projekt-manga/schemas',

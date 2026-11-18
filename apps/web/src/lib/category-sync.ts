@@ -34,17 +34,33 @@ let loadedOwner: string | null | undefined;
 
 const reload = () => queryClient.invalidateQueries({ queryKey: queryKeys.categories });
 
+/** A write failed since the store was last put back to the server's list. */
+let writeFailed = false;
+
 function enqueue(write: () => Promise<unknown>) {
   pendingWrites += 1;
   queue = queue
     .then(write)
     .catch((error: unknown) => {
+      writeFailed = true;
       reportError(error, "Couldn't save that category change. Try again.");
     })
     .finally(() => {
       pendingWrites -= 1;
       // Whatever the outcome, the server has the last word once the queue is empty.
-      if (pendingWrites === 0) void reload();
+      if (pendingWrites !== 0) return;
+      void reload().then(() => {
+        if (!writeFailed) return;
+        writeFailed = false;
+        // The reload usually answers exactly what it answered before (the failed change
+        // never reached the server), and an unchanged answer doesn't reach the store again:
+        // put it back to that list here, so a category that wasn't saved doesn't stay.
+        const latest = queryClient.getQueryData<CategoryWithMembers[]>([
+          ...queryKeys.categories,
+          loadedOwner ?? null,
+        ]);
+        if (latest && pendingWrites === 0) show(latest);
+      });
     });
 }
 

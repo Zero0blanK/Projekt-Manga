@@ -346,8 +346,9 @@ try {
   webServer = startWeb(rendererRoot, webPort, port);
   await waitForWeb(webServer, `${webUrl}/settings`);
 
-  browser = await chromium.launch();
-  const context = await browser.newContext();
+  browser = await chromium.launch({ executablePath: process.env.SMOKE_CHROMIUM_PATH || undefined });
+  // See smoke.mjs: the offline service worker would bypass page.route mocks.
+  const context = await browser.newContext({ serviceWorkers: 'block' });
   const page = await context.newPage();
   const browserRestore = await submitRestoreFromPrivacy(page, 'browser', webUrl);
 

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ImageOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { coverAtWidth, coverWidthFor } from '@/lib/cover-url';
 import { useCoverBlur } from '@/components/discover/cover-privacy-provider';
 
 const retryDelays = [1_500, 4_000, 9_000, 20_000];
@@ -26,10 +27,7 @@ function recoveryGroup(src: string): string | null {
  * downloading it first, with nothing for the ring to show.
  */
 function sizedForBox(src: string, cssWidth: number): string {
-  if (!src.includes('/cache/thumbnail/')) return src;
-  const needed = cssWidth * (window.devicePixelRatio || 1);
-  const width = [200, 400, 800].find((candidate) => candidate >= needed) ?? 800;
-  return `${src}${src.includes('?') ? '&' : '?'}w=${width}`;
+  return coverAtWidth(src, coverWidthFor(cssWidth, window.devicePixelRatio));
 }
 
 /** How far a download has got, as a fraction. */

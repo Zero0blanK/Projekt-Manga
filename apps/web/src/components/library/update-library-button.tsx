@@ -76,12 +76,13 @@ export function useUpdateLibrary() {
     }
     refresh();
 
+    const titles = `${manga.length} title${manga.length === 1 ? '' : 's'}`;
     const summary =
       found > 0
-        ? `${found} new chapter${found === 1 ? '' : 's'} across ${manga.length} titles.`
+        ? `${found} new chapter${found === 1 ? '' : 's'} across ${titles}.`
         : failed.length > 0
           ? `No new chapters found in the titles that could be checked.`
-          : `No new chapters found across ${manga.length} titles.`;
+          : `No new chapters found across ${titles}.`;
     toast({
       title: failed.length > 0 ? 'Library check incomplete' : 'Library up to date',
       description: summary,

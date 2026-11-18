@@ -3,6 +3,7 @@
 import { ApiError } from '@projekt-manga/api-client';
 import { toast } from '@/hooks/use-toast';
 import { recordClientError } from '@/lib/client-diagnostics';
+import { describeLoadError } from '@/lib/load-error';
 
 /**
  * Tells the reader something failed, once, in words they can act on.
@@ -41,7 +42,8 @@ export function reportError(error: unknown, message: string): void {
 
   // The api-client's messages are already reader-facing (offline, timeout, the server's
   // own message), so they add real detail rather than a stack trace.
-  const detail = error instanceof ApiError ? error.message : null;
+  // An ended sign-in says how to sign in again; a bare server status says so in words.
+  const detail = describeLoadError(error);
   const description = detail ? `${message} ${detail}` : message;
 
   recordClientError('reported', description);

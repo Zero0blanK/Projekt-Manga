@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Offline — Projekt Manga</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f3ee;
+        --fg: #1c1915;
+        --muted: #6b645b;
+        --accent: #3b6fd8;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #12100e;
+          --fg: #ece7df;
+          --muted: #a49c91;
+          --accent: #7aa2f7;
+        }
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          15px/1.5 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 26rem;
+        padding: 2rem 1rem;
+        text-align: center;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin: 0 0 0.5rem;
+      }
+      p {
+        color: var(--muted);
+        margin: 0 0 1.5rem;
+      }
+      a {
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        border-radius: 0.5rem;
+        background: var(--accent);
+        color: #fff;
+        text-decoration: none;
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>You're offline</h1>
+      <p>
+        This page wasn't opened on this device before, so it isn't saved. Browsing sources needs a
+        connection; your library and the pages you've visited still open without one.
+      </p>
+      <a href="/">Open your library</a>
+    </main>
+  </body>
+</html>

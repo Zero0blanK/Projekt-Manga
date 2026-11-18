@@ -19,9 +19,28 @@ const requireFromWeb = createRequire(path.join(root, 'apps/web/package.json'));
 const { chromium } = requireFromExtensions('playwright');
 const electronExecutable = requireFromExtensions('electron');
 const nextCli = requireFromWeb.resolve('next/dist/bin/next');
-const mode = process.argv[2] ?? 'all';
+const mode = process.argv.slice(2).find((arg) => !arg.startsWith('--')) ?? 'all';
 if (!['browser', 'desktop', 'all'].includes(mode)) {
-  throw new Error('Usage: npm run smoke [-- browser|desktop|all]');
+  throw new Error('Usage: npm run smoke [-- browser|desktop|all] [--production]');
+}
+// --production builds the web app (`next build`) and serves it with `next start`, instead of
+// the dev server, so the smoke runs against what ships. The API URL is inlined at build time,
+// so the build has to happen here, after the fixture API has its port.
+const production = process.argv.includes('--production');
+
+async function buildWeb(env) {
+  const build = spawn(process.execPath, [nextCli, 'build'], {
+    cwd: path.join(root, 'apps/web'),
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  for (const stream of [build.stdout, build.stderr])
+    stream.on('data', (chunk) => {
+      output = (output + chunk.toString()).slice(-4000);
+    });
+  const code = await new Promise((resolve) => build.once('exit', resolve));
+  if (code !== 0) throw new Error(`next build exited with ${code}: ${output}`);
 }
 
 const source = {
@@ -665,14 +684,16 @@ try {
   const webPort = await freePort();
   const apiUrl = `http://127.0.0.1:${apiPort}/api`;
   const webUrl = `http://127.0.0.1:${webPort}`;
+  const webEnv = {
+    ...process.env,
+    NEXT_PUBLIC_API_URL: apiUrl,
+    PROJEKT_MANGA_API_PORT: String(apiPort),
+  };
+  if (production) await buildWeb(webEnv);
   web = spawn(
     process.execPath,
-    [nextCli, 'dev', '--port', String(webPort), '--hostname', '127.0.0.1'],
-    {
-      cwd: path.join(root, 'apps/web'),
-      env: { ...process.env, NEXT_PUBLIC_API_URL: apiUrl, PROJEKT_MANGA_API_PORT: String(apiPort) },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
+    [nextCli, production ? 'start' : 'dev', '--port', String(webPort), '--hostname', '127.0.0.1'],
+    { cwd: path.join(root, 'apps/web'), env: webEnv, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   for (const stream of [web.stdout, web.stderr])
     stream.on('data', (chunk) => {
@@ -681,8 +702,12 @@ try {
   await ready(`${webUrl}/discover`, web, () => webOutput);
 
   if (mode !== 'desktop') {
-    browser = await chromium.launch();
-    const browserContext = await browser.newContext();
+    browser = await chromium.launch({
+      executablePath: process.env.SMOKE_CHROMIUM_PATH || undefined,
+    });
+    // The offline service worker (apps/web/public/sw.js) would answer requests this smoke
+    // mocks with page.route, which Playwright doesn't apply to a worker's requests.
+    const browserContext = await browser.newContext({ serviceWorkers: 'block' });
     await browserContext.tracing.start({ screenshots: true, snapshots: true });
     const evidenceDirectory = path.join(root, 'build', 'v2-browser');
     await mkdir(evidenceDirectory, { recursive: true });

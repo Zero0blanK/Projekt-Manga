@@ -24,6 +24,7 @@ import {
 import { useDownloadRows } from '@/components/downloads/row-data';
 import { RecentlyUpdatedRail } from '@/components/library/recently-updated-rail';
 import { EmptyState } from '@/components/page-shell';
+import { LoadError } from '@/components/load-error';
 import { MangaGridSkeleton } from '@/components/skeletons';
 import { creditLinkedReading, mostRecentlyReadLibraryManga } from '@/lib/recent-reading';
 import { LibrarySelectionBar, parseDensity } from '@/components/library/library-tools';
@@ -71,7 +72,7 @@ export function LibraryPageClient() {
   const sortDir = useAppState((s) => s.sortDir);
   const view = useAppState((s) => s.view);
   const categoryMembers = useAppState((s) => s.categoryMembers);
-  const { manga: mangaLibrary, loading, refresh } = useMangaLibrary();
+  const { manga: mangaLibrary, loading, filling, error: libraryError, refresh } = useMangaLibrary();
   const { shelf, bookmarks } = useLibraryState();
 
   const shelfOf = (m: Manga) => resolveShelf(m, shelf);
@@ -175,17 +176,30 @@ export function LibraryPageClient() {
             <h1 className="text-display text-4xl leading-none text-foreground sm:text-5xl">
               My Library
             </h1>
-            <p className="mt-2 text-sm text-muted-foreground">
-              <span className="text-foreground">{mangaLibrary.length}</span>{' '}
-              {mangaLibrary.length === 1 ? 'title' : 'titles'} ·{' '}
-              <span className="text-foreground">{reading.length}</span> in progress ·{' '}
-              <Link
-                href="/bookmarks"
-                className="text-foreground underline decoration-border underline-offset-4 hover:text-primary"
-              >
-                {bookmarks.length} bookmarked
-              </Link>
-            </p>
+            {/* Counts of 0 while the library is still arriving (slow on a slow connection)
+                read as an empty library. */}
+            {loading && mangaLibrary.length === 0 ? (
+              <p role="status" className="mt-2 text-sm text-muted-foreground">
+                Loading your library…
+              </p>
+            ) : filling ? (
+              <p role="status" className="mt-2 text-sm text-muted-foreground">
+                <span className="text-foreground">{mangaLibrary.length}</span> titles so far ·
+                loading the rest…
+              </p>
+            ) : (
+              <p className="mt-2 text-sm text-muted-foreground">
+                <span className="text-foreground">{mangaLibrary.length}</span>{' '}
+                {mangaLibrary.length === 1 ? 'title' : 'titles'} ·{' '}
+                <span className="text-foreground">{reading.length}</span> in progress ·{' '}
+                <Link
+                  href="/bookmarks"
+                  className="text-foreground underline decoration-border underline-offset-4 hover:text-primary"
+                >
+                  {bookmarks.length} bookmarked
+                </Link>
+              </p>
+            )}
           </div>
           <div className="-mx-4 flex max-w-[calc(100%+2rem)] items-center gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:max-w-full sm:flex-wrap sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
             <SortMenu />
@@ -309,6 +323,10 @@ export function LibraryPageClient() {
 
           {loading && mangaLibrary.length === 0 ? (
             <MangaGridSkeleton />
+          ) : libraryError && mangaLibrary.length === 0 ? (
+            <LoadError error={libraryError} onRetry={refresh}>
+              Your library didn&apos;t load.
+            </LoadError>
           ) : !loading && mangaLibrary.length === 0 ? (
             <EmptyState>
               Your library is empty — add a title from{' '}

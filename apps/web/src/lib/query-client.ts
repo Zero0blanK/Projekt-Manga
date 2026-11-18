@@ -1,6 +1,7 @@
 'use client';
 
 import { QueryClient } from '@tanstack/react-query';
+import { ApiError } from '@projekt-manga/api-client';
 import { clearAllBrowseSnapshots } from './browse-state';
 
 /**
@@ -24,10 +25,24 @@ export const queryClient = new QueryClient({
       // is exactly the kind of traffic the sources rate-limit.
       staleTime: 60_000,
       refetchOnWindowFocus: false,
-      retry: 1,
+      retry: shouldRetry,
     },
   },
 });
+
+/**
+ * One more try for a failure that might not happen twice: the server unreachable or slow,
+ * a 5xx, a timeout, being rate-limited. Not for an answer that would be the same again (a
+ * 404, a 401, a bad request), where retrying only delays the error the screen needs to show,
+ * and never for a request the app cancelled itself.
+ */
+export function shouldRetry(failureCount: number, error: unknown): boolean {
+  if (failureCount >= 1) return false;
+  if (!(error instanceof ApiError)) return true;
+  if (error.kind === 'aborted') return false;
+  if (error.kind !== 'http') return true;
+  return error.status >= 500 || error.status === 408 || error.status === 429;
+}
 
 /** Query keys in one place so an action's invalidation and a hook's subscription can't
  * drift apart — a mismatch there fails silently as a view that just never updates. */

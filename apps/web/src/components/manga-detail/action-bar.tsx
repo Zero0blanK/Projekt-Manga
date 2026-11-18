@@ -12,9 +12,10 @@ import {
   setTitleInLibrary,
   useLibraryState,
 } from '@/lib/library-store';
-import { fromMangaDetails, type Manga } from '@/lib/manga-data';
+import { fromMangaDetails, resumePosition, type Manga } from '@/lib/manga-data';
 import {
   getMangaChapters,
+  pendingProgressWrites,
   getMangaDetailsById,
   usesLocalFirstDataSync,
   initiateDownload,
@@ -40,7 +41,24 @@ import { invalidateDownloads, useDownloads } from '@/lib/shared-queries';
 function ContinueReadingLink({ manga }: { manga: Manga }) {
   const [localPosition, setLocalPosition] = useState<Manga | null>(null);
   useEffect(() => {
-    if (!usesLocalFirstDataSync()) return;
+    if (!usesLocalFirstDataSync()) {
+      // In a browser, the page came with the server's position. Progress read here while
+      // offline and not yet sent moves it on: the chapter list has it applied
+      // (packages/api-client/src/progressOutbox.ts), so resume from that.
+      const waiting = pendingProgressWrites().some(
+        (write) => write.chapter?.mangaSlug === manga.slug && write.chapter.source === manga.source,
+      );
+      if (!waiting) return;
+      const controller = new AbortController();
+      getMangaChapters(manga.id, manga.slug, manga.source, controller.signal)
+        .then((rows) => {
+          if (!controller.signal.aborted) setLocalPosition({ ...manga, ...resumePosition(rows) });
+        })
+        .catch(() => {
+          // The page's own position stands.
+        });
+      return () => controller.abort();
+    }
     let active = true;
     getMangaDetailsById(manga.id)
       .then((details) => {
@@ -52,7 +70,7 @@ function ContinueReadingLink({ manga }: { manga: Manga }) {
     return () => {
       active = false;
     };
-  }, [manga.id]);
+  }, [manga]);
 
   // Keyed off the resume target, not `progress`: progress counts finished chapters, so a
   // reader who stopped part-way through their first chapter had nothing marked read and

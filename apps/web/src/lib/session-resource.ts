@@ -21,6 +21,8 @@ import { useQuery } from '@tanstack/react-query';
 import { queryClient, queryKeys } from './query-client';
 import { reportError } from './report-error';
 import { cancelLibraryUpdate } from './run-library-update';
+import { forgetSavedLibraries } from './offline-library';
+import { clearOfflineDataCaches } from './service-worker';
 
 const EMPTY_USER: PublicUser | null = null;
 
@@ -57,6 +59,9 @@ export function useCurrentUser() {
 
 function setSessionUser(user: PublicUser | null) {
   cancelLibraryUpdate();
+  // Another account now: the offline copies of the last one's library go with it.
+  void forgetSavedLibraries();
+  void clearOfflineDataCaches();
   queryClient.setQueryData(queryKeys.session, user);
   queryClient.setQueryData(queryKeys.mangaLibrary, []);
   queryClient.setQueryData(queryKeys.libraryState, []);

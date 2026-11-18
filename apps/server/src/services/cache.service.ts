@@ -4,6 +4,7 @@ import type { Readable } from 'node:stream';
 import cacheRepository from '../repositories/cache.repository.js';
 import mangaOverrideRepository from '../repositories/mangaOverride.repository.js';
 import storage from '../utils/storage.js';
+import { prewarmThumbnailSizes } from '../utils/thumbnailResize.js';
 import { createImageRequestHeaders } from '../utils/userAgent.js';
 import {
   assertPublicHttpUrl,
@@ -149,6 +150,9 @@ const syncThumbnailUnlocked = async (
         console.error('Failed to clean up replaced thumbnail', error);
       });
     }
+    // The grid's sizes made now rather than on first view, so even the first time a cover
+    // is shown it comes straight off disk. Never fails: a cover without them is served whole.
+    await prewarmThumbnailSizes(storage.resolveCachedThumbnail(hostedUrl));
 
     return { updated: true, hostedUrl: `/api/cache/thumbnail/${encodeURIComponent(manga_id)}` };
   } catch (error) {

@@ -8,7 +8,10 @@ const { getMangaDetailsById, getAllDownloads } = vi.hoisted(() => ({
   getAllDownloads: vi.fn(),
 }));
 
-vi.mock('@projekt-manga/api-client', () => ({
+// The real module underneath (ApiError, which the query client's retry rule checks), with
+// these replaced.
+vi.mock('@projekt-manga/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@projekt-manga/api-client')>()),
   getMangaDetailsById,
   getAllDownloads,
   usesLocalFirstDataSync: () => true,

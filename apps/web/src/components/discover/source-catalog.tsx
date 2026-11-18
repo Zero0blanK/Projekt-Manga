@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { CircleArrowUp, PackageCheck, PackageOpen, RefreshCw } from 'lucide-react';
 import { ApiError, buildInstalledExtensionIconUrl } from '@projekt-manga/api-client';
+import { describeLoadError } from '@/lib/load-error';
 import type { ExtensionListingEntry } from '@projekt-manga/schemas';
 import { extensionActions, useSourceCatalog, type CatalogEntry } from '@/lib/extensions-store';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -33,8 +34,11 @@ import { CachedSourceIcon } from './cached-source-icon';
 function errorMessage(error: unknown, fallback: string): string {
   // ApiError carries the server's own wording — "already installed from this repository",
   // "needs extension API version 2", "does not match the checksum in its listing" — all of
-  // which say more than any message this component could write.
-  return error instanceof ApiError ? error.message : fallback;
+  // which say more than any message this component could write. It follows what failed,
+  // so a bare server error still says which source and which action.
+  // An ended sign-in or a bare server status is put in words (lib/load-error.ts).
+  const detail = describeLoadError(error);
+  return detail ? `${fallback.replace(/\.$/, '')}: ${detail}` : fallback;
 }
 
 /**
@@ -161,8 +165,28 @@ export function SourceCatalog({
     }
   };
 
+  // Which action a row is busy with, so its label says that one. A finished install turns
+  // the row's button into "Remove" while the list refreshes, and a plain busy flag then made
+  // it read "Removing…".
+  const [rowActions, setRowActions] = useState<Record<string, 'install' | 'remove' | 'update'>>({});
+  const runRow = (
+    key: string,
+    kind: 'install' | 'remove' | 'update',
+    action: () => Promise<void>,
+  ) => {
+    if (activeKeys.current.has(key)) return Promise.resolve();
+    setRowActions((prev) => ({ ...prev, [key]: kind }));
+    return run(key, action).finally(() =>
+      setRowActions((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }),
+    );
+  };
+
   const handleInstall = (item: CatalogEntry) =>
-    run(`${item.repositoryId}:${item.entry.source_key}`, async () => {
+    runRow(`${item.repositoryId}:${item.entry.source_key}`, 'install', async () => {
       try {
         await extensionActions.install(item.repositoryId, item.entry.source_key, () =>
           confirm({
@@ -184,7 +208,7 @@ export function SourceCatalog({
     });
 
   const handleUninstall = (item: CatalogEntry) =>
-    run(`${item.repositoryId}:${item.entry.source_key}`, async () => {
+    runRow(`${item.repositoryId}:${item.entry.source_key}`, 'remove', async () => {
       if (!item.installedId) return;
       try {
         await extensionActions.uninstall(item.installedId);
@@ -197,7 +221,7 @@ export function SourceCatalog({
     });
 
   const handleUpdate = (item: CatalogEntry) =>
-    run(`${item.repositoryId}:${item.entry.source_key}`, async () => {
+    runRow(`${item.repositoryId}:${item.entry.source_key}`, 'update', async () => {
       if (!item.installedId) return;
       try {
         const changed = await extensionActions.checkForUpdate(item.installedId);
@@ -430,7 +454,7 @@ export function SourceCatalog({
                                         aria-label={`Remove ${repairSourceName(item.entry.name)}`}
                                         className="min-h-9 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive transition hover:bg-destructive/20 disabled:opacity-50"
                                       >
-                                        {busy ? 'Removing…' : 'Remove'}
+                                        {rowActions[key] === 'remove' ? 'Removing…' : 'Remove'}
                                       </button>
                                     ) : (
                                       <button
@@ -440,7 +464,7 @@ export function SourceCatalog({
                                         aria-label={`Install ${repairSourceName(item.entry.name)}`}
                                         className="min-h-9 cursor-pointer rounded-lg border border-border/60 px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
                                       >
-                                        {busy ? 'Installing…' : 'Install'}
+                                        {rowActions[key] === 'install' ? 'Installing…' : 'Install'}
                                       </button>
                                     )}
                                   </div>

@@ -9,6 +9,7 @@ import {
 } from '@projekt-manga/api-client';
 import { isSourceIncognito, useSourceIncognito } from '@/lib/incognito';
 import { invalidateSavedReadingProgress } from '@/lib/query-client';
+import { hasPendingProgress } from '@/lib/progress-outbox';
 import { queueReaderProgressBeacons } from '@/lib/reader-progress-beacon';
 import { reportError } from '@/lib/report-error';
 import { useReadingClock } from '@/lib/use-reading-clock';
@@ -118,7 +119,9 @@ export function useReaderProgress(
 
       // On tab close/hide a normal fetch is often killed mid-flight; sendBeacon is the
       // one transport the browser promises to finish.
-      if (useBeacon && !usesLocalFirstDataSync()) {
+      // Offline, a beacon is accepted and then dropped; the normal path keeps the write
+      // on this device instead (lib/progress-outbox.ts), and so does anything already waiting.
+      if (useBeacon && !usesLocalFirstDataSync() && navigator.onLine && !hasPendingProgress()) {
         const queued = queueReaderProgressBeacons(
           buildApiUrl(path),
           body,

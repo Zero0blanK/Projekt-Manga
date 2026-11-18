@@ -11,7 +11,13 @@ import {
   subscribeToRestore,
 } from '@/lib/restore-job';
 import { useCurrentUser } from '@/lib/session-resource';
-import { RestoreAccountRecovery } from '@/components/settings/account-panel';
+import dynamic from 'next/dynamic';
+
+// Only shown when a restore belongs to another account; it brings the sign-in forms with it.
+const RestoreAccountRecovery = dynamic(
+  () => import('@/components/settings/account-panel').then((m) => m.RestoreAccountRecovery),
+  { ssr: false },
+);
 
 /**
  * Where a library restore stands, in a corner of the app while it runs.

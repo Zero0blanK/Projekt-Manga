@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { WifiOff } from 'lucide-react';
 import { getHealth } from '@projekt-manga/api-client';
-import { queryClient } from '@/lib/query-client';
+import { queryClient, queryKeys } from '@/lib/query-client';
 
 const CHECK_INTERVAL_MS = 30_000;
 
@@ -35,6 +35,9 @@ export function ConnectionBanner() {
     },
     queryClient,
   );
+  // With the server unreachable, a library on screen came from this device: the saved copy
+  // (lib/offline-library.ts) or the offline worker's cache (public/sw.js).
+  const saved = (queryClient.getQueryData<unknown[]>(queryKeys.mangaLibrary)?.length ?? 0) > 0;
   if (online && !unreachable) return null;
   return (
     <div
@@ -43,7 +46,11 @@ export function ConnectionBanner() {
     >
       <WifiOff size={14} aria-hidden="true" className="shrink-0 text-muted-foreground" />
       {unreachable ? (
-        <span>Can&apos;t reach the library server. Retrying.</span>
+        <span>
+          {saved
+            ? "Can't reach the library server. Showing your library as saved on this device. Reading progress is kept here and sent once it's back."
+            : "Can't reach the library server. Retrying."}
+        </span>
       ) : (
         <span>
           You&apos;re offline. Sources need a connection, but{' '}

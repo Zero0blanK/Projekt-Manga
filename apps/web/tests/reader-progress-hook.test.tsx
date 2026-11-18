@@ -22,6 +22,7 @@ vi.mock('@/lib/incognito', () => ({
 vi.mock('@/lib/query-client', () => ({ invalidateSavedReadingProgress: vi.fn() }));
 vi.mock('@/lib/reader-progress-beacon', () => ({ queueReaderProgressBeacons: beacons }));
 vi.mock('@/lib/report-error', () => ({ reportError: vi.fn() }));
+vi.mock('@/lib/progress-outbox', () => ({ hasPendingProgress: () => false }));
 vi.mock('@/lib/use-reading-clock', () => ({ useReadingClock: () => takeElapsed }));
 
 import { useAutoMarkRead, useReaderProgress } from '@/components/reader/use-reader-progress';
@@ -83,6 +84,21 @@ describe('useReaderProgress', () => {
 
     expect(beacons).toHaveBeenCalledTimes(1);
     expect(markChapterByLastPage).not.toHaveBeenCalled();
+  });
+
+  it('skips the beacon offline, which would accept the save and then drop it', async () => {
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    renderHook(() => useReaderProgress(target, at(3)));
+
+    act(() => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    await settle();
+
+    expect(beacons).not.toHaveBeenCalled();
+    // The normal path, which keeps it on this device (lib/progress-outbox.ts).
+    expect(markChapterByLastPage).toHaveBeenCalledTimes(1);
+    onLine.mockRestore();
   });
 
   it('flushes the old chapter before moving to another', async () => {

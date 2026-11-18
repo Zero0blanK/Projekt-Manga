@@ -31,16 +31,36 @@ import { AutomaticDesktopSync } from '@/components/automatic-desktop-sync';
 import { RestoreJobMonitor } from '@/components/restore-job-monitor';
 import { useRestorePending } from '@/lib/restore-job';
 import { RestoreStatusCard } from '@/components/restore-status-card';
-import { UpdatePrompt } from '@/components/update-prompt';
 import { CommandPalette } from '@/components/command-palette';
+import { updateBridge } from '@/lib/desktop-update';
+import { registerServiceWorker } from '@/lib/service-worker';
+import dynamic from 'next/dynamic';
 import { SmoothScroll } from '@/components/smooth-scroll';
 import { useScrollBehavior } from '@/lib/scroll';
 import { DesktopIntegration } from '@/components/desktop-integration';
 import { ServerStartingScreen } from '@/components/server-starting-screen';
 
+// Desktop only, and with the changelog in it: downloaded only where updates can happen.
+const UpdatePrompt = dynamic(
+  () => import('@/components/update-prompt').then((m) => m.UpdatePrompt),
+  { ssr: false },
+);
+
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
+  const [hasUpdates, setHasUpdates] = useState(false);
+  useEffect(() => setHasUpdates(updateBridge() !== null), []);
+  // After the page has loaded, so it never competes with the first screen for the network.
+  useEffect(() => {
+    if (document.readyState === 'complete') {
+      void registerServiceWorker();
+      return;
+    }
+    const onLoad = () => void registerServiceWorker();
+    window.addEventListener('load', onLoad, { once: true });
+    return () => window.removeEventListener('load', onLoad);
+  }, []);
 
   // "Ready" is the document being done (subresources and webfonts) plus the library
   // having answered, since every first screen waits on both. The splash holds until
@@ -212,7 +232,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {/* Only once the splash has gone: it covers the prompt, and the click that skips it
           would otherwise land outside the prompt. Not during a restore: installing restarts
           the app's server, which would roll the restore back to run again. */}
-      {splashDone && !restorePending && <UpdatePrompt />}
+      {splashDone && !restorePending && hasUpdates && <UpdatePrompt />}
       <div className="pointer-events-none fixed bottom-4 right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
         <LibraryUpdateDial />
         {/* The reader stays clear, and the downloads page already shows the queue. */}
