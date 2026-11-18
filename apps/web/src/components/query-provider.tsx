@@ -24,8 +24,9 @@ import {
 } from '@/lib/offline-library';
 import { queryKeys } from '@/lib/query-client';
 import { keepLibraryCovers } from '@/lib/cover-cache';
+import { keepDownloadsOffline } from '@/lib/offline-downloads';
 import type { Manga } from '@/lib/manga-data';
-import type { PublicUser } from '@projekt-manga/api-client';
+import type { DownloadSummary, PublicUser } from '@projekt-manga/api-client';
 
 // At module scope, not in an effect: this has to run before the first request, and every
 // query in this app is issued from below this provider. An effect would fire after the
@@ -66,6 +67,10 @@ export function QueryProvider({ children }: { children: ReactNode }) {
       } else if (key === queryKeys.mangaLibrary[0]) {
         noteFreshLibrary();
         keepLibraryCovers((event.query.state.data as Manga[] | undefined) ?? []);
+      } else if (key === queryKeys.downloads[0]) {
+        // Downloaded chapters, readable here offline (lib/offline-downloads.ts).
+        void keepDownloadsOffline((event.query.state.data as DownloadSummary[] | undefined) ?? []);
+        return;
       } else if (key !== queryKeys.libraryState[0]) {
         return;
       }

@@ -25,10 +25,10 @@ const OFFLINE_PAGE = '/offline.html';
 
 const MAX_ENTRIES = {
   [STATIC_CACHE]: 600,
-  [PAGES_CACHE]: 60,
+  [PAGES_CACHE]: 300,
   [DATA_CACHE]: 400,
   [IMAGES_CACHE]: 3000,
-  [CHAPTERS_CACHE]: 3000,
+  [CHAPTERS_CACHE]: 20000,
 };
 
 /** The API's base URL ("https://host/api"), from the registration URL. */
@@ -81,6 +81,17 @@ self.addEventListener('message', (event) => {
   const data = event.data;
   if (data && data.type === 'cache-covers' && Array.isArray(data.urls)) {
     event.waitUntil(cacheCovers(data.urls.filter((url) => typeof url === 'string')));
+    return;
+  }
+  // Downloaded chapters and their titles' pages (src/lib/offline-downloads.ts). Answers
+  // on the port it was given once they are kept.
+  if (data && data.type === 'keep-urls' && Array.isArray(data.urls)) {
+    const cacheName = data.kind === 'pages' ? PAGES_CACHE : CHAPTERS_CACHE;
+    const done = keepUrls(
+      cacheName,
+      data.urls.filter((url) => typeof url === 'string'),
+    ).finally(() => event.ports[0]?.postMessage('done'));
+    event.waitUntil(done);
     return;
   }
   // The page lists the code it loaded before this worker took control (first visit).
@@ -206,6 +217,62 @@ async function cacheCovers(urls) {
   await Promise.all([worker(), worker(), worker(), worker()]);
 }
 
+/**
+ * The app's own files a page's HTML refers to: its <script> and stylesheet tags, and the
+ * chunks named in the route data Next inlines (`static/chunks/...`, without the prefix).
+ */
+async function keepPageCode(html) {
+  const found = new Set();
+  for (const match of html.matchAll(
+    /(?:\/_next\/)?static\/(?:chunks|media|css)\/[\w.~-]+\.(?:js|css|woff2?)/g,
+  )) {
+    const path = match[0].startsWith('/_next/') ? match[0] : `/_next/${match[0]}`;
+    found.add(new URL(path, self.location.origin).href);
+  }
+  if (found.size === 0) return;
+  const cache = await caches.open(STATIC_CACHE);
+  await Promise.all(
+    [...found].map(async (url) => {
+      try {
+        if (await cache.match(url)) return;
+        const response = await fetch(url);
+        if (response.ok) await put(cache, STATIC_CACHE, url, response);
+      } catch {
+        // Missing now (a newer build): the page will fetch what it needs when online.
+      }
+    }),
+  );
+}
+
+/** Keeps each URL not kept already, three at a time. A page is only kept as HTML. */
+async function keepUrls(cacheName, urls) {
+  const cache = await caches.open(cacheName);
+  const queue = urls.slice();
+  const run = async () => {
+    for (let url = queue.shift(); url; url = queue.shift()) {
+      try {
+        if (await cache.match(url, { ignoreVary: true })) continue;
+        const sameOrigin = new URL(url).origin === self.location.origin;
+        const response = await fetch(url, {
+          credentials: 'include',
+          mode: sameOrigin ? 'same-origin' : 'cors',
+        });
+        if (!response.ok) continue;
+        if (cacheName === PAGES_CACHE) {
+          if (!response.headers.get('content-type')?.includes('text/html')) continue;
+          // A page is no use offline without its code, which this device may never have
+          // loaded (a page never opened here): keep everything it refers to as well.
+          await keepPageCode(await response.clone().text());
+        }
+        await put(cache, cacheName, url, response);
+      } catch {
+        // Offline again, or refused: the rest still get their turn.
+      }
+    }
+  };
+  await Promise.all([run(), run(), run()]);
+}
+
 async function cacheFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
   const hit = await cache.match(request, { ignoreVary: true });
@@ -263,9 +330,16 @@ async function page(request) {
   }
 }
 
+/** Saves since each cache was last trimmed: listing a large cache on every save is slow. */
+const putsSinceTrim = new Map();
+const TRIM_EVERY = 50;
+
 async function put(cache, cacheName, request, response) {
   try {
     await cache.put(request, response);
+    const puts = (putsSinceTrim.get(cacheName) ?? 0) + 1;
+    putsSinceTrim.set(cacheName, puts % TRIM_EVERY);
+    if (puts < TRIM_EVERY) return;
     const keys = await cache.keys();
     const excess = keys.length - (MAX_ENTRIES[cacheName] ?? 500);
     // Oldest first: keys come back in insertion order.
