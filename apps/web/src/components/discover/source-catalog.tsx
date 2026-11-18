@@ -161,8 +161,28 @@ export function SourceCatalog({
     }
   };
 
+  // Which action a row is busy with, so its label says that one. A finished install turns
+  // the row's button into "Remove" while the list refreshes, and a plain busy flag then made
+  // it read "Removing…".
+  const [rowActions, setRowActions] = useState<Record<string, 'install' | 'remove' | 'update'>>({});
+  const runRow = (
+    key: string,
+    kind: 'install' | 'remove' | 'update',
+    action: () => Promise<void>,
+  ) => {
+    if (activeKeys.current.has(key)) return Promise.resolve();
+    setRowActions((prev) => ({ ...prev, [key]: kind }));
+    return run(key, action).finally(() =>
+      setRowActions((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      }),
+    );
+  };
+
   const handleInstall = (item: CatalogEntry) =>
-    run(`${item.repositoryId}:${item.entry.source_key}`, async () => {
+    runRow(`${item.repositoryId}:${item.entry.source_key}`, 'install', async () => {
       try {
         await extensionActions.install(item.repositoryId, item.entry.source_key, () =>
           confirm({
@@ -184,7 +204,7 @@ export function SourceCatalog({
     });
 
   const handleUninstall = (item: CatalogEntry) =>
-    run(`${item.repositoryId}:${item.entry.source_key}`, async () => {
+    runRow(`${item.repositoryId}:${item.entry.source_key}`, 'remove', async () => {
       if (!item.installedId) return;
       try {
         await extensionActions.uninstall(item.installedId);
@@ -197,7 +217,7 @@ export function SourceCatalog({
     });
 
   const handleUpdate = (item: CatalogEntry) =>
-    run(`${item.repositoryId}:${item.entry.source_key}`, async () => {
+    runRow(`${item.repositoryId}:${item.entry.source_key}`, 'update', async () => {
       if (!item.installedId) return;
       try {
         const changed = await extensionActions.checkForUpdate(item.installedId);
@@ -430,7 +450,7 @@ export function SourceCatalog({
                                         aria-label={`Remove ${repairSourceName(item.entry.name)}`}
                                         className="min-h-9 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive transition hover:bg-destructive/20 disabled:opacity-50"
                                       >
-                                        {busy ? 'Removing…' : 'Remove'}
+                                        {rowActions[key] === 'remove' ? 'Removing…' : 'Remove'}
                                       </button>
                                     ) : (
                                       <button
@@ -440,7 +460,7 @@ export function SourceCatalog({
                                         aria-label={`Install ${repairSourceName(item.entry.name)}`}
                                         className="min-h-9 cursor-pointer rounded-lg border border-border/60 px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
                                       >
-                                        {busy ? 'Installing…' : 'Install'}
+                                        {rowActions[key] === 'install' ? 'Installing…' : 'Install'}
                                       </button>
                                     )}
                                   </div>

@@ -267,8 +267,8 @@ export function UpdateLog() {
   if (!loading && log.length === 0) {
     return (
       <EmptyState>
-        No update checks yet — run &ldquo;Update Library&rdquo; from your library to check sources
-        for new chapters.
+        Nothing logged yet. New chapters and failed checks show up here after &ldquo;Update
+        Library&rdquo; runs; a check that finds nothing new isn&apos;t logged.
       </EmptyState>
     );
   }

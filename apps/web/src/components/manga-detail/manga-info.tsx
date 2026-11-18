@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Star } from 'lucide-react';
+import { SourceName } from './source-name';
 import { artistLine, authorLine, formatRelative, groupLine, type Manga } from '@/lib/manga-data';
 
 export function MangaStatusLabel({ status }: { status: Manga['status'] }) {
@@ -32,7 +33,7 @@ export function MangaSourceBadges({ manga }: { manga: Manga }) {
         className="flex items-center gap-1 rounded-full border border-border/60 bg-surface/60 px-2 py-0.5 font-medium text-foreground"
         style={{ background: manga.accent + '22' }}
       >
-        {manga.source}
+        <SourceName sourceId={manga.source} />
       </span>
     </div>
   );
