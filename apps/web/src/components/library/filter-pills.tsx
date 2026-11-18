@@ -29,6 +29,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { MAX_CATEGORY_NAME, categoryNameProblem } from '@/lib/category-names';
+import { toast } from '@/hooks/use-toast';
 
 export function FilterPills({
   filter,
@@ -55,9 +57,26 @@ export function FilterPills({
 
   const shelfOf = (m: Manga) => resolveShelf(m, shelf);
 
-  const submitCategory = () => {
+  const shelfLabels = filters.map((f) => f.label);
+  const nameProblem = categoryNameProblem(name, {
+    shelves: shelfLabels,
+    categories: customCategories,
+  });
+  const editProblem = editing
+    ? categoryNameProblem(editName, {
+        shelves: shelfLabels,
+        categories: customCategories,
+        current: editing,
+      })
+    : null;
+
+  /** `leaving`: the field lost focus, so a name that can't be used is dropped, and said so. */
+  const submitCategory = (leaving = false) => {
     const trimmed = name.trim();
-    if (trimmed) {
+    if (nameProblem) {
+      if (!leaving) return;
+      toast({ description: `Category not added. ${nameProblem}` });
+    } else if (trimmed) {
       actions.addCategory(trimmed);
       onChange(trimmed);
     }
@@ -72,7 +91,7 @@ export function FilterPills({
   };
 
   const submitEdit = () => {
-    if (!editing) return;
+    if (!editing || editProblem) return;
     const trimmed = editName.trim();
     actions.renameCategory(editing, trimmed);
     if (filter === editing && trimmed) onChange(trimmed);
@@ -176,10 +195,22 @@ export function FilterPills({
                 setAdding(false);
               }
             }}
-            onBlur={submitCategory}
+            onBlur={() => submitCategory(true)}
+            maxLength={MAX_CATEGORY_NAME}
+            aria-invalid={nameProblem ? true : undefined}
+            aria-describedby={nameProblem ? 'new-category-problem' : undefined}
             placeholder="Category name"
             className="w-28 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
           />
+          {nameProblem && (
+            <span
+              id="new-category-problem"
+              role="alert"
+              className="ml-2 text-[11px] text-destructive"
+            >
+              {nameProblem}
+            </span>
+          )}
         </div>
       ) : (
         <button
@@ -231,13 +262,21 @@ export function FilterPills({
             onKeyDown={(e) => {
               if (e.key === 'Enter') submitEdit();
             }}
+            maxLength={MAX_CATEGORY_NAME}
+            aria-invalid={editProblem ? true : undefined}
+            aria-describedby={editProblem ? 'rename-category-problem' : undefined}
             placeholder="Category name"
           />
+          {editProblem && (
+            <p id="rename-category-problem" role="alert" className="text-xs text-destructive">
+              {editProblem}
+            </p>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditing(null)}>
               Cancel
             </Button>
-            <Button onClick={submitEdit} disabled={!editName.trim()}>
+            <Button onClick={submitEdit} disabled={!editName.trim() || !!editProblem}>
               Save
             </Button>
           </DialogFooter>
