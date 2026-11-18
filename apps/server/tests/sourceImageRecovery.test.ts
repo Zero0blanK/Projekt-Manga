@@ -46,4 +46,29 @@ describe('image proxy recovery', () => {
     expect(response.headers['retry-after']).toBe('30');
     expect(response.body.message).toMatch(/rate-limiting/);
   });
+
+  it('serves an SVG icon as a PNG, never as the SVG itself', async () => {
+    const svg = Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><script>alert(1)</script><rect width="16" height="16"/></svg>',
+    );
+    vi.mocked(axios.get).mockResolvedValueOnce({
+      status: 200,
+      headers: { 'content-type': 'image/svg+xml' },
+      data: Readable.from([svg]),
+    });
+    const response = await request(app)
+      .get('/api/source/image-proxy')
+      .query({ url: 'https://icons.example/source.svg' })
+      .buffer(true)
+      .parse((res, done) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => done(null, Buffer.concat(chunks)));
+      });
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toBe('image/png');
+    const body = response.body as Buffer;
+    expect(body.subarray(0, 4).toString('hex')).toBe('89504e47');
+    expect(body.includes(Buffer.from('<script'))).toBe(false);
+  });
 });
