@@ -705,7 +705,9 @@ try {
     browser = await chromium.launch({
       executablePath: process.env.SMOKE_CHROMIUM_PATH || undefined,
     });
-    const browserContext = await browser.newContext();
+    // The offline service worker (apps/web/public/sw.js) would answer requests this smoke
+    // mocks with page.route, which Playwright doesn't apply to a worker's requests.
+    const browserContext = await browser.newContext({ serviceWorkers: 'block' });
     await browserContext.tracing.start({ screenshots: true, snapshots: true });
     const evidenceDirectory = path.join(root, 'build', 'v2-browser');
     await mkdir(evidenceDirectory, { recursive: true });

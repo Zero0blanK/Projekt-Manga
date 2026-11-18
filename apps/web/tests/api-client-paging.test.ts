@@ -30,4 +30,33 @@ describe('fetchAllPages', () => {
       'offline',
     );
   });
+
+  it('can start with a smaller page and report each one as it lands', async () => {
+    const fetchPage = vi.fn(async ({ limit, offset }: { limit: number; offset: number }) =>
+      offset >= 260 ? ['last'] : Array<string>(limit).fill(String(offset)),
+    );
+    const seen: number[] = [];
+
+    const all = await fetchAllPages(fetchPage, {
+      firstPageSize: 60,
+      onPage: (soFar) => seen.push(soFar.length),
+    });
+
+    expect(fetchPage.mock.calls.map(([page]) => page)).toEqual([
+      { limit: 60, offset: 0 },
+      { limit: 200, offset: 60 },
+      { limit: 200, offset: 260 },
+    ]);
+    // Not after the last page: the caller gets that as the result.
+    expect(seen).toEqual([60, 260]);
+    expect(all).toHaveLength(261);
+  });
+
+  it('stops after a short first page, even a small one', async () => {
+    const fetchPage = vi.fn(async () => ['a', 'b']);
+    const onPage = vi.fn();
+    expect(await fetchAllPages(fetchPage, { firstPageSize: 60, onPage })).toEqual(['a', 'b']);
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+    expect(onPage).not.toHaveBeenCalled();
+  });
 });

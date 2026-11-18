@@ -176,13 +176,25 @@ const LIST_PAGE_SIZE = 200;
 /** A whole list, a page at a time, so no single response has to carry all of it. */
 export async function fetchAllPages<T>(
   fetchPage: (page: { limit: number; offset: number }) => Promise<T[]>,
+  progress: PageProgress<T> = {},
 ): Promise<T[]> {
   const all: T[] = [];
+  let limit = Math.min(progress.firstPageSize ?? LIST_PAGE_SIZE, LIST_PAGE_SIZE);
   for (;;) {
-    const page = await fetchPage({ limit: LIST_PAGE_SIZE, offset: all.length });
+    const page = await fetchPage({ limit, offset: all.length });
     all.push(...page);
-    if (page.length < LIST_PAGE_SIZE) return all;
+    if (page.length < limit) return all;
+    progress.onPage?.(all.slice());
+    limit = LIST_PAGE_SIZE;
   }
+}
+
+/** For showing a long list as it arrives rather than once it has all arrived. */
+export interface PageProgress<T> {
+  /** A smaller first page, so the first screenful arrives sooner on a slow connection. */
+  firstPageSize?: number;
+  /** Everything so far, after each page that isn't the last. */
+  onPage?: (soFar: T[]) => void;
 }
 
 export interface RequestOptions {

@@ -15,6 +15,14 @@ import {
   persistStaticDataCache,
   restoreStaticDataCache,
 } from '@/lib/startup-static-data';
+import {
+  checkSavedLibraryOwner,
+  noteFreshLibrary,
+  restoreSavedLibrary,
+  saveLibrary,
+} from '@/lib/offline-library';
+import { queryKeys } from '@/lib/query-client';
+import type { PublicUser } from '@projekt-manga/api-client';
 
 // At module scope, not in an effect: this has to run before the first request, and every
 // query in this app is issued from below this provider. An effect would fire after the
@@ -36,6 +44,32 @@ export function QueryProvider({ children }: { children: ReactNode }) {
   // first Sources or Extensions screen from issuing a duplicate request.
   useLayoutEffect(() => {
     restoreStaticDataCache(queryClient);
+    void restoreSavedLibrary(queryClient);
+  }, []);
+
+  // Keeps the on-device copy of the library current (lib/offline-library.ts). Only answers
+  // from the server count: the copy itself, and a first load's partial pages, are written
+  // with setQueryData, which marks them manual.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated' || event.action.type !== 'success' || event.action.manual)
+        return;
+      const [key] = event.query.queryKey;
+      if (key === queryKeys.session[0]) {
+        checkSavedLibraryOwner(queryClient, (event.query.state.data as PublicUser | null) ?? null);
+      } else if (key === queryKeys.mangaLibrary[0]) {
+        noteFreshLibrary();
+      } else if (key !== queryKeys.libraryState[0]) {
+        return;
+      }
+      clearTimeout(timer);
+      timer = setTimeout(() => void saveLibrary(queryClient), 1000);
+    });
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {

@@ -72,7 +72,7 @@ export function LibraryPageClient() {
   const sortDir = useAppState((s) => s.sortDir);
   const view = useAppState((s) => s.view);
   const categoryMembers = useAppState((s) => s.categoryMembers);
-  const { manga: mangaLibrary, loading, error: libraryError, refresh } = useMangaLibrary();
+  const { manga: mangaLibrary, loading, filling, error: libraryError, refresh } = useMangaLibrary();
   const { shelf, bookmarks } = useLibraryState();
 
   const shelfOf = (m: Manga) => resolveShelf(m, shelf);
@@ -181,6 +181,11 @@ export function LibraryPageClient() {
             {loading && mangaLibrary.length === 0 ? (
               <p role="status" className="mt-2 text-sm text-muted-foreground">
                 Loading your library…
+              </p>
+            ) : filling ? (
+              <p role="status" className="mt-2 text-sm text-muted-foreground">
+                <span className="text-foreground">{mangaLibrary.length}</span> titles so far ·
+                loading the rest…
               </p>
             ) : (
               <p className="mt-2 text-sm text-muted-foreground">

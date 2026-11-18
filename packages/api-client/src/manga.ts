@@ -1,6 +1,6 @@
 import type { GetMangaOptions, AddMangaPayload } from '@projekt-manga/types';
 import { SESSION_COOKIE_NAME } from '@projekt-manga/types';
-import { ApiError, fetchAllPages, request } from './client.js';
+import { ApiError, fetchAllPages, request, type PageProgress } from './client.js';
 import { localInvoke, usesLocalFirstData } from './runtime.js';
 import type {
   Manga,
@@ -38,22 +38,32 @@ export type {
 // replicating yet — see apps/desktop/src/main/db/local-store.ts's listLibrary(), which
 // always orders by title. Revisit if that stops being true.
 /** HTTP-only view of this session's server library, including on desktop. */
-export const getServerManga = (options: GetMangaOptions = {}, signal?: AbortSignal) =>
-  fetchAllPages((page) =>
-    request<MangaListItem[]>('/manga', {
-      query: { sortBy: options.sortBy, sortOrder: options.sortOrder, ...page },
-      signal,
-    }),
+export const getServerManga = (
+  options: GetMangaOptions = {},
+  signal?: AbortSignal,
+  progress?: PageProgress<MangaListItem>,
+) =>
+  fetchAllPages(
+    (page) =>
+      request<MangaListItem[]>('/manga', {
+        query: { sortBy: options.sortBy, sortOrder: options.sortOrder, ...page },
+        signal,
+      }),
+    progress,
   );
 
-export const getManga = async (options: GetMangaOptions = {}, signal?: AbortSignal) => {
+export const getManga = async (
+  options: GetMangaOptions = {},
+  signal?: AbortSignal,
+  progress?: PageProgress<MangaListItem>,
+) => {
   if (await usesLocalFirstData()) {
     // localInvoke has no AbortSignal parameter — `signal` is silently dropped on this
     // branch, so cancellation is only honoured on the HTTP path below. A caller relying on
     // abort here keeps waiting on desktop.
     return localInvoke<MangaListItem[]>('manga', 'listLibrary');
   }
-  return getServerManga(options, signal);
+  return getServerManga(options, signal, progress);
 };
 
 export const getMangaById = (mangaId: string, signal?: AbortSignal) =>

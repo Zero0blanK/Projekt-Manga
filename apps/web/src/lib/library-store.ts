@@ -29,6 +29,8 @@ import type { ShelfStatus } from './app-store';
 import { queryClient, queryKeys } from './query-client';
 import { reportError } from './report-error';
 import { staticDataQueries } from './startup-static-data';
+import { isLibraryFilling, isShowingSavedLibrary, setLibraryFilling } from './offline-library';
+import { FIRST_LIBRARY_PAGE } from './library-preload';
 
 /* ------------------------------------------------------------- shared resources */
 
@@ -56,17 +58,54 @@ function useHydrated(): boolean {
   return hydrated;
 }
 
+/**
+ * The whole library, shown as it arrives the first time it loads.
+ *
+ * A large library is several requests, which on a slow connection used to mean a long
+ * wait on placeholders before every title appeared at once. With nothing shown yet, each
+ * page goes on screen as soon as it lands, the first one kept small. A refetch of a
+ * library already on screen keeps it as is until the full list is back, so it never
+ * shrinks to a page and grows again.
+ */
+export async function fetchLibraryProgressively(
+  client: ReturnType<typeof useQueryClient>,
+  signal: AbortSignal,
+): Promise<Manga[]> {
+  const showing = client.getQueryData<Manga[]>(queryKeys.mangaLibrary);
+  const progressive = showing === undefined || showing.length === 0;
+  setLibraryFilling(progressive);
+  try {
+    const items = await getManga({}, signal, {
+      // Always: the page's preload (lib/library-preload.ts) is for exactly this request.
+      firstPageSize: FIRST_LIBRARY_PAGE,
+      onPage: progressive
+        ? (soFar) => {
+            // Cancelled (an account switch, say): the page belongs to the old request. And a
+            // saved copy already on screen is fuller than a first page: it stays until the end.
+            if (signal.aborted || isShowingSavedLibrary()) return;
+            client.setQueryData(queryKeys.mangaLibrary, soFar.map(fromMangaListItem));
+          }
+        : undefined,
+    });
+    return items.map(fromMangaListItem);
+  } finally {
+    if (progressive) setLibraryFilling(false);
+  }
+}
+
 export function useMangaLibrary() {
   const hydrated = useHydrated();
   const client = useQueryClient();
-  const { data, isPending, error } = useQuery({
+  const { data, isPending, isFetching, error } = useQuery({
     queryKey: queryKeys.mangaLibrary,
-    queryFn: async ({ signal }) => (await getManga({}, signal)).map(fromMangaListItem),
+    queryFn: ({ signal }) => fetchLibraryProgressively(client, signal),
   });
 
   return {
     manga: hydrated ? (data ?? EMPTY_MANGA) : EMPTY_MANGA,
     loading: !hydrated || isPending,
+    /** Some titles are showing and more are still arriving (a first load). */
+    filling: hydrated && !isPending && isFetching && isLibraryFilling() && !isShowingSavedLibrary(),
     error,
     refresh: () => client.invalidateQueries({ queryKey: queryKeys.mangaLibrary }),
   };

@@ -37,9 +37,9 @@ export function FilterPills({
   filter: string;
   onChange: (value: string) => void;
 }) {
-  const { manga: mangaLibrary, loading } = useMangaLibrary();
-  // No counts until the library has arrived: 0 would read as an empty shelf.
-  const counting = loading && mangaLibrary.length === 0;
+  const { manga: mangaLibrary, loading, filling } = useMangaLibrary();
+  // No counts until the library has all arrived: 0, or a partial count, would mislead.
+  const counting = (loading && mangaLibrary.length === 0) || filling;
   const { shelf } = useLibraryState();
   const customCategories = useAppState((s) => s.customCategories);
   const categoryMembers = useAppState((s) => s.categoryMembers);
