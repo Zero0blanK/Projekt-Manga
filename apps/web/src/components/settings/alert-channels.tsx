@@ -11,6 +11,9 @@ import {
 } from '@projekt-manga/api-client';
 import { ActionButton, LoadingBlock, ToggleSwitch } from '@/components/settings/field-controls';
 import { formatRelative } from '@/lib/manga-data';
+import { describeLoadError } from '@/lib/load-error';
+import { LoadError } from '@/components/load-error';
+import { ApiError } from '@projekt-manga/api-client';
 
 type Kind = NotificationChannel['kind'];
 
@@ -40,8 +43,11 @@ const KINDS: Array<{ kind: Kind; label: string; help: string }> = [
 const INPUT =
   'w-full rounded-lg border border-border/60 bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary/60';
 
-const errorText = (error: unknown, fallback: string) =>
-  error instanceof Error && error.message ? error.message : fallback;
+/** What failed, then why when the API says (an ended sign-in and bare statuses in words). */
+const errorText = (error: unknown, failed: string) => {
+  const detail = describeLoadError(error);
+  return detail ? `${failed} ${detail}` : failed;
+};
 
 /**
  * Settings › Notifications › Outside the app: where new-chapter alerts go when a scheduled
@@ -51,6 +57,8 @@ const errorText = (error: unknown, fallback: string) =>
 export function AlertChannels() {
   const [channels, setChannels] = useState<NotificationChannel[] | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const [loadFailure, setLoadFailure] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
   const [adding, setAdding] = useState(false);
   const [kind, setKind] = useState<Kind>('ntfy');
   const [name, setName] = useState('');
@@ -62,15 +70,19 @@ export function AlertChannels() {
 
   useEffect(() => {
     const controller = new AbortController();
+    setLoadFailure(null);
     getNotificationChannels(controller.signal)
       .then((found) => setChannels(Array.isArray(found) ? found : []))
       // An aborted request (this effect cleaned up, as Strict Mode does on mount) says
-      // nothing about the server; only a real failure means alerts are unavailable.
-      .catch(() => {
-        if (!controller.signal.aborted) setUnavailable(true);
+      // nothing about the server. Only a server without the endpoint (404) means alerts
+      // aren't available; anything else (down, offline, an error) can be retried.
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof ApiError && error.status === 404) setUnavailable(true);
+        else setLoadFailure(error);
       });
     return () => controller.abort();
-  }, []);
+  }, [attempt]);
 
   if (unavailable)
     return (
@@ -78,25 +90,31 @@ export function AlertChannels() {
         Alerts outside the app need a server that supports them.
       </p>
     );
+  if (loadFailure)
+    return (
+      <LoadError error={loadFailure} onRetry={() => setAttempt((n) => n + 1)}>
+        Alert channels didn&apos;t load.
+      </LoadError>
+    );
   if (!channels) return <LoadingBlock label="Loading alert channels" />;
 
   const replace = (next: NotificationChannel) =>
     setChannels((current) => current?.map((c) => (c.id === next.id ? next : c)) ?? null);
 
-  const act = async (id: string, work: () => Promise<void>) => {
+  const act = async (id: string, failed: string, work: () => Promise<void>) => {
     setBusy(id);
     setMessage('');
     try {
       await work();
     } catch (error) {
-      setMessage(errorText(error, "Couldn't save that change."));
+      setMessage(errorText(error, failed));
     } finally {
       setBusy(null);
     }
   };
 
   const add = () =>
-    act('add', async () => {
+    act('add', "Couldn't add the channel.", async () => {
       const label = name.trim() || KINDS.find((k) => k.kind === kind)!.label;
       const created = await addNotificationChannel(
         kind === 'telegram'
@@ -139,17 +157,20 @@ export function AlertChannels() {
                 disabled={busy === channel.id}
                 label={`Send alerts to ${channel.name}`}
                 onToggle={() =>
-                  void act(channel.id, async () =>
-                    replace(
-                      await updateNotificationChannel(channel.id, { enabled: !channel.enabled }),
-                    ),
+                  void act(
+                    channel.id,
+                    `Couldn't ${channel.enabled ? 'pause' : 'resume'} “${channel.name}”.`,
+                    async () =>
+                      replace(
+                        await updateNotificationChannel(channel.id, { enabled: !channel.enabled }),
+                      ),
                   )
                 }
               />
               <ActionButton
                 disabled={busy === channel.id}
                 onClick={() =>
-                  void act(channel.id, async () =>
+                  void act(channel.id, `Couldn't send a test to “${channel.name}”.`, async () =>
                     replace(await testNotificationChannel(channel.id)),
                   )
                 }
@@ -160,7 +181,7 @@ export function AlertChannels() {
                 variant="destructive"
                 disabled={busy === channel.id}
                 onClick={() =>
-                  void act(channel.id, async () => {
+                  void act(channel.id, `Couldn't remove “${channel.name}”.`, async () => {
                     await removeNotificationChannel(channel.id);
                     setChannels((current) => current?.filter((c) => c.id !== channel.id) ?? null);
                   })

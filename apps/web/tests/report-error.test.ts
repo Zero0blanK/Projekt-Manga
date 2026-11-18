@@ -86,4 +86,27 @@ describe('isAborted', () => {
     expect(isAborted(new Error('boom'))).toBe(false);
     expect(isAborted(null)).toBe(false);
   });
+
+  it('says how to sign in again when the sign-in has ended', () => {
+    reportError(new FakeApiError('Not signed in', 401, 'http'), "Couldn't save that.");
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description:
+          "Couldn't save that. Your sign-in has ended. Sign in again from Settings › Profile.",
+      }),
+    );
+  });
+
+  it('puts a bare server status into words', () => {
+    reportError(
+      new FakeApiError('Request failed with status 503', 503, 'http'),
+      "Couldn't save that.",
+    );
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description:
+          "Couldn't save that. The library server ran into a problem. Try again in a moment.",
+      }),
+    );
+  });
 });

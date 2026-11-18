@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { reportError } from '@/lib/report-error';
 import Link, { useLinkStatus } from 'next/link';
 import { toast } from '@/hooks/use-toast';
 import type { Mangas } from '@projekt-manga/types';
@@ -87,9 +88,8 @@ export function SourceResultCard({ sourceId, item }: { sourceId: string; item: M
         // toast belongs to whichever action the reader picks there, not to this call.
         if (id !== null) toast({ description: `Added "${item.title}" to your library` });
       })
-      .catch(() =>
-        toast({ description: `Couldn't add "${item.title}" — it may already be in your library.` }),
-      )
+      // The real reason (offline, the server's own "already in your library"), not a guess.
+      .catch((error: unknown) => reportError(error, `Couldn't add "${item.title}".`))
       .finally(() => setAdding(false));
   };
 

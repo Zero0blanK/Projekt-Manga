@@ -17,8 +17,12 @@ const api = vi.hoisted(() => ({
   removeNotificationChannel: vi.fn(),
   testNotificationChannel: vi.fn(),
 }));
-vi.mock('@projekt-manga/api-client', () => api);
+vi.mock('@projekt-manga/api-client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@projekt-manga/api-client')>()),
+  ...api,
+}));
 
+import { ApiError } from '@projekt-manga/api-client';
 import { AlertChannels } from '@/components/settings/alert-channels';
 
 describe('alert channels setting', () => {
@@ -60,12 +64,33 @@ describe('alert channels setting', () => {
 
   it("shows the server's reason when a channel is refused", async () => {
     api.getNotificationChannels.mockResolvedValue([]);
-    api.addNotificationChannel.mockRejectedValue(new Error('Must be a Discord webhook URL'));
+    api.addNotificationChannel.mockRejectedValue(
+      new ApiError('Must be a Discord webhook URL', 400, 'http'),
+    );
     render(<AlertChannels />);
     fireEvent.click(await screen.findByRole('button', { name: 'Add a channel' }));
     fireEvent.click(screen.getByRole('radio', { name: 'Discord' }));
     fireEvent.change(screen.getByLabelText('URL'), { target: { value: 'https://example.com/x' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add channel' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Must be a Discord webhook URL');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't add the channel. Must be a Discord webhook URL",
+    );
+  });
+
+  it('can retry when the channels fail to load, rather than calling alerts unsupported', async () => {
+    api.getNotificationChannels
+      .mockRejectedValueOnce(new ApiError('Unable to reach the server.', 0, 'network'))
+      .mockResolvedValue([channel]);
+    render(<AlertChannels />);
+    expect(await screen.findByText("Alert channels didn't load.")).toBeInTheDocument();
+    expect(screen.queryByText(/need a server that supports them/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('My server')).toBeInTheDocument();
+  });
+
+  it('says alerts are unsupported only when the server has no such feature', async () => {
+    api.getNotificationChannels.mockRejectedValueOnce(new ApiError('Not found', 404, 'http'));
+    render(<AlertChannels />);
+    expect(await screen.findByText(/need a server that supports them/)).toBeInTheDocument();
   });
 });

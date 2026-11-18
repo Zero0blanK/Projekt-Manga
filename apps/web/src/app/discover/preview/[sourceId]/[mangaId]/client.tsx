@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { reportError } from '@/lib/report-error';
 import type { MangaDetails } from '@projekt-manga/types';
 import {
   initiateDownload,
@@ -193,11 +194,8 @@ function SourcePreviewContent({
         // titles). The page itself already reflects the change.
         void refresh();
       })
-      .catch(() =>
-        toast({
-          description: `Couldn't add "${details.title}" — it may already be in your library.`,
-        }),
-      )
+      // The real reason (offline, the server's own "already in your library"), not a guess.
+      .catch((error: unknown) => reportError(error, `Couldn't add "${details.title}".`))
       .finally(() => setAdding(false));
   };
 

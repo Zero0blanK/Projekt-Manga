@@ -168,7 +168,7 @@ function ChapterListItem({
             data-chapter-index={index}
             // The visible title (and group) belong in the name too: "Chapter 3" alone hid
             // which release a screen-reader user was about to open.
-            aria-label={`Chapter ${c.n}${c.title && c.title !== `Chapter ${c.n}` ? `: ${c.title}` : ''}${c.group ? `, ${c.group}` : ''}${isNew ? ', new' : ''}${progress ? `, ${progress}` : ''}${selectionMode ? (selected ? ', selected' : ', select') : ', hold or press Space to select'}`}
+            aria-label={`Chapter ${c.n}${c.title && c.title !== `Chapter ${c.n}` ? `: ${c.title}` : ''}${c.group ? `, ${c.group}` : ''}${isNew ? ', new' : ''}${c.read ? ', read' : ''}${progress ? `, ${progress}` : ''}${selectionMode ? (selected ? ', selected' : ', select') : ', hold or press Space to select'}`}
             onKeyDown={(event) => {
               hold.onKeyDown(event);
               onNavigate(event, index);
@@ -661,7 +661,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
         }
         toast({
           description: failed.length
-            ? `${failed.length} chapters could not be processed. They remain selected for retry.`
+            ? `${failed.length} ${failed.length === 1 ? 'chapter' : 'chapters'} could not be processed. ${failed.length === 1 ? 'It remains' : 'They remain'} selected for retry.`
             : action === 'download'
               ? 'Selected chapters queued for download.'
               : 'Selected chapters updated.',

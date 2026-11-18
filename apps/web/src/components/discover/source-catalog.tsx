@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { CircleArrowUp, PackageCheck, PackageOpen, RefreshCw } from 'lucide-react';
 import { ApiError, buildInstalledExtensionIconUrl } from '@projekt-manga/api-client';
+import { describeLoadError } from '@/lib/load-error';
 import type { ExtensionListingEntry } from '@projekt-manga/schemas';
 import { extensionActions, useSourceCatalog, type CatalogEntry } from '@/lib/extensions-store';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -33,8 +34,11 @@ import { CachedSourceIcon } from './cached-source-icon';
 function errorMessage(error: unknown, fallback: string): string {
   // ApiError carries the server's own wording — "already installed from this repository",
   // "needs extension API version 2", "does not match the checksum in its listing" — all of
-  // which say more than any message this component could write.
-  return error instanceof ApiError ? error.message : fallback;
+  // which say more than any message this component could write. It follows what failed,
+  // so a bare server error still says which source and which action.
+  // An ended sign-in or a bare server status is put in words (lib/load-error.ts).
+  const detail = describeLoadError(error);
+  return detail ? `${fallback.replace(/\.$/, '')}: ${detail}` : fallback;
 }
 
 /**

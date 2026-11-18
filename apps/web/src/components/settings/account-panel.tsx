@@ -99,7 +99,7 @@ function RegisterForm({ onSuccess }: { onSuccess: () => void }) {
           )}
         />
         {form.formState.errors.root && (
-          <p className="text-[0.8rem] font-medium text-destructive">
+          <p role="alert" className="text-[0.8rem] font-medium text-destructive">
             {form.formState.errors.root.message}
           </p>
         )}
@@ -162,7 +162,7 @@ function LoginForm({ onSuccess }: { onSuccess: () => void }) {
           )}
         />
         {form.formState.errors.root && (
-          <p className="text-[0.8rem] font-medium text-destructive">
+          <p role="alert" className="text-[0.8rem] font-medium text-destructive">
             {form.formState.errors.root.message}
           </p>
         )}
