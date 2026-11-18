@@ -55,7 +55,7 @@ export const markChapterAsRead = async (
   // Kept on this device if the server can't be reached (progressOutbox.ts).
   return sendOrKeep<UpdateResult>(
     {
-      key: `chapter:${mangaSlug}:${sourceChapterKey}`,
+      key: `read:${mangaSlug}:${sourceChapterKey}`,
       path: `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/mark-read`,
       body: chapterMeta,
       chapter: { source: chapterMeta.source, mangaSlug, sourceChapterKey, isRead: true },
@@ -78,7 +78,7 @@ export const markChapterAsUnread = async (
   if (!(await awaitProgressWrite(`chapter:${mangaSlug}:${sourceChapterKey}`))) return { count: 0 };
   return sendOrKeep<UpdateResult>(
     {
-      key: `chapter:${mangaSlug}:${sourceChapterKey}`,
+      key: `read:${mangaSlug}:${sourceChapterKey}`,
       path: `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/mark-unread`,
       body: chapterMeta,
       chapter: {
@@ -108,7 +108,7 @@ export const markChapterByLastPage = async (
   if (!(await awaitProgressWrite(`chapter:${mangaSlug}:${sourceChapterKey}`))) return { count: 0 };
   return sendOrKeep<UpdateResult>(
     {
-      key: `chapter:${mangaSlug}:${sourceChapterKey}`,
+      key: `page:${mangaSlug}:${sourceChapterKey}`,
       path: `/chapter/${encode(mangaSlug)}/${encode(sourceChapterKey)}/${lastPageRead}/mark-by-page`,
       body: chapterMeta,
       chapter: { source: chapterMeta.source, mangaSlug, sourceChapterKey, lastPageRead },

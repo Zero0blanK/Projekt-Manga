@@ -10,8 +10,9 @@ import type { MangaChapterRecord } from './manga.js';
  * it can, and chapter lists read meanwhile show it, so the reader and the title page agree
  * with what was read offline.
  *
- * Only the newest write per chapter is kept (it says where the reader is now), except that
- * reading time adds up, since the server adds each write's time to its total.
+ * Only the newest write of each kind per chapter is kept: its page, and separately whether
+ * it is read, since reaching the last page marks it read and the next page save must not
+ * replace that. Reading time adds up, since the server adds each write's time to its total.
  *
  * Inert until the app installs a store (apps/web/src/lib/progress-outbox.ts), so a server
  * render or another consumer of this package never queues anything.

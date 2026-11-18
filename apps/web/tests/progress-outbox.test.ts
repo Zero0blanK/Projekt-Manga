@@ -59,7 +59,7 @@ describe('reading progress with no connection', () => {
     fetchMock.mockImplementation(offline);
     await expect(markChapterByLastPage('one', 'c1', 5, meta)).resolves.toEqual({ count: 1 });
     expect(pendingProgressWrites()).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ owner: 'u1', key: 'chapter:one:c1' });
+    expect(rows[0]).toMatchObject({ owner: 'u1', key: 'page:one:c1' });
   });
 
   it('keeps only where the reader is now, for each chapter', async () => {
@@ -71,6 +71,22 @@ describe('reading progress with no connection', () => {
       '/chapter/one/c1/9/mark-by-page',
       '/chapter/one/c2/mark-read',
     ]);
+  });
+
+  it('keeps a chapter marked read when its page is saved after it', async () => {
+    // Reaching the last page marks the chapter read, then saves the page: both must stay.
+    fetchMock.mockImplementation(offline);
+    await markChapterAsRead('one', 'c1', meta);
+    await markChapterByLastPage('one', 'c1', 10, meta);
+    expect(rows.map((r) => r.path)).toEqual([
+      '/chapter/one/c1/mark-read',
+      '/chapter/one/c1/10/mark-by-page',
+    ]);
+    fetchMock.mockImplementation(async () =>
+      ok([{ source_chapter_key: 'c1', last_page_read: 0, is_read: false }]),
+    );
+    const [c1] = await getChapter('one', undefined, 'src');
+    expect([c1.is_read, c1.last_page_read]).toEqual([true, 10]);
   });
 
   it('adds up reading time across history writes for a chapter', async () => {

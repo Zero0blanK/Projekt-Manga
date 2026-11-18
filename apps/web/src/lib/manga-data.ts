@@ -4,6 +4,7 @@ import {
   type MangaListItem,
   type MangaOverride,
   type MangaWithDetails,
+  type MangaChapterRecord,
   type SourceSummary,
 } from '@projekt-manga/api-client';
 import type { MangaDetails as SourceMangaDetails } from '@projekt-manga/types';
@@ -212,7 +213,52 @@ export function fromMangaDetails(item: MangaWithDetails): Manga {
   const latest = sorted[0];
   const readChapters = chapters.filter((c) => c.is_read);
   const lastRead = sortByChapterNumber(readChapters)[0];
+  const { currentChapter, currentChapterTitle, currentPage } = resumePosition(chapters);
 
+  return {
+    id: item.id,
+    slug: item.slug,
+    title: item.title,
+    authors: credit(item.author),
+    artists: credit(item.artist),
+    groups: null,
+    source: item.source,
+    chapters: chapterCount,
+    latestChapter: latest ? `Chapter ${latest.chapter_number}` : 'No chapters yet',
+    latestChapterNum: latest?.chapter_number ?? 0,
+    updatedAt: latest?.release_date ?? item.updated_at,
+    status: STATUS_MAP[item.status] ?? 'Unknown',
+    progress: lastRead && chapterCount > 0 ? readChapters.length / chapterCount : undefined,
+    currentChapter,
+    currentChapterTitle,
+    currentPage,
+    tags: splitGenres(item.genres),
+    color,
+    accent,
+    synopsis: item.description,
+    rating: item.rating,
+    thumbnailUrl: proxiedThumbnail(
+      item.thumbnail_url,
+      item.source,
+      item.id,
+      item.cache?.sha256_url,
+      item.override,
+    ),
+    inLibrary: item.in_library ?? true,
+    editable: {
+      title: item.title,
+      author: item.author,
+      description: item.description,
+      status: item.status,
+      override: item.override ?? null,
+    },
+  };
+}
+
+/** Where to pick a title up again, from its chapter list. */
+export function resumePosition(
+  chapters: MangaChapterRecord[],
+): Pick<Manga, 'currentChapter' | 'currentChapterTitle' | 'currentPage'> {
   // Where to resume. "Last touched" deliberately includes chapters that are only part-way
   // through (last_page_read > 0 but not yet marked read), so stopping
   // mid-chapter still leaves something to continue from.
@@ -239,42 +285,9 @@ export function fromMangaDetails(item: MangaWithDetails): Manga {
   const continueTitle = finished ? nextAfterTouched?.name : lastTouched?.name;
 
   return {
-    id: item.id,
-    slug: item.slug,
-    title: item.title,
-    authors: credit(item.author),
-    artists: credit(item.artist),
-    groups: null,
-    source: item.source,
-    chapters: chapterCount,
-    latestChapter: latest ? `Chapter ${latest.chapter_number}` : 'No chapters yet',
-    latestChapterNum: latest?.chapter_number ?? 0,
-    updatedAt: latest?.release_date ?? item.updated_at,
-    status: STATUS_MAP[item.status] ?? 'Unknown',
-    progress: lastRead && chapterCount > 0 ? readChapters.length / chapterCount : undefined,
     currentChapter: continueChapter,
     currentChapterTitle: continueTitle ?? undefined,
     currentPage: continuePage,
-    tags: splitGenres(item.genres),
-    color,
-    accent,
-    synopsis: item.description,
-    rating: item.rating,
-    thumbnailUrl: proxiedThumbnail(
-      item.thumbnail_url,
-      item.source,
-      item.id,
-      item.cache?.sha256_url,
-      item.override,
-    ),
-    inLibrary: item.in_library ?? true,
-    editable: {
-      title: item.title,
-      author: item.author,
-      description: item.description,
-      status: item.status,
-      override: item.override ?? null,
-    },
   };
 }
 
