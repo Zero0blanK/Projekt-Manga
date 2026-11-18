@@ -5,6 +5,10 @@ import { describeLoadError } from '@/lib/load-error';
 import { shouldRetry } from '@/lib/query-client';
 import { LoadError } from '@/components/load-error';
 import { RouteError } from '@/components/route-error';
+import { classifyRouteFailure } from '@/lib/route-failure';
+
+/** A server-side error as production delivers it: no message, only a digest. */
+const serverError = () => Object.assign(new Error(''), { digest: '123' });
 
 vi.mock('@/lib/client-diagnostics', () => ({ recordClientError: vi.fn() }));
 vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -84,7 +88,7 @@ describe('a page that failed to render', () => {
     const retry = vi.fn();
     render(
       <RouteError
-        error={new Error('x')}
+        error={serverError()}
         retry={retry}
         title="This title didn't load"
         hint="The library server didn't answer."
@@ -103,5 +107,44 @@ describe('a page that failed to render', () => {
     render(<RouteError error={new Error('x')} retry={vi.fn()} title="Nope" hint="Server down." />);
     expect(screen.getByRole('alert')).toHaveTextContent("You're offline");
     expect(screen.getByRole('link', { name: 'Downloads' })).toHaveAttribute('href', '/downloads');
+  });
+
+  it('says a crash is a crash, not that the server failed', () => {
+    render(
+      <RouteError
+        error={new TypeError('x.filter is not a function')}
+        retry={vi.fn()}
+        title="This title didn't load"
+        hint="The source didn't answer in time."
+      />,
+    );
+    expect(screen.queryByText("The source didn't answer in time.")).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Something went wrong while showing this page',
+    );
+  });
+
+  it('reloads when part of the app failed to download', () => {
+    const chunkError = Object.assign(new Error('Loading chunk 123 failed.'), {
+      name: 'ChunkLoadError',
+    });
+    render(<RouteError error={chunkError} retry={vi.fn()} title="Nope" hint="Server down." />);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      "Part of the app didn't finish downloading",
+    );
+  });
+});
+
+describe('classifyRouteFailure', () => {
+  it('tells loading, downloading and crashing apart', () => {
+    expect(classifyRouteFailure(serverError())).toBe('load');
+    expect(classifyRouteFailure(new ApiError('down', 0, 'network'))).toBe('load');
+    expect(
+      classifyRouteFailure(new TypeError('Failed to fetch dynamically imported module: /x.js')),
+    ).toBe('download');
+    expect(classifyRouteFailure(Object.assign(new Error('x'), { name: 'ChunkLoadError' }))).toBe(
+      'download',
+    );
+    expect(classifyRouteFailure(new TypeError('x is undefined'))).toBe('crash');
   });
 });

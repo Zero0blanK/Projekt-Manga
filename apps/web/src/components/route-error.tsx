@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, Loader2, RotateCw, WifiOff } from 'lucide-react';
 import { recordClientError } from '@/lib/client-diagnostics';
+import { classifyRouteFailure } from '@/lib/route-failure';
 
 /**
  * A page that failed while rendering, as the route's `error.tsx` shows it.
@@ -26,7 +27,7 @@ export function RouteError({
   error: unknown;
   retry: () => void;
   title: string;
-  /** The likely cause for this page, in a sentence. */
+  /** The likely cause when this page's data didn't load, in a sentence. */
   hint: ReactNode;
   backHref?: string;
   backLabel?: string;
@@ -50,7 +51,10 @@ export function RouteError({
     };
   }, []);
 
+  const failure = classifyRouteFailure(error);
   const Icon = offline ? WifiOff : AlertTriangle;
+  // A chunk that failed to download stays failed for this page load, so reload instead.
+  const tryAgain = failure === 'download' ? () => window.location.reload() : retry;
 
   return (
     <div
@@ -64,13 +68,17 @@ export function RouteError({
       <p className="mt-2 text-sm text-muted-foreground">
         {offline
           ? "You're offline. Reconnect, then try again. Downloaded chapters still open from Downloads."
-          : hint}
+          : failure === 'download'
+            ? "Part of the app didn't finish downloading, most likely because the connection is slow or dropped. Try again to download it."
+            : failure === 'crash'
+              ? 'Something went wrong while showing this page. Try again; if it keeps happening, it is a bug in the app.'
+              : hint}
       </p>
       <div className="mt-6 flex flex-wrap justify-center gap-2">
         <button
           type="button"
           disabled={retrying}
-          onClick={() => startRetry(() => retry())}
+          onClick={() => startRetry(() => tryAgain())}
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
         >
           {retrying ? (
