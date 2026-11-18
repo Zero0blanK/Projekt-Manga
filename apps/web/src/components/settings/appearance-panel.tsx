@@ -319,7 +319,7 @@ export function AppearancePanel() {
         </Field>
         <Field
           label="Smooth scrolling"
-          hint="Glide the long-strip reader with the wheel and keys, and animate jumps to a page or chapter"
+          hint="Glide pages and the long-strip reader with the wheel, and animate jumps to a page or chapter"
         >
           <Toggle settingKey="smoothScroll" defaultOn />
         </Field>
