@@ -50,7 +50,7 @@ export function LibraryPageClient() {
   // Linked sources: reading on one counts as reading its library entry. A failed link
   // lookup just leaves history as it is, and failed history only costs the featured card.
   const { data: rawHistory, isError: historyFailed } = useHistory();
-  const { data: linkGroups, isPending: linksPending } = useQuery(
+  const { data: linkGroups } = useQuery(
     {
       queryKey: [...queryKeys.mangaLinks, owner],
       queryFn: ({ signal }) => getAllMangaLinks(signal).catch(() => []),
@@ -61,9 +61,13 @@ export function LibraryPageClient() {
   const history = useMemo(() => {
     if (sessionLoading) return null;
     if (historyFailed) return [];
-    if (!rawHistory || linksPending) return null;
+    if (!rawHistory) return null;
+    // Links only move credit from a linked title to its library entry, so the card shows
+    // from history straight away and follows the links once they arrive. Waiting for them
+    // hid Continue reading for as long as the server was slow to answer them (during a
+    // library update, say), on desktop too, where history itself is local.
     return creditLinkedReading(rawHistory, linkGroups ?? []);
-  }, [sessionLoading, historyFailed, rawHistory, linksPending, linkGroups]);
+  }, [sessionLoading, historyFailed, rawHistory, linkGroups]);
   const historyRows = history;
 
   const sort = useAppState((s) => s.sort);
