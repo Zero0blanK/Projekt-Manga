@@ -246,7 +246,12 @@ export function FilterPanel({
                   label={field.label}
                   value={typeof value === 'string' ? value : ''}
                   onChange={(next) => set(field.value, next || undefined)}
-                  options={[{ value: '', label: 'Any' }, ...(field.options ?? [])]}
+                  // A source's own list may already start with its "any" choice (value '').
+                  options={
+                    field.options?.some((option) => option.value === '')
+                      ? field.options
+                      : [{ value: '', label: 'Any' }, ...(field.options ?? [])]
+                  }
                   className="w-full"
                 />
               </FilterSection>

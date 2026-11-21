@@ -35,6 +35,23 @@ describe('SelectMenu', () => {
     expect(menu.className).not.toContain('min-w-[max(');
   });
 
+  it('lists a repeated value once', async () => {
+    const user = userEvent.setup();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(
+      <SelectMenu
+        label="Genre"
+        value=""
+        options={[{ value: '', label: 'Any' }, { value: '', label: 'All' }, ...options]}
+        onChange={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Genre: Any' }));
+    expect(await screen.findAllByRole('menuitem')).toHaveLength(3);
+    expect(errors.mock.calls.some((call) => String(call[0]).includes('same key'))).toBe(false);
+    errors.mockRestore();
+  });
+
   it('draws one arrow, and falls back to the placeholder for an unlisted value', () => {
     render(
       <SelectMenu

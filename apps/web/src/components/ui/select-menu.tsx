@@ -36,7 +36,12 @@ export function SelectMenu({
   disabled?: boolean;
   className?: string;
 }) {
-  const shown = options.find((option) => option.value === value)?.label ?? placeholder;
+  // One entry per value: a repeated one (from a source's own list, say) would be the same
+  // choice twice, and React can't tell the two rows apart.
+  const choices = options.filter(
+    (option, index) => options.findIndex((other) => other.value === option.value) === index,
+  );
+  const shown = choices.find((option) => option.value === value)?.label ?? placeholder;
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger
@@ -57,7 +62,7 @@ export function SelectMenu({
         align="start"
         className="max-h-72 min-w-(--radix-dropdown-menu-trigger-width)"
       >
-        {options.map((option) => (
+        {choices.map((option) => (
           <DropdownMenuItem
             key={option.value}
             aria-current={option.value === value ? 'true' : undefined}
