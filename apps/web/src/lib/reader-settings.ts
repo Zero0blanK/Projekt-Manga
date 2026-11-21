@@ -171,6 +171,9 @@ export function useReaderSettings(sourceId?: string, mangaId?: string) {
 
   return {
     pageLayout: layout,
+    /** The page layout this title's own reader override sets, or null without one: an
+     * explicit per-title choice, which wins over opening a webtoon as a long strip. */
+    titlePageLayout: override?.pageLayout ?? null,
     readingDirection: direction,
     /** Vertical reading always means the long strip, whatever the page layout says. A
      * two-page spread on a phone-width screen shrinks both pages to unreadable thumbnails,
