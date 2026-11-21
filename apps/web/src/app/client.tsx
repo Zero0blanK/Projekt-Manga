@@ -50,7 +50,7 @@ export function LibraryPageClient() {
   // Linked sources: reading on one counts as reading its library entry. A failed link
   // lookup just leaves history as it is, and failed history only costs the featured card.
   const { data: rawHistory, isError: historyFailed } = useHistory();
-  const { data: linkGroups, isPending: linksPending } = useQuery(
+  const { data: linkGroups } = useQuery(
     {
       queryKey: [...queryKeys.mangaLinks, owner],
       queryFn: ({ signal }) => getAllMangaLinks(signal).catch(() => []),
@@ -61,9 +61,13 @@ export function LibraryPageClient() {
   const history = useMemo(() => {
     if (sessionLoading) return null;
     if (historyFailed) return [];
-    if (!rawHistory || linksPending) return null;
+    if (!rawHistory) return null;
+    // Links only move credit from a linked title to its library entry, so the card shows
+    // from history straight away and follows the links once they arrive. Waiting for them
+    // hid Continue reading for as long as the server was slow to answer them (during a
+    // library update, say), on desktop too, where history itself is local.
     return creditLinkedReading(rawHistory, linkGroups ?? []);
-  }, [sessionLoading, historyFailed, rawHistory, linksPending, linkGroups]);
+  }, [sessionLoading, historyFailed, rawHistory, linkGroups]);
   const historyRows = history;
 
   const sort = useAppState((s) => s.sort);
@@ -167,77 +171,81 @@ export function LibraryPageClient() {
   return (
     <div className="flex min-w-0">
       <div className={`${PAGE_FRAME} flex-1`}>
-        <PageHeader
-          title="Library"
-          description={
-            // Counts of 0 while the library is still arriving (slow on a slow connection)
-            // read as an empty library.
-            loading && mangaLibrary.length === 0 ? (
-              <p role="status">Loading your library…</p>
-            ) : filling ? (
-              <p role="status">
-                <span className="text-foreground">{mangaLibrary.length}</span> titles so far ·
-                loading the rest…
-              </p>
-            ) : (
-              <p>
-                <span className="text-foreground">{mangaLibrary.length}</span>{' '}
-                {mangaLibrary.length === 1 ? 'title' : 'titles'} ·{' '}
-                <span className="text-foreground">{reading.length}</span> in progress ·{' '}
-                <Link
-                  href="/bookmarks"
-                  className="text-foreground underline decoration-border underline-offset-4 hover:text-primary"
-                >
-                  {bookmarks.length} bookmarked
-                </Link>
-              </p>
-            )
-          }
-          actions={historyRows && <ReadingGoalProgress history={historyRows} compact />}
-        >
-          {/* Which shelf, then how the list is sorted, narrowed and shown. Places elsewhere
-              (bookmarks, upcoming, migrate, local comics) are in the More menu, so this row
-              is only the list's own controls. */}
-          <FilterPills filter={filter} onChange={setFilter} />
-          <div className="-mx-4 mt-4 flex max-w-[calc(100%+2rem)] items-center gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:max-w-full sm:flex-wrap sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
-            <SortMenu />
-            {mangaLibrary.length > 0 && (
-              <LibraryFilterMenu
-                library={mangaLibrary}
-                filters={libraryFilters}
-                onChange={setLibraryFilters}
-                quick={[
-                  {
-                    label: 'Unread',
-                    description: 'Show only titles with unread chapters',
-                    on: onlyUnread,
-                    set: setOnlyUnread,
-                  },
-                  {
-                    label: 'Downloaded',
-                    description: 'Show only titles with downloaded chapters',
-                    on: onlyDownloaded,
-                    set: setOnlyDownloaded,
-                  },
-                ]}
-              />
-            )}
-            <ViewToggle />
-            {/* With nothing in the library there is nothing to update; finding a first title
+        {/* The shelves and categories lead the page; the title and the list's controls
+            (sort, filters, view, update, more) share the row below, controls on the right. */}
+        <FilterPills filter={filter} onChange={setFilter} />
+        <div className="mt-6 sm:mt-8">
+          <PageHeader
+            title="Library"
+            description={
+              // Counts of 0 while the library is still arriving (slow on a slow connection)
+              // read as an empty library.
+              loading && mangaLibrary.length === 0 ? (
+                <p role="status">Loading your library…</p>
+              ) : filling ? (
+                <p role="status">
+                  <span className="text-foreground">{mangaLibrary.length}</span> titles so far ·
+                  loading the rest…
+                </p>
+              ) : (
+                <p>
+                  <span className="text-foreground">{mangaLibrary.length}</span>{' '}
+                  {mangaLibrary.length === 1 ? 'title' : 'titles'} ·{' '}
+                  <span className="text-foreground">{reading.length}</span> in progress ·{' '}
+                  <Link
+                    href="/bookmarks"
+                    className="text-foreground underline decoration-border underline-offset-4 hover:text-primary"
+                  >
+                    {bookmarks.length} bookmarked
+                  </Link>
+                </p>
+              )
+            }
+            actions={
+              // Only the list's own controls; places elsewhere (bookmarks, upcoming, migrate,
+              // local comics) are in the More menu.
+              <div className="-mx-4 flex max-w-[calc(100%+2rem)] items-center gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:max-w-full sm:flex-wrap sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
+                <SortMenu />
+                {mangaLibrary.length > 0 && (
+                  <LibraryFilterMenu
+                    library={mangaLibrary}
+                    filters={libraryFilters}
+                    onChange={setLibraryFilters}
+                    quick={[
+                      {
+                        label: 'Unread',
+                        description: 'Show only titles with unread chapters',
+                        on: onlyUnread,
+                        set: setOnlyUnread,
+                      },
+                      {
+                        label: 'Downloaded',
+                        description: 'Show only titles with downloaded chapters',
+                        on: onlyDownloaded,
+                        set: setOnlyDownloaded,
+                      },
+                    ]}
+                  />
+                )}
+                <ViewToggle />
+                {/* With nothing in the library there is nothing to update; finding a first title
                 is the one useful next step. */}
-            {mangaLibrary.length > 0 ? (
-              <UpdateLibraryButton />
-            ) : (
-              <Link
-                href="/discover"
-                className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
-              >
-                Find manga
-              </Link>
-            )}
-            <LibraryMoreMenu library={mangaLibrary} />
-          </div>
-        </PageHeader>
+                {mangaLibrary.length > 0 ? (
+                  <UpdateLibraryButton />
+                ) : (
+                  <Link
+                    href="/discover"
+                    className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+                  >
+                    Find manga
+                  </Link>
+                )}
+                {historyRows && <ReadingGoalProgress history={historyRows} compact />}
+                <LibraryMoreMenu library={mangaLibrary} />
+              </div>
+            }
+          />
+        </div>
 
         {featured && <ContinueReadingHero manga={featured} recentRead={recentRead ?? undefined} />}
 
