@@ -28,28 +28,33 @@ export function LibraryLiveUpdates() {
   const userId = user?.id ?? null;
   useEffect(() => {
     if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
-    return subscribeToLibraryChanges((scope) => {
-      if (scope === 'progress') {
-        // Reading writes constantly: refresh what's on screen, and leave the big library
-        // list to the same rule as this window's own reading.
-        invalidateSavedReadingProgress();
+    return subscribeToLibraryChanges(
+      (scope) => {
+        if (scope === 'progress') {
+          // Reading writes constantly: refresh what's on screen, and leave the big library
+          // list to the same rule as this window's own reading.
+          invalidateSavedReadingProgress();
+          void queryClient.invalidateQueries({
+            refetchType: 'active',
+            predicate: (query) => {
+              const key = String(query.queryKey[0]);
+              return (
+                !NOT_LIBRARY.has(key) &&
+                key !== queryKeys.mangaLibrary[0] &&
+                key !== queryKeys.categories[0]
+              );
+            },
+          });
+          return;
+        }
         void queryClient.invalidateQueries({
-          refetchType: 'active',
-          predicate: (query) => {
-            const key = String(query.queryKey[0]);
-            return (
-              !NOT_LIBRARY.has(key) &&
-              key !== queryKeys.mangaLibrary[0] &&
-              key !== queryKeys.categories[0]
-            );
-          },
+          predicate: (query) => !NOT_LIBRARY.has(String(query.queryKey[0])),
         });
-        return;
-      }
-      void queryClient.invalidateQueries({
-        predicate: (query) => !NOT_LIBRARY.has(String(query.queryKey[0])),
-      });
-    });
+      },
+      // The extension engine's status (Settings › Extensions › Extension engine), only
+      // where it is on screen.
+      () => void queryClient.invalidateQueries({ queryKey: ['suwayomi', 'engine'] }),
+    );
   }, [userId]);
   return null;
 }

@@ -35,8 +35,11 @@ export const getReleaseEstimates = (signal?: AbortSignal) =>
  */
 export function subscribeToLibraryChanges(
   onChange: (scope: 'library' | 'progress') => void,
+  /** The built-in extension engine's status changed: read it again. */
+  onEngineChange?: () => void,
 ): () => void {
   const source = new EventSource(buildApiUrl('/library-events/stream'), { withCredentials: true });
+  if (onEngineChange) source.addEventListener('engine', () => onEngineChange());
   source.addEventListener('change', (event) => {
     let scope: 'library' | 'progress' = 'library';
     try {

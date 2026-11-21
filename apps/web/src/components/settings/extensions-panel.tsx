@@ -7,7 +7,7 @@ import { Panel, Field, Toggle } from '@/components/settings/field-controls';
 import { HIDE_LIBRARY_IN_SOURCES } from '@/lib/library-titles';
 import { AUTO_OPEN_CHALLENGE_SETTING } from '@/lib/source-browser';
 import { AddRepositoryForm } from '@/components/extensions/add-repository-form';
-import { SuwayomiServer } from '@/components/settings/suwayomi-server';
+import { ExtensionEngine } from '@/components/settings/extension-engine';
 import { SourceHealthPanel } from '@/components/settings/source-health-panel';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -203,8 +203,11 @@ export function ExtensionsPanel() {
         )}
       </Panel>
       <SourceHealthPanel />
-      <Panel title="Suwayomi server" subtitle="Use the sources installed on your Suwayomi server">
-        <SuwayomiServer />
+      <Panel
+        title="Extension engine"
+        subtitle="Run Suwayomi extensions, such as Keiyoushi's, built in or on your own server"
+      >
+        <ExtensionEngine />
       </Panel>
     </div>
   );

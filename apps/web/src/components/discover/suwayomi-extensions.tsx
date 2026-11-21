@@ -109,7 +109,8 @@ export function useSuwayomiExtensions() {
     },
     client,
   );
-  const enabled = settings.data?.enabled === true;
+  const builtIn = settings.data?.mode === 'built-in';
+  const enabled = builtIn || (settings.data?.mode !== 'off' && settings.data?.enabled === true);
   const list = useQuery(
     {
       queryKey: EXTENSIONS_KEY,
@@ -119,7 +120,7 @@ export function useSuwayomiExtensions() {
     },
     client,
   );
-  return { enabled, list };
+  return { enabled, builtIn, list };
 }
 
 /**
@@ -139,7 +140,7 @@ export function SuwayomiExtensions({
   const [refreshing, setRefreshing] = useState(false);
   // Per row, so one install doesn't freeze every other row.
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
-  const { enabled, list } = useSuwayomiExtensions();
+  const { enabled, builtIn, list } = useSuwayomiExtensions();
   if (!enabled) return null;
 
   const refresh = async () => {
@@ -230,20 +231,35 @@ export function SuwayomiExtensions({
         </div>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Extensions from your Suwayomi server&apos;s repositories. They install on that server, and
-        their sources appear under Installed sources.
+        {builtIn
+          ? "Extensions from the extension engine's repositories. They install in the engine, and their sources appear under Installed sources."
+          : "Extensions from your Suwayomi server's repositories. They install on that server, and their sources appear under Installed sources."}
       </p>
       {list.isPending ? (
         <p className="mt-4 text-sm text-muted-foreground">Loading Suwayomi extensions…</p>
       ) : list.isError ? (
-        <p role="alert" className="mt-4 text-sm text-destructive">
-          {errorText(list.error, "Couldn't reach the Suwayomi server.")}
-        </p>
+        <div role="alert" className="mt-4 space-y-1 text-sm">
+          <p className="text-destructive">
+            {errorText(
+              list.error,
+              builtIn
+                ? "Couldn't reach the extension engine."
+                : "Couldn't reach the Suwayomi server.",
+            )}
+          </p>
+          {builtIn && (
+            <a href="/settings#extensions" className="text-xs text-primary hover:underline">
+              Download or start it in Settings › Extensions › Extension engine
+            </a>
+          )}
+        </div>
       ) : visible.length === 0 ? (
         <p className="mt-4 text-sm text-muted-foreground">
           {list.data?.length
             ? 'No Suwayomi extensions match.'
-            : 'Suwayomi lists no extensions. Add an extension repository in Suwayomi, then refresh.'}
+            : builtIn
+              ? 'The engine lists no extensions. Add an extension repository in Settings › Extensions › Extension engine, then refresh.'
+              : 'Suwayomi lists no extensions. Add an extension repository in Suwayomi, then refresh.'}
         </p>
       ) : (
         <div className="mt-4 space-y-6">

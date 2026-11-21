@@ -696,12 +696,47 @@ export interface SourceUrlKeys {
 /** The host's Suwayomi server connection. The password is never sent back: only
  * `has_password`. */
 export interface SuwayomiSettings {
+  /** Where Suwayomi sources come from: the built-in engine, the user's own server, or off. */
+  mode: SuwayomiMode;
   enabled: boolean;
   url: string;
   username: string | null;
   has_password: boolean;
   /** False when the saved password can no longer be decrypted and has to be entered again. */
   password_readable: boolean;
+}
+
+export type SuwayomiMode = 'built-in' | 'external' | 'off';
+
+/** Where an engine download has got to. */
+export interface EngineDownloadProgress {
+  step: 'runtime' | 'server' | 'verifying' | 'unpacking' | 'finishing';
+  received: number;
+  total: number | null;
+}
+
+/** The built-in extension engine (Settings › Extensions › Extension engine). */
+export interface ExtensionEngineStatus {
+  state: 'not-installed' | 'downloading' | 'stopped' | 'starting' | 'running' | 'error';
+  /** Whether a Java runtime is published for this computer at all. */
+  supported: boolean;
+  installed: { server: string; runtime: string } | null;
+  download: EngineDownloadProgress | null;
+  /** Newer versions found by "Check for updates". */
+  update: { server: string; runtime: string } | null;
+  error: string | null;
+  /** The engine's last lines of output, when it failed. */
+  lastLines: string[];
+  diskBytes: number;
+  memoryMb: number | null;
+  startWithServer: boolean | null;
+  licenses: ReadonlyArray<{ name: string; license: string; url: string }>;
+}
+
+/** An extension repository the built-in engine lists extensions from. */
+export interface ExtensionEngineRepository {
+  url: string;
+  name: string;
 }
 
 /** What a connection test found on the server. */
