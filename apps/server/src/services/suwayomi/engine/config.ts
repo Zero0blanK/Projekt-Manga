@@ -43,6 +43,10 @@ export function managedSettings(config: EngineConfig): Record<string, string | n
     updateMangas: false,
     autoDownloadNewChapters: false,
     backupInterval: 0,
+    // Its embedded Chromium (for extensions that need a web view) is off: when on, the
+    // engine downloads it from GitHub by itself on first start and runs it as a separate
+    // browser process, and nothing here downloads or runs without the user asking.
+    kcefEnabled: false,
   };
 }
 

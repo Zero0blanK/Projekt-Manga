@@ -23,6 +23,20 @@ export function announceLibraryChange(owner: LibraryOwner, scope: LibraryChangeS
   changes.emit('change', owner, scope);
 }
 
+/**
+ * The built-in extension engine's status changed (download progress, started, stopped).
+ * Separate from library changes: it says only "read the engine status again", which the
+ * Settings panel does through its admin-only route.
+ */
+export function announceEngineChange(): void {
+  changes.emit('engine');
+}
+
+export function onEngineChange(listener: () => void): () => void {
+  changes.on('engine', listener);
+  return () => changes.off('engine', listener);
+}
+
 export function onLibraryChange(
   listener: (owner: LibraryOwner, scope: LibraryChangeScope) => void,
 ): () => void {

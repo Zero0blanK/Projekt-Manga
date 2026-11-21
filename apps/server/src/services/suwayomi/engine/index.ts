@@ -1,3 +1,4 @@
+import { announceEngineChange } from '../../../utils/libraryChanges.js';
 import {
   getSuwayomiSettings,
   notifySuwayomiConnectionChange,
@@ -60,6 +61,8 @@ export function onEngineStatusChange(listener: () => void): () => void {
 }
 
 function changed(): void {
+  // Open apps and tabs re-read the status (libraryEvents.route.ts).
+  announceEngineChange();
   for (const listener of listeners) {
     try {
       listener();

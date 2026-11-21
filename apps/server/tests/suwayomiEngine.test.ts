@@ -1,5 +1,14 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import request from 'supertest';
+
+vi.mock('../src/services/sandboxedSourceRegistry.service.js', () => ({
+  getInstalledSandboxedSource: vi.fn(async () => undefined),
+  getInstalledSandboxedSources: vi.fn(async () => []),
+}));
+
+import app from '../src/app.js';
+import { announceEngineChange } from '../src/utils/libraryChanges.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
@@ -300,6 +309,37 @@ describe('running the engine', () => {
     },
   );
 
+  it.skipIf(!runtimePlatform())(
+    'stops anything the engine started, too',
+    { timeout: 30_000 },
+    async () => {
+      useMirrorForGithub();
+      await installEngine({
+        server: serverRelease('v1', 'with-helper'),
+        runtime: await runtimeRelease('21.0.1'),
+      });
+      await engineProcess.start();
+      const helper = Number(
+        await fsp.readFile(path.join(enginePaths.dataDir(), 'helper.pid'), 'utf8'),
+      );
+      expect(() => process.kill(helper, 0)).not.toThrow();
+      await engineProcess.stop();
+      await expect
+        .poll(
+          () => {
+            try {
+              process.kill(helper, 0);
+              return 'alive';
+            } catch {
+              return 'gone';
+            }
+          },
+          { timeout: 10_000 },
+        )
+        .toBe('gone');
+    },
+  );
+
   it.skipIf(!runtimePlatform())('restarts it after a crash', { timeout: 40_000 }, async () => {
     useMirrorForGithub();
     await installEngine({
@@ -456,5 +496,161 @@ describe('connection modes', () => {
     await setSuwayomiMode('external');
     expect(readSuwayomiConnection()?.baseUrl).toBe('http://127.0.0.1:4567');
     setBuiltInConnectionProvider(() => engineProcess.currentConnection());
+  });
+});
+
+describe('the engine API', () => {
+  const api = () => request(app);
+
+  it('is for the server host only', async () => {
+    process.env.ADMIN_TOKEN = 'a-sixteen-char-token';
+    try {
+      const res = await api().get('/api/suwayomi/engine').set('X-Forwarded-For', '203.0.113.9');
+      expect(res.status).toBe(403);
+    } finally {
+      delete process.env.ADMIN_TOKEN;
+    }
+  });
+
+  it('reports the engine as not installed, with its licenses', async () => {
+    const res = await api().get('/api/suwayomi/engine');
+    expect(res.status).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.body.data).toMatchObject({ state: 'not-installed', installed: null, update: null });
+    expect(res.body.data.licenses.map((l: { license: string }) => l.license)).toContain('MPL-2.0');
+  });
+
+  it('runs one download at a time, and cancels it', async () => {
+    // A download that waits until it is cancelled.
+    setEngineDownloadsForTests({
+      fetch: (_url, init) =>
+        new Promise((_resolve, reject) =>
+          init.signal?.addEventListener('abort', () => reject(new Error('aborted'))),
+        ),
+      hosts: ['api.adoptium.net'],
+    });
+    const first = await api().post('/api/suwayomi/engine/install');
+    expect(first.status).toBe(202);
+    expect(first.body.data.state).toBe('downloading');
+    expect((await api().post('/api/suwayomi/engine/install')).status).toBe(409);
+    await api().post('/api/suwayomi/engine/cancel');
+    await expect
+      .poll(async () => (await api().get('/api/suwayomi/engine')).body.data.state)
+      .toBe('not-installed');
+    // A cancel is not an error.
+    expect((await api().get('/api/suwayomi/engine')).body.data.error).toBeNull();
+  });
+
+  it('shows a download that fails as an error', async () => {
+    // Only the local mirror is allowed here, so the Java runtime lookup is refused.
+    expect((await api().post('/api/suwayomi/engine/install')).status).toBe(202);
+    await expect
+      .poll(async () => (await api().get('/api/suwayomi/engine')).body.data.error)
+      .toMatch(/not allowed/);
+    expect((await api().get('/api/suwayomi/engine')).body.data.state).toBe('not-installed');
+  });
+
+  it.skipIf(!runtimePlatform())('starts, stops, and changes settings', async () => {
+    useMirrorForGithub();
+    await installEngine({ server: serverRelease('v1'), runtime: await runtimeRelease('21.0.1') });
+    expect((await api().post('/api/suwayomi/engine/start')).body.data.state).toBe('running');
+    const settings = await api()
+      .put('/api/suwayomi/engine/settings')
+      .send({ memory_mb: 1024, start_with_server: false });
+    expect(settings.body.data).toMatchObject({ memoryMb: 1024, startWithServer: false });
+    expect((await api().put('/api/suwayomi/engine/settings').send({ memory_mb: 64 })).status).toBe(
+      400,
+    );
+    expect((await api().post('/api/suwayomi/engine/stop')).body.data.state).toBe('stopped');
+  });
+
+  it.skipIf(!runtimePlatform())(
+    'reads and saves extension repositories through the engine',
+    async () => {
+      useMirrorForGithub();
+      await installEngine({ server: serverRelease('v1'), runtime: await runtimeRelease('21.0.1') });
+      // Not running: says so.
+      expect((await api().get('/api/suwayomi/engine/repositories')).status).toBe(503);
+      await api().post('/api/suwayomi/engine/start');
+      const repo = 'https://repo.example/index.min.json';
+      const saved = await api()
+        .put('/api/suwayomi/engine/repositories')
+        .send({ repositories: [repo, repo] });
+      expect(saved.status).toBe(200);
+      const listed = [{ url: repo, name: 'Example repository' }];
+      expect(saved.body.data).toEqual(listed);
+      expect((await api().get('/api/suwayomi/engine/repositories')).body.data).toEqual(listed);
+      // A repository that isn't there is refused, in words, with no Java class names.
+      const missing = await api()
+        .put('/api/suwayomi/engine/repositories')
+        .send({ repositories: [repo, 'https://repo.example/missing/index.min.json'] });
+      expect(missing.status).toBe(503);
+      expect(missing.body.message).toBe('Suwayomi: HTTP error 404');
+      // Removing one.
+      const emptied = await api()
+        .put('/api/suwayomi/engine/repositories')
+        .send({ repositories: [] });
+      expect(emptied.body.data).toEqual([]);
+      // Only https index URLs, without credentials.
+      for (const bad of ['http://repo.example/index.json', 'https://u:p@repo.example/x.json']) {
+        expect(
+          (
+            await api()
+              .put('/api/suwayomi/engine/repositories')
+              .send({ repositories: [bad] })
+          ).status,
+        ).toBe(400);
+      }
+    },
+  );
+
+  it.skipIf(!runtimePlatform())(
+    'starts the engine when built-in is chosen, and stops it otherwise',
+    async () => {
+      useMirrorForGithub();
+      await installEngine({ server: serverRelease('v1'), runtime: await runtimeRelease('21.0.1') });
+      const chosen = await api().put('/api/suwayomi/mode').send({ mode: 'built-in' });
+      expect(chosen.body.data.mode).toBe('built-in');
+      expect(engineProcess.status().state).toBe('running');
+      await api().put('/api/suwayomi/mode').send({ mode: 'off' });
+      expect(engineProcess.status().state).toBe('stopped');
+      // The external server needs its address saved first.
+      expect((await api().put('/api/suwayomi/mode').send({ mode: 'external' })).status).toBe(400);
+    },
+  );
+
+  it.skipIf(!runtimePlatform())('removes the engine, keeping its data when asked', async () => {
+    useMirrorForGithub();
+    await installEngine({ server: serverRelease('v1'), runtime: await runtimeRelease('21.0.1') });
+    await fsp.mkdir(enginePaths.dataDir(), { recursive: true });
+    const removed = await api().delete('/api/suwayomi/engine?keep_data=true');
+    expect(removed.body.data.state).toBe('not-installed');
+    expect(fs.existsSync(enginePaths.dataDir())).toBe(true);
+    expect((await api().delete('/api/suwayomi/engine?keep_data=maybe')).status).toBe(400);
+  });
+});
+
+describe('live engine status', () => {
+  it('tells open library streams to re-read the engine status', async () => {
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as { port: number };
+    const received: string[] = [];
+    const stream = http.get(`http://127.0.0.1:${port}/api/library-events/stream`, (res) => {
+      res.on('data', (chunk: Buffer) => received.push(chunk.toString('utf8')));
+    });
+    try {
+      await expect.poll(() => received.join('')).toContain('event: connected');
+      announceEngineChange();
+      announceEngineChange();
+      await expect.poll(() => received.join('')).toContain('event: engine');
+      // A burst becomes one event.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(received.join('').match(/event: engine/g)).toHaveLength(1);
+    } finally {
+      stream.destroy();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

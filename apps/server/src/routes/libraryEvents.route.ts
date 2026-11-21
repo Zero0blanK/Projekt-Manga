@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import {
   announceLibraryChange,
   EVERYONE,
+  onEngineChange,
   onLibraryChange,
   type LibraryChangeScope,
 } from '../utils/libraryChanges.js';
@@ -73,12 +74,22 @@ router.get('/stream', (req: Request, res: Response) => {
       pendingScope = 'progress';
     }, 300);
   });
+  // The extension engine's status, at most four times a second while a download runs.
+  let enginePending: NodeJS.Timeout | null = null;
+  const stopEngine = onEngineChange(() => {
+    enginePending ??= setTimeout(() => {
+      enginePending = null;
+      res.write('event: engine\ndata: {}\n\n');
+    }, 250);
+  });
   const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15_000);
 
   req.on('close', () => {
     clearInterval(heartbeat);
     if (pending) clearTimeout(pending);
+    if (enginePending) clearTimeout(enginePending);
     stopListening();
+    stopEngine();
     streams.delete(res);
     perClient.release(req.ip);
   });
