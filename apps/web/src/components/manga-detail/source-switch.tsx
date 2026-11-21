@@ -56,7 +56,7 @@ export function SourceSwitch({ manga }: { manga: Manga }) {
     <Link
       href={`/manga/${encodeURIComponent(manga.id)}/migrate`}
       aria-label="Migrate manga"
-      title="Migrate manga"
+      title="Migrate or link another source"
       className="grid h-10 w-10 place-items-center rounded-full border border-border/60 bg-surface/60 text-foreground transition hover:bg-surface"
     >
       <ArrowRightLeft className="h-4 w-4" />

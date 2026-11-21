@@ -43,6 +43,7 @@ import {
   parsePreferredGroup,
   selectChapterRelease,
 } from '@/lib/reader-preferences';
+import { useTitleLayoutChoice } from '@/components/reader/use-title-layout-choice';
 import { ReaderPersonalTools } from '@/components/reader/reader-personal-tools';
 import { ReaderTintOverlay } from '@/components/reader/reader-tint';
 import { afterChapterRead, downloadAhead } from '@/lib/auto-downloads';
@@ -145,6 +146,25 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     layout: configuredLayout,
     webtoon: looksLikeWebtoon,
     titleLayout: titlePageLayout,
+  });
+  const autoLongStrip = effectiveLayout === 'Long strip' && configuredLayout !== 'Long strip';
+  // The reader's current values, kept in a per-title override saved from here.
+  const overrideBase = {
+    zoomBehavior,
+    brightness,
+    stripGap,
+    pagePrefetchAhead,
+    chapterPrefetchCount,
+    colorFilter,
+    tint,
+    tintStrength,
+  };
+  const chooseTitleLayout = useTitleLayoutChoice({
+    source: manga.source,
+    mangaId: manga.id,
+    autoLongStrip,
+    readingDirection,
+    base: overrideBase,
   });
   // Seeded from the setting, then toggled for the session by the "F" key. The initial
   // useState value is the *pre-hydration* default (the store only reads localStorage in an
@@ -620,19 +640,10 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
         <WebtoonSuggestion
           source={manga.source}
           mangaId={manga.id}
-          visible={effectiveLayout === 'Long strip' && configuredLayout !== 'Long strip'}
+          visible={autoLongStrip}
           pagedLayout={pageLayout}
           readingDirection={readingDirection}
-          base={{
-            zoomBehavior,
-            brightness,
-            stripGap,
-            pagePrefetchAhead,
-            chapterPrefetchCount,
-            colorFilter,
-            tint,
-            tintStrength,
-          }}
+          base={overrideBase}
         />
         {/* Always present for screen readers, even while the reader chrome is hidden. */}
         <h1 className="sr-only">
@@ -650,6 +661,8 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
             chapter={chapter}
             chapterId={currentRecord?.id}
             title={incognito ? `Incognito · ${title}` : title}
+            currentLayout={effectiveLayout}
+            onChooseLayout={chooseTitleLayout}
             zoom={zoom}
             zoomMin={ZOOM_MIN}
             zoomMax={ZOOM_MAX}
