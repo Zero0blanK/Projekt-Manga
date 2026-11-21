@@ -67,6 +67,30 @@ Integration tests run against a real SQLite file and truncate every table, so th
 start unless `DATABASE_URL` names a disposable database — see
 the project's verification guidance.
 
+## Built-in extension engine
+
+**Settings › Extensions › Extension engine** can run Suwayomi-Server (MPL-2.0) for you,
+instead of pointing at one you host yourself. Nothing is bundled. The server downloads a Java
+runtime (Temurin 21) and the pinned Suwayomi-Server jar only when someone presses Download,
+checks each file's SHA-256, and keeps them in `suwayomi-engine/` beside the database. The code
+is in `src/services/suwayomi/engine/`.
+
+On a hosted server or in a container:
+
+- **Linux builds are picked automatically**, glibc or musl (Alpine), x64 or arm64. The server
+  needs outbound HTTPS to `api.github.com`, `github.com`, the GitHub release-asset hosts and
+  `api.adoptium.net`, and a system `tar`.
+- **Disk:** about 235 MB to download and about 350 MB once unpacked, plus whatever extensions
+  are installed. If the database lives on a volume, so does the engine; otherwise it is
+  downloaded again whenever the container is recreated.
+- **Memory:** the Java heap defaults to 512 MB and can be set between 256 and 8192 MB in the
+  same panel. Leave that much headroom in the container's memory limit.
+- **Network:** the engine listens only on `127.0.0.1` on a free port, with a generated login,
+  so it is never reachable from outside the container. Its web UI, tray icon, update checks,
+  automatic backups and embedded browser are turned off.
+- It starts with the server when chosen, restarts up to three times after a crash, and stops
+  with the server (its whole process tree).
+
 ## API reference
 
 - [`API.md`](API.md) — human-readable index with `curl` examples
