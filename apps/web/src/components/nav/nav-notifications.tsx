@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { NAV_ITEM_SIZE } from '@/components/nav/nav-button';
 import Link from 'next/link';
 import { buildImageProxyUrl } from '@projekt-manga/api-client';
 import { formatRelative } from '@/lib/manga-data';
@@ -109,7 +110,7 @@ export function NavNotifications({
   const unreadMangaIds = useUnreadUpdateTitles();
 
   return (
-    <div className="relative">
+    <div className={`relative flex ${NAV_ITEM_SIZE}`}>
       <button
         type="button"
         aria-label={
@@ -129,7 +130,7 @@ export function NavNotifications({
             );
           }
         }}
-        className={`relative grid h-11 w-11 shrink-0 place-items-center rounded-full transition focus-visible:outline-2 focus-visible:outline-primary ${
+        className={`relative grid h-11 w-full place-items-center rounded-full transition focus-visible:outline-2 focus-visible:outline-primary ${
           open
             ? 'bg-accent text-foreground'
             : 'text-muted-foreground hover:bg-accent hover:text-foreground'
