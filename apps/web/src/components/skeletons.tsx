@@ -1,3 +1,4 @@
+import { DETAIL_COVER_WIDTH, DETAIL_FRAME } from '@/components/manga-detail/detail-frame';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MangaGrid } from '@/components/manga-grid';
 
@@ -138,10 +139,12 @@ export function SourceCardsSkeleton({ count = 6 }: { count?: number }) {
  */
 export function MangaDetailHeaderSkeleton() {
   return (
-    <div className="relative mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+    <div className={DETAIL_FRAME}>
       <Skeleton className="h-7 w-24 rounded-full" />
       <div className="mt-6 flex flex-col items-start gap-8 md:flex-row">
-        <Skeleton className="aspect-2/3 w-full max-w-[220px] shrink-0 rounded-xl" />
+        <Skeleton
+          className={`aspect-2/3 max-w-[220px] shrink-0 rounded-xl md:max-w-none ${DETAIL_COVER_WIDTH}`}
+        />
         <div className="w-full flex-1 space-y-3">
           <Skeleton className="h-3 w-20" />
           <Skeleton className="h-10 w-3/4" />
