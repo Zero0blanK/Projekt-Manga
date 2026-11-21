@@ -48,15 +48,21 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fakeEngine = path.join(here, 'fixtures', 'fake-engine.mjs');
 const sha = (data: Buffer | string) => crypto.createHash('sha256').update(data).digest('hex');
 
-/** A local "download host": path → body, plus /redirect?to= for redirect tests. */
+/**
+ * A local "download host": path → body. Redirects go only to targets a test registers
+ * here (`/redirect/<name>`), never to one named in the request itself.
+ */
 const files = new Map<string, Buffer>();
+const redirects = new Map<string, string>();
 let mirror: http.Server;
 let mirrorUrl = '';
 beforeAll(async () => {
   mirror = http.createServer((request, response) => {
     const url = new URL(request.url ?? '/', 'http://x');
-    if (url.pathname === '/redirect') {
-      response.writeHead(302, { Location: url.searchParams.get('to') ?? '/' }).end();
+    if (url.pathname.startsWith('/redirect/')) {
+      const target = redirects.get(url.pathname.slice('/redirect/'.length));
+      if (target) response.writeHead(302, { Location: target }).end();
+      else response.writeHead(404).end();
       return;
     }
     const body = files.get(url.pathname);
@@ -214,14 +220,9 @@ describe('engine downloads', () => {
       hosts: ['127.0.0.1'],
       allowHttp: true,
     });
-    const away = encodeURIComponent('http://localhost:1/part');
+    redirects.set('away', 'http://localhost:1/part');
     await expect(
-      downloadVerified(
-        new URL(`${mirrorUrl}/redirect?to=${away}`),
-        path.join(root, 'b'),
-        sha('x'),
-        {},
-      ),
+      downloadVerified(new URL(`${mirrorUrl}/redirect/away`), path.join(root, 'b'), sha('x'), {}),
     ).rejects.toThrow(/not allowed/);
   });
 
