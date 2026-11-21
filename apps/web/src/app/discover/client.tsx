@@ -30,7 +30,7 @@ import {
 import { InstalledSourceCard } from '@/components/discover/installed-source-card';
 import { SourceBulkBar } from '@/components/discover/source-bulk-bar';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Pin, Puzzle, Search, X } from 'lucide-react';
+import { Pin, Search, X } from 'lucide-react';
 import type { DisplaySource } from '@/lib/manga-data';
 import { DiscoverFilterBar } from '@/components/discover/discover-filter-bar';
 import {
@@ -45,6 +45,7 @@ import {
 } from '@/lib/discover-filters';
 import { summarizeSourceHealth } from '@/lib/source-health-status';
 import { repositoryPublisher } from '@/lib/repository-url';
+import { PAGE_FRAME, PageHeader } from '@/components/page-shell';
 
 /** The Extensions tab's filters in the URL, apart from Installed sources' own. */
 const EXTENSION_FILTER_PREFIX = 'x';
@@ -263,14 +264,18 @@ export function DiscoverPageClient() {
   );
   if (query)
     return (
-      <div className="min-w-0 px-6 py-8">
-        <h1 className="text-display text-4xl">Results for “{query}”</h1>
-        <div className="mt-3 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-          <span>Searching {visible.length} sources</span>
-          <Link href="/discover" className="text-primary">
-            Clear search
-          </Link>
-        </div>
+      <div className={PAGE_FRAME}>
+        <PageHeader
+          title={`Results for “${query}”`}
+          description={
+            <span className="flex flex-wrap items-center gap-4">
+              <span>Searching {visible.length} sources</span>
+              <Link href="/discover" className="text-primary">
+                Clear search
+              </Link>
+            </span>
+          }
+        />
         {visible.map((source) => (
           <SourceSearchCarousel
             key={(user?.id ?? 'anonymous') + ':' + source.id}
@@ -289,12 +294,11 @@ export function DiscoverPageClient() {
       </div>
     );
   return (
-    <div className="mx-auto min-w-0 max-w-7xl px-6 py-8 sm:px-8">
-      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-        <Puzzle size={14} className="text-primary" />
-        Discover
-      </div>
-      <h1 className="mt-2 text-display text-4xl">Sources</h1>
+    <div className={PAGE_FRAME}>
+      <PageHeader
+        title="Discover"
+        description="Browse your sources, or add new ones. Search titles from the bar at the top."
+      />
       <Tabs value={tab} onValueChange={changeTab} className="mt-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <TabsList>
@@ -305,8 +309,9 @@ export function DiscoverPageClient() {
             <Search size={18} className="shrink-0 text-muted-foreground" />
             <input
               type="search"
-              aria-label="Search sources"
-              placeholder="Search sources…"
+              // Narrows the list of sources by name; searching titles is the top bar's job.
+              aria-label="Filter sources by name"
+              placeholder="Filter sources by name…"
               value={name}
               onChange={(event) => setName(event.target.value)}
               // The clear button below replaces the browser's own, so there is only one.

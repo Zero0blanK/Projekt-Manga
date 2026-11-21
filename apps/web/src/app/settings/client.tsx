@@ -99,14 +99,25 @@ export function SettingsPageClient() {
   // mount rather than during render — the server has no hash, and reading it in render
   // would produce a hydration mismatch. The hash (rather than a query param) also avoids
   // forcing a Suspense boundary via useSearchParams.
+  //
+  // `hashchange` alone misses in-app links: the Next router (the command palette's
+  // "Settings › Reader", a <Link href="/settings#reader">) changes the hash with
+  // history.pushState, which fires no hashchange, so on this page the URL moved to
+  // #reader while the panel and the sidebar's highlight stayed on Profile. The
+  // Navigation API reports every history entry change, pushState included.
   useEffect(() => {
     const sync = () => {
       const section = sectionFromHash();
       if (section) setActive(section);
     };
     sync();
+    const navigation = (window as Window & { navigation?: EventTarget }).navigation;
     window.addEventListener('hashchange', sync);
-    return () => window.removeEventListener('hashchange', sync);
+    navigation?.addEventListener('currententrychange', sync);
+    return () => {
+      window.removeEventListener('hashchange', sync);
+      navigation?.removeEventListener('currententrychange', sync);
+    };
   }, []);
 
   const select = (id: SectionId) => {
@@ -118,12 +129,7 @@ export function SettingsPageClient() {
 
   return (
     <div className="mx-auto min-w-0 max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
-      <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-primary">
-        Preferences
-      </div>
-      <h1 className="mt-1 text-display text-3xl text-foreground sm:text-4xl lg:text-5xl">
-        Settings
-      </h1>
+      <h1 className="text-display text-3xl text-foreground sm:text-4xl lg:text-5xl">Settings</h1>
       {focusMessage && (
         <p role="status" className="mt-2 text-xs text-muted-foreground">
           {focusMessage}

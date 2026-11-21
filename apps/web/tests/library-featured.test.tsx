@@ -15,7 +15,10 @@ vi.mock('@/components/library/library-tools', () => ({
   parseDensity: () => 'comfortable',
 }));
 
-const { getHistory } = vi.hoisted(() => ({ getHistory: vi.fn() }));
+const { getHistory, getAllMangaLinks } = vi.hoisted(() => ({
+  getHistory: vi.fn(),
+  getAllMangaLinks: vi.fn(async () => []),
+}));
 const library: Manga[] = ['older', 'recent'].map((id) => ({
   // "recent" is fully read; "older" still has its one chapter unread.
   progress: id === 'recent' ? 1 : 0,
@@ -40,7 +43,7 @@ const library: Manga[] = ['older', 'recent'].map((id) => ({
   inLibrary: true,
 }));
 
-vi.mock('@projekt-manga/api-client', () => ({ getHistory, getAllMangaLinks: async () => [] }));
+vi.mock('@projekt-manga/api-client', () => ({ getHistory, getAllMangaLinks }));
 vi.mock('@/lib/library-store', () => ({
   useMangaLibrary: () => ({ manga: library, loading: false }),
   useLibraryState: () => ({ shelf: { older: 'reading', recent: 'reading' }, bookmarks: [] }),
@@ -129,13 +132,26 @@ describe('Library featured title', () => {
     );
   });
 
+  // The linked-sources lookup is a server request even on desktop; a slow server (a library
+  // update running, say) must not hold back Continue reading.
+  it('shows Continue reading while the linked-sources lookup is still out', async () => {
+    getAllMangaLinks.mockImplementationOnce(() => new Promise(() => {}));
+    getHistory.mockResolvedValueOnce([
+      { manga_id: 'recent', last_read: '2026-02-01T00:00:00Z', read_at: '2026-02-01T00:00:00Z' },
+    ]);
+    render(<LibraryPageClient />);
+    await waitFor(() => expect(screen.getByTestId('featured')).toHaveTextContent('recent'));
+  });
+
   it('narrows the grid to titles with unread chapters', async () => {
     getHistory.mockResolvedValue([]);
     render(<LibraryPageClient />);
     const grid = await screen.findByTestId('grid');
     expect(grid).toHaveTextContent('older');
     expect(grid).toHaveTextContent('recent');
-    fireEvent.click(screen.getByRole('button', { name: 'Unread' }));
+    // Unread is in the Filters menu, with the other ways to narrow the list.
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unread' }));
     expect(screen.getByTestId('grid')).toHaveTextContent('older');
     expect(screen.getByTestId('grid')).not.toHaveTextContent('recent');
     expect(screen.getByRole('button', { name: 'Unread' })).toHaveAttribute('aria-pressed', 'true');

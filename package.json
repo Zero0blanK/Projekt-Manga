@@ -13,7 +13,7 @@
     "dev:web": "npm run dev --workspace=ProjektManga",
     "dev:desktop": "npm run dev --workspace=@projekt-manga/desktop",
     "dev:server": "npm run dev --workspace=@projekt-manga/server",
-    "dev:desktop:wait-for-web": "wait-on http-get://localhost:3000",
+    "dev:desktop:wait-for-web": "wait-on http-get://localhost:3000 http-get://localhost:4000/api/health",
     "dev:desktop:all": "concurrently -k -n SERVER,WEB,DESKTOP -c blue,green,magenta \"npm run dev:server\" \"npm run dev:web\" \"npm run dev:desktop:wait-for-web && npm run dev:desktop\"",
     "build:shared": "npm run build --workspace=@projekt-manga/types && npm run build --workspace=@projekt-manga/schemas && npm run build --workspace=@projekt-manga/api-client",
     "build:web": "npm run build --workspace=ProjektManga",

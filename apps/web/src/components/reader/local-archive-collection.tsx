@@ -125,13 +125,13 @@ export function LocalArchiveCollection() {
   }, [items]);
 
   return (
-    <section className="space-y-4 rounded-xl border p-4">
-      <h2 className="font-semibold">Local comics</h2>
+    // Its page's header names it and says what it takes (app/local/page.tsx).
+    <section aria-label="Local comics" className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Desktop only. Import a CBZ, ZIP or EPUB comic (up to 100 MiB, 500 MiB expanded and 2,000
-        pages), or a folder of JPEG, PNG or WebP pages; you can also drop one on the window.
-        ComicInfo.xml fills in the series and number. Files stay on this device and are left out of
-        backups and account sync.
+        Import a CBZ, ZIP or EPUB comic (up to 100 MiB, 500 MiB expanded and 2,000 pages), or a
+        folder of JPEG, PNG or WebP pages; you can also drop one on the window. ComicInfo.xml fills
+        in the series and number. Files stay on this device and are left out of backups and account
+        sync.
       </p>
       {desktop ? (
         <div className="flex flex-wrap gap-2">

@@ -13,10 +13,13 @@ export const FIRST_LIBRARY_PAGE = 60;
  * request (lib/library-store.ts) matches this URL and credentials exactly, which is what
  * lets the browser hand it the preloaded response.
  *
+ * It sits in the root layout, which every page loads, so it acts only when the page being
+ * opened is the library itself.
+ *
  * Browser only: the desktop app reads its library from its own database.
  */
 export const libraryPreloadScript = () =>
-  `(function(){try{if(window.desktop)return;var l=document.createElement('link');l.rel='preload';l.as='fetch';l.crossOrigin='use-credentials';l.href=${scriptString(
+  `(function(){try{if(window.desktop||location.pathname!=='/')return;var l=document.createElement('link');l.rel='preload';l.as='fetch';l.crossOrigin='use-credentials';l.href=${scriptString(
     buildApiUrl('/manga', { limit: FIRST_LIBRARY_PAGE, offset: 0 }),
   )};document.head.appendChild(l);}catch(e){}})();`;
 

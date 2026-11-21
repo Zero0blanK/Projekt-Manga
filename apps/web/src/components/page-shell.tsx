@@ -1,4 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 
 /**
  * The standard page frame: one container width, one set of gutters, one header block.
@@ -7,36 +9,56 @@ import type { ComponentType, ReactNode } from 'react';
  * navigating between them.
  */
 export function PageShell({ children }: { children: ReactNode }) {
-  return <div className="mx-auto min-w-0 max-w-6xl px-4 py-6 sm:px-6 lg:px-8">{children}</div>;
+  return <div className={PAGE_FRAME}>{children}</div>;
 }
 
+/** The frame's classes, for a page that needs them on an element of its own. */
+export const PAGE_FRAME = 'mx-auto w-full min-w-0 max-w-6xl px-4 py-6 sm:px-6 lg:px-8';
+
+/**
+ * Every page's title block. The title is the page's name, the one the navigation uses, so
+ * where you are is the first thing read; what the page is for goes in the line below.
+ */
 export function PageHeader({
-  icon: Icon,
-  eyebrow,
   title,
   description,
+  back,
   actions,
+  children,
 }: {
-  icon: ComponentType<{ className?: string }>;
-  eyebrow: string;
-  title: string;
+  title: ReactNode;
   description?: ReactNode;
+  /** A "Back to …" link above the title, for pages reached from another page. */
+  back?: ReactNode;
   /** Buttons or links pinned to the right of the title, wrapping below it when narrow. */
   actions?: ReactNode;
+  /** Controls that belong to the header, under the title (a page's tabs, say). */
+  children?: ReactNode;
 }) {
   return (
-    <header className="flex flex-wrap items-end justify-between gap-4">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-primary">
-          <Icon className="h-3 w-3" /> {eyebrow}
+    <header>
+      {back && <div className="mb-4">{back}</div>}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-display text-3xl text-foreground sm:text-4xl lg:text-5xl">{title}</h1>
+          {description && <div className="mt-2 text-sm text-muted-foreground">{description}</div>}
         </div>
-        <h1 className="mt-1 text-display text-3xl text-foreground sm:text-4xl lg:text-5xl">
-          {title}
-        </h1>
-        {description && <p className="mt-2 text-sm text-muted-foreground">{description}</p>}
+        {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {children && <div className="mt-5">{children}</div>}
     </header>
+  );
+}
+
+/** The "Back to …" link a page puts above its title, in one style everywhere. */
+export function BackLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex w-fit items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground transition hover:text-foreground"
+    >
+      <ArrowLeft className="h-3.5 w-3.5" /> {children}
+    </Link>
   );
 }
 

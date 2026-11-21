@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { NAV_ITEM_SIZE } from '@/components/nav/nav-button';
 import { usePathname } from 'next/navigation';
 import { useDownloadQueueCount } from '@/components/downloads/row-data';
 import { Download } from 'lucide-react';
@@ -20,7 +21,7 @@ export function NavDownloads() {
       href="/downloads"
       aria-label={queued > 0 ? `Downloads, ${queued} in queue` : 'Downloads'}
       aria-current={isActive ? 'page' : undefined}
-      className={`group relative grid h-11 w-11 shrink-0 place-items-center rounded-full transition focus-visible:outline-2 focus-visible:outline-primary ${
+      className={`group relative grid ${NAV_ITEM_SIZE} place-items-center rounded-full transition focus-visible:outline-2 focus-visible:outline-primary ${
         isActive
           ? 'bg-primary/15 text-primary'
           : 'text-muted-foreground hover:bg-accent hover:text-foreground'

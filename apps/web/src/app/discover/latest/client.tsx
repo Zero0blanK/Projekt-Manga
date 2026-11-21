@@ -8,7 +8,6 @@ export function LatestPageClient() {
     <DiscoverBrowsePage
       browseKey="discover-latest"
       category="latest"
-      icon={Clock}
       emptyIcon={Clock}
       defaultTitle="Latest"
     />

@@ -48,9 +48,7 @@ export function NotificationsPageClient() {
   return (
     <PageShell>
       <PageHeader
-        icon={Bell}
-        eyebrow="Notifications"
-        title="Stay in the loop"
+        title="Notifications"
         description="New chapters as your sources publish them, grouped by when they were fetched."
         actions={
           <Link

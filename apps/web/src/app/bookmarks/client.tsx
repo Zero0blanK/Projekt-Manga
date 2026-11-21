@@ -50,11 +50,8 @@ export function BookmarksPageClient() {
     <div className="mx-auto min-w-0 max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-primary">
-            <Bookmark className="h-3 w-3 fill-current" /> Bookmarks
-          </div>
-          <h1 className="mt-1 text-display text-3xl text-foreground sm:text-4xl lg:text-5xl">
-            Saved for later
+          <h1 className="text-display text-3xl text-foreground sm:text-4xl lg:text-5xl">
+            Bookmarks
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
             <span className="text-foreground">{manga.length}</span>{' '}

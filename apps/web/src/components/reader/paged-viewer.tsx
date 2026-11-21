@@ -11,9 +11,9 @@ import {
   READER_SPLIT_WIDE,
   READER_SWAP_SPREAD,
   buildReaderUnits,
-  isTallPage,
   isWidePage,
 } from '@/lib/page-image';
+import { looksLikeWebtoon, tallyPageShape } from '@/lib/webtoon-layout';
 import { useScrollBehavior } from '@/lib/scroll';
 import { READER_ZONE_LAYOUT, zoneAt } from '@/lib/click-zones';
 import {
@@ -92,7 +92,7 @@ export function PagedViewer({
   autoAdvanceSecondsLeft?: number | null;
   onCancelAutoAdvance?: () => void;
   /** Called once when most of the first pages are far taller than wide: a webtoon being
-   * read page by page, better read in the long strip. */
+   * read page by page, which the reader then opens as a long strip. */
   onLooksLikeWebtoon?: () => void;
 }) {
   const globalZoomBehavior = useSetting('zoomBehavior', 'Smart') as string;
@@ -549,9 +549,8 @@ export function PagedViewer({
                   }
                   onNaturalSize={(width, height) => {
                     const seen = shapes.current;
-                    seen.seen += 1;
-                    if (isTallPage(width, height)) seen.tall += 1;
-                    if (!seen.reported && seen.seen >= 3 && seen.tall / seen.seen >= 2 / 3) {
+                    Object.assign(seen, tallyPageShape(seen, width, height));
+                    if (!seen.reported && looksLikeWebtoon(seen)) {
                       seen.reported = true;
                       onLooksLikeWebtoon?.();
                     }

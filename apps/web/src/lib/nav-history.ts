@@ -40,7 +40,6 @@ const LABELS: Array<{ match: (path: string) => boolean; label: string }> = [
   { match: (p) => p.startsWith('/discover/preview'), label: 'details' },
   { match: (p) => p.startsWith('/discover'), label: 'Discover' },
   { match: (p) => p.startsWith('/bookmarks'), label: 'Bookmarks' },
-  { match: (p) => p.startsWith('/recents'), label: 'Recents' },
   { match: (p) => p.startsWith('/history'), label: 'History' },
   { match: (p) => p.startsWith('/downloads'), label: 'Downloads' },
   { match: (p) => p.startsWith('/notifications'), label: 'Notifications' },

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryObserver } from '@tanstack/react-query';
 
 const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
@@ -61,6 +62,26 @@ describe('ConnectionBanner', () => {
     render(<ConnectionBanner />);
     await screen.findByText(/reach the library server/, undefined, { timeout: 4000 });
   });
+
+  it('notices within seconds that a server still starting is up, and reloads what failed meanwhile', async () => {
+    mocks.getHealth.mockRejectedValue(new Error('starting'));
+    const library = vi.fn().mockRejectedValueOnce(new Error('starting')).mockResolvedValue(['One']);
+    const observer = new QueryObserver(queryClient, {
+      queryKey: ['library-under-test'],
+      queryFn: library,
+      retry: false,
+    });
+    const stop = observer.subscribe(() => {});
+    render(<ConnectionBanner />);
+    await screen.findByText(/reach the library server/, undefined, { timeout: 4000 });
+    await waitFor(() => expect(observer.getCurrentResult().isError).toBe(true));
+
+    mocks.getHealth.mockResolvedValue({ status: 'ok' });
+    // Well inside the 30-second check made while everything answers.
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull(), { timeout: 6000 });
+    await waitFor(() => expect(observer.getCurrentResult().data).toEqual(['One']));
+    stop();
+  }, 15_000);
 
   it('says what still works when the device goes offline', async () => {
     const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);

@@ -26,7 +26,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { ArrowLeft, Search, Filter, X, ChevronDown } from 'lucide-react';
+import { Search, Filter, X, ChevronDown } from 'lucide-react';
 import { MangaGrid } from '@/components/manga-grid';
 import { MangaGridSkeleton } from '@/components/skeletons';
 import { LoadError } from '@/components/load-error';
@@ -34,6 +34,7 @@ import { useInstalledExtensions } from '@/lib/extensions-store';
 import { installedExtensionFor } from '@projekt-manga/types';
 import { useContentPrivacy, isAdultSource } from './content-privacy';
 import { sourceLanguageValues, useSourceDisplayLanguage } from '@/lib/source-display-language';
+import { BackLink, PAGE_FRAME, PageHeader } from '@/components/page-shell';
 
 /** The sort filter, when a source exposes one (e.g. MangaDex's "sortBy" select). Sources
  * without it omit the sort row rather than faking options they can't honour. */
@@ -49,7 +50,6 @@ const SORT_FILTER_KEY = 'sortBy';
 export function DiscoverBrowsePage({
   browseKey,
   category,
-  icon: Icon,
   emptyIcon: EmptyIcon,
   defaultTitle,
   showRankBadges = false,
@@ -58,7 +58,6 @@ export function DiscoverBrowsePage({
   browseKey: string;
   /** The source-browse category to fetch (e.g. "popular", "latest"). */
   category: string;
-  icon: ComponentType<{ className?: string }>;
   emptyIcon: ComponentType<{ className?: string }>;
   /** Heading shown when no source-driven sort is active. */
   defaultTitle: string;
@@ -372,29 +371,19 @@ export function DiscoverBrowsePage({
   const activeSortLabel = sortOptions.find((o) => o.value === sortValue)?.label;
 
   return (
-    <div className="min-w-0 px-8 py-6">
-      <header className="flex flex-col gap-5">
-        <Link
-          href="/discover"
-          className="inline-flex w-fit items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-[11px] text-muted-foreground transition hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to Discover
-        </Link>
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-              <Icon className="h-3 w-3 text-primary" /> Browse
-            </div>
-            {/* Reflects the chosen ranking rather than always claiming the default title. */}
-            <h1 className="mt-1 truncate text-display text-4xl text-foreground">
-              {query ? `Results for “${query}”` : (activeSortLabel ?? defaultTitle)}
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {loading ? 'Loading…' : `${items.length}${hasMore ? '+' : ''} titles`}
-              {active ? ` on ${active.name}` : ''}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+    <div className={PAGE_FRAME}>
+      <PageHeader
+        back={<BackLink href="/discover">Back to Discover</BackLink>}
+        // Reflects the chosen ranking rather than always claiming the default title.
+        title={query ? `Results for “${query}”` : (activeSortLabel ?? defaultTitle)}
+        description={
+          <>
+            {loading ? 'Loading…' : `${items.length}${hasMore ? '+' : ''} titles`}
+            {active ? ` on ${active.name}` : ''}
+          </>
+        }
+        actions={
+          <>
             {capabilities?.search && (
               <form
                 onSubmit={(event) => {
@@ -483,9 +472,9 @@ export function DiscoverBrowsePage({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       {/* Source-driven ranking tabs — only rendered when the source actually supports
           sorting, so the control can never promise an ordering it won't apply. */}

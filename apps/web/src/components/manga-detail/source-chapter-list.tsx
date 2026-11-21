@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { ChapterSelectionLink } from './chapter-selection-link';
+import { CHAPTER_CONTROLS_CLASS, CHAPTER_TOOLBAR_CLASS } from './chapter-row';
+import { ChapterRowText } from './chapter-row-text';
 import { useChapterWindow } from '@/lib/chapter-window';
 import { useCoarsePointer } from '@/lib/use-coarse-pointer';
 import type { Chapters } from '@projekt-manga/types';
@@ -367,140 +369,144 @@ export function SourceChapterList({
 
   return (
     <div className="mt-12">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex items-baseline gap-3">
-          <h2 className="text-display text-2xl text-foreground">Chapters</h2>
-          <span className="text-xs text-muted-foreground">
-            {filtered.length === chapters.length
-              ? `${chapters.length} total`
-              : `${filtered.length} of ${chapters.length}`}
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground focus-within:border-primary/50">
-            <Search className="h-3.5 w-3.5" />
-            <input
-              aria-label="Find a chapter"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Find a chapter…"
-              className="w-32 bg-transparent text-foreground outline-none placeholder:text-muted-foreground pointer-coarse:min-h-6"
-            />
-            {query && (
+      {/* Held under the floating top nav while the list scrolls, as in the library list. */}
+      <div data-chapter-toolbar className={CHAPTER_TOOLBAR_CLASS}>
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+          <div className="flex items-baseline gap-3">
+            <h2 className="text-display text-2xl text-foreground">Chapters</h2>
+            <span className="text-xs text-muted-foreground">
+              {filtered.length === chapters.length
+                ? `${chapters.length} total`
+                : `${filtered.length} of ${chapters.length}`}
+            </span>
+          </div>
+          <div className={CHAPTER_CONTROLS_CLASS}>
+            <div className="flex items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground focus-within:border-primary/50">
+              <Search className="h-3.5 w-3.5" />
+              <input
+                aria-label="Find a chapter"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Find a chapter…"
+                className="w-32 bg-transparent text-foreground outline-none placeholder:text-muted-foreground pointer-coarse:min-h-6"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  aria-label="Clear search"
+                  className="hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {STATUS_FILTERS.map((s) => (
               <button
                 type="button"
-                onClick={() => setQuery('')}
-                aria-label="Clear search"
-                className="hover:text-foreground"
+                key={s}
+                onClick={() => setStatus(s)}
+                aria-pressed={status === s}
+                // `border-transparent` rather than no border keeps the selected pill the same
+                // height as its neighbours.
+                className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
+                  status === s
+                    ? 'border-transparent bg-primary text-primary-foreground shadow-glow'
+                    : 'border-border/60 bg-surface/40 text-muted-foreground hover:border-border hover:text-foreground'
+                }`}
               >
-                <X className="h-3.5 w-3.5" />
+                {s}
               </button>
-            )}
-          </div>
+            ))}
 
-          {STATUS_FILTERS.map((s) => (
+            {allGroups.length > 1 && (
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary">
+                  {group === 'All' ? 'All groups' : group}
+                  <ChevronDown className="h-3.5 w-3.5 opacity-50" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onSelect={() => setGroup('All')}
+                    className={group === 'All' ? 'text-primary' : ''}
+                  >
+                    All groups
+                  </DropdownMenuItem>
+                  {allGroups.map((g) => (
+                    <DropdownMenuItem
+                      key={g}
+                      onSelect={() => setGroup(g)}
+                      className={group === g ? 'text-primary' : ''}
+                    >
+                      {g}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
             <button
               type="button"
-              key={s}
-              onClick={() => setStatus(s)}
-              aria-pressed={status === s}
-              // `border-transparent` rather than no border keeps the selected pill the same
-              // height as its neighbours.
-              className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
-                status === s
-                  ? 'border-transparent bg-primary text-primary-foreground shadow-glow'
-                  : 'border-border/60 bg-surface/40 text-muted-foreground hover:border-border hover:text-foreground'
-              }`}
+              onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+              // No aria-label: the visible text is the name, so it matches what someone
+              // would say to a voice control. What pressing it *does* goes in the title,
+              // which becomes the description rather than replacing the name.
+              title={sortDir === 'desc' ? 'Switch to oldest first' : 'Switch to latest first'}
+              className="flex items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground transition hover:border-border hover:text-foreground"
             >
-              {s}
+              <ArrowUpDown className="h-3.5 w-3.5" />
+              {sortDir === 'desc' ? 'Latest first' : 'Oldest first'}
+              <SortDirectionIcon direction={sortDir} />
             </button>
-          ))}
-
-          {allGroups.length > 1 && (
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary">
-                {group === 'All' ? 'All groups' : group}
-                <ChevronDown className="h-3.5 w-3.5 opacity-50" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onSelect={() => setGroup('All')}
-                  className={group === 'All' ? 'text-primary' : ''}
-                >
-                  All groups
-                </DropdownMenuItem>
-                {allGroups.map((g) => (
-                  <DropdownMenuItem
-                    key={g}
-                    onSelect={() => setGroup(g)}
-                    className={group === g ? 'text-primary' : ''}
-                  >
-                    {g}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
-            // No aria-label: the visible text is the name, so it matches what someone
-            // would say to a voice control. What pressing it *does* goes in the title,
-            // which becomes the description rather than replacing the name.
-            title={sortDir === 'desc' ? 'Switch to oldest first' : 'Switch to latest first'}
-            className="flex items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground transition hover:border-border hover:text-foreground"
-          >
-            <ArrowUpDown className="h-3.5 w-3.5" />
-            {sortDir === 'desc' ? 'Latest first' : 'Oldest first'}
-            <SortDirectionIcon direction={sortDir} />
-          </button>
+          </div>
         </div>
+        {status === 'Downloaded' && downloadsError && (
+          <p role="status" className="mt-2 text-xs text-destructive">
+            Download status could not be loaded. Refresh this page to retry.
+          </p>
+        )}
+        {selected.length > 0 && (
+          <div
+            role="toolbar"
+            aria-label="Selected chapter actions"
+            className="mt-2 flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-background p-3 text-xs shadow-lg"
+          >
+            <span role="status" className="font-semibold">
+              {selected.length} selected
+            </span>
+            <button
+              type="button"
+              disabled={batchBusy}
+              className="text-primary"
+              onClick={() => void download()}
+            >
+              Download
+            </button>
+            <button
+              type="button"
+              disabled={batchBusy}
+              className="text-primary"
+              onClick={() => void markSelected(true)}
+            >
+              Mark read
+            </button>
+            <button
+              type="button"
+              disabled={batchBusy}
+              className="text-primary"
+              onClick={() => void markSelected(false)}
+            >
+              Mark unread
+            </button>
+            <button type="button" disabled={batchBusy} onClick={() => setSelected([])}>
+              Clear
+            </button>
+          </div>
+        )}
       </div>
-      {status === 'Downloaded' && downloadsError && (
-        <p role="status" className="mt-2 text-xs text-destructive">
-          Download status could not be loaded. Refresh this page to retry.
-        </p>
-      )}
-      {selected.length > 0 ? (
-        <div
-          role="toolbar"
-          aria-label="Selected chapter actions"
-          className="sticky top-36 z-20 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-background/95 p-3 text-xs shadow-lg backdrop-blur sm:top-24"
-        >
-          <span role="status" className="font-semibold">
-            {selected.length} selected
-          </span>
-          <button
-            type="button"
-            disabled={batchBusy}
-            className="text-primary"
-            onClick={() => void download()}
-          >
-            Download
-          </button>
-          <button
-            type="button"
-            disabled={batchBusy}
-            className="text-primary"
-            onClick={() => void markSelected(true)}
-          >
-            Mark read
-          </button>
-          <button
-            type="button"
-            disabled={batchBusy}
-            className="text-primary"
-            onClick={() => void markSelected(false)}
-          >
-            Mark unread
-          </button>
-          <button type="button" disabled={batchBusy} onClick={() => setSelected([])}>
-            Clear
-          </button>
-        </div>
-      ) : (
-        <p className="mt-3 text-xs text-muted-foreground">
+      {selected.length === 0 && (
+        <p className="mt-1 text-xs text-muted-foreground">
           {coarsePointer
             ? 'Long-press a chapter to select it.'
             : 'Hold a chapter or press Space to select. Right-click for actions.'}
@@ -534,7 +540,7 @@ export function SourceChapterList({
                   <li
                     aria-setsize={sorted.length}
                     aria-posinset={chapterWindow.start + index + 1}
-                    className={`flex h-[72px] items-center ${selected.includes(c.id) ? 'bg-primary/15 ring-1 ring-inset ring-primary/40' : 'transition-colors hover:bg-accent'}`}
+                    className={`flex h-12 items-center ${selected.includes(c.id) ? 'bg-primary/15 ring-1 ring-inset ring-primary/40' : 'transition-colors hover:bg-accent'}`}
                   >
                     <button
                       type="button"
@@ -562,18 +568,14 @@ export function SourceChapterList({
                         )
                       }
                     >
-                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-background text-xs font-semibold tabular-nums text-muted-foreground group-hover:text-primary">
-                        {c.chapter_number}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium text-foreground">
-                          {c.name || `Chapter ${c.chapter_number}`}
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {c.release_date ? formatRelative(c.release_date) : 'Unknown date'}
-                          {knownGroup(c.scanlator) && ` · ${knownGroup(c.scanlator)}`}
-                        </div>
-                      </div>
+                      <ChapterRowText
+                        number={c.chapter_number}
+                        title={c.name || `Chapter ${c.chapter_number}`}
+                        meta={[
+                          c.release_date ? formatRelative(c.release_date) : 'Unknown date',
+                          knownGroup(c.scanlator),
+                        ]}
+                      />
                       {progressLabel && (
                         <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium tabular-nums text-primary">
                           {progressLabel}

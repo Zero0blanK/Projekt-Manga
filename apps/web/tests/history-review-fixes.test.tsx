@@ -20,15 +20,43 @@ vi.mock('@/lib/library-store', () => ({
 vi.mock('@/lib/report-error', () => ({ reportError: vi.fn() }));
 
 const { HistoryPageClient } = await import('@/app/history/client');
-const { RecentsPageClient } = await import('@/app/recents/client');
 
 beforeEach(() => {
   vi.clearAllMocks();
   deleteHistory.mockResolvedValue(undefined);
 });
 
-describe('history and recents recovery', () => {
-  it('does not mistake a failed Recents request for an empty history', async () => {
+describe('history recovery', () => {
+  // Recents was merged into History; these two cases came over from its tests.
+  it('shows a source-only title and resumes it by chapter key', async () => {
+    getHistory.mockResolvedValueOnce([
+      {
+        id: 'history-1',
+        source: 'source-a',
+        manga_slug: 'source-title',
+        chapter_id: 'row-7',
+        source_chapter_key: 'chapter-7',
+        chapter_number: 0,
+        title: 'Real Title',
+        thumbnail_url: 'https://example.com/cover.jpg',
+        last_read: '2026-09-27T00:00:00Z',
+        read_at: '2026-09-27T00:00:00Z',
+        last_page_read: 3,
+        page_count: 10,
+      },
+    ]);
+    render(<HistoryPageClient />);
+    expect(await screen.findByRole('link', { name: 'Real Title' })).toHaveAttribute(
+      'href',
+      '/discover/preview/source-a/source-title',
+    );
+    expect(screen.getByRole('link', { name: 'Resume' })).toHaveAttribute(
+      'href',
+      '/discover/preview/source-a/source-title/read?chapterId=chapter-7&page=3',
+    );
+  });
+
+  it('does not mistake a failed request for an empty history', async () => {
     getHistory.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([
       {
         id: 'read-1',
@@ -43,8 +71,8 @@ describe('history and recents recovery', () => {
         page_count: 10,
       },
     ]);
-    render(<RecentsPageClient />);
-    expect(await screen.findByText(/Couldn't load recent reading/)).toBeInTheDocument();
+    render(<HistoryPageClient />);
+    expect(await screen.findByText(/Couldn't load your reading history/)).toBeInTheDocument();
     expect(screen.queryByText(/Nothing read yet/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('Recovered title')).toBeInTheDocument();

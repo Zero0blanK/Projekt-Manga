@@ -60,9 +60,7 @@ export function UpcomingPageClient() {
   return (
     <PageShell>
       <PageHeader
-        icon={CalendarDays}
-        eyebrow="Upcoming"
-        title="What's coming next"
+        title="Upcoming"
         description="Expected release days, estimated from each title's recent chapters."
       />
 

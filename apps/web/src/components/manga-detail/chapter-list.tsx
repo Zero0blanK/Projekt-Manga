@@ -84,6 +84,8 @@ import { useCurrentUser } from '@/lib/session-resource';
 import { useNewSinceLastVisit } from '@/lib/chapter-visits';
 import { applyExternalChapterState } from '@/lib/external-backup/extras';
 import { useDownloads } from '@/lib/shared-queries';
+import { CHAPTER_CONTROLS_CLASS, CHAPTER_TOOLBAR_CLASS } from './chapter-row';
+import { ChapterRowText } from './chapter-row-text';
 
 type ChapterRow = {
   /** The stored row's id: reader links, downloads and bookmarks look it up. */
@@ -150,7 +152,7 @@ function ChapterListItem({
         <li
           aria-setsize={total}
           aria-posinset={index + 1}
-          className={`flex h-[72px] items-center ${selected ? 'bg-primary/15 ring-1 ring-inset ring-primary/40' : 'transition-colors hover:bg-accent'}`}
+          className={`flex h-12 items-center ${selected ? 'bg-primary/15 ring-1 ring-inset ring-primary/40' : 'transition-colors hover:bg-accent'}`}
         >
           <button
             type="button"
@@ -179,18 +181,9 @@ function ChapterListItem({
                 onSelect();
               }
             }}
-            className={`flex h-full min-w-0 flex-1 items-center gap-4 px-4 py-3 ${selected ? '' : 'group'}`}
+            className={`flex h-full min-w-0 flex-1 items-center gap-3 py-1 pl-2 pr-4 ${selected ? '' : 'group'}`}
           >
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-background text-xs font-semibold tabular-nums text-muted-foreground group-hover:text-primary">
-              {c.n}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium text-foreground">{c.title}</div>
-              <div className="text-xs text-muted-foreground">
-                {c.date}
-                {c.group && ` · ${c.group}`}
-              </div>
-            </div>
+            <ChapterRowText number={c.n} title={c.title} meta={[c.date, c.group]} />
             {missing > 0 && (
               <span
                 title={
@@ -674,177 +667,182 @@ export function ChapterList({ manga }: { manga: Manga }) {
 
   return (
     <div className="mt-12">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex items-baseline gap-3">
-          <h2 className="text-display text-2xl text-foreground">Chapters</h2>
-          <span className="text-xs text-muted-foreground">
-            {filtered.length === chapters.length
-              ? `${chapters.length} total`
-              : `${filtered.length} of ${chapters.length}`}
-          </span>
-          {newUnread > 0 && (
-            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
-              {newUnread} new since your last visit
+      {/* Stays under the floating top nav while the list scrolls, so search, filters and
+          sort (and the selection actions) are never a long scroll back up. */}
+      <div data-chapter-toolbar className={CHAPTER_TOOLBAR_CLASS}>
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+          <div className="flex items-baseline gap-3">
+            <h2 className="text-display text-2xl text-foreground">Chapters</h2>
+            <span className="text-xs text-muted-foreground">
+              {filtered.length === chapters.length
+                ? `${chapters.length} total`
+                : `${filtered.length} of ${chapters.length}`}
             </span>
-          )}
-          {checking && (
-            <span role="status" className="flex items-center gap-1.5 text-xs text-primary">
-              <RefreshCw className="h-3 w-3 animate-spin" />
-              Checking for new chapters…
-            </span>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground focus-within:border-primary/50">
-            <Search className="h-3.5 w-3.5" />
-            <input
-              aria-label="Find a chapter"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Find a chapter…"
-              className="w-32 bg-transparent text-foreground outline-none placeholder:text-muted-foreground pointer-coarse:min-h-6"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => setQuery('')}
-                aria-label="Clear search"
-                className="hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+            {newUnread > 0 && (
+              <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+                {newUnread} new since your last visit
+              </span>
+            )}
+            {checking && (
+              <span role="status" className="flex items-center gap-1.5 text-xs text-primary">
+                <RefreshCw className="h-3 w-3 animate-spin" />
+                Checking for new chapters…
+              </span>
             )}
           </div>
+          <div className={CHAPTER_CONTROLS_CLASS}>
+            <div className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground focus-within:border-primary/50">
+              <Search className="h-3.5 w-3.5" />
+              <input
+                aria-label="Find a chapter"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Find a chapter…"
+                className="w-32 bg-transparent text-foreground outline-none placeholder:text-muted-foreground pointer-coarse:min-h-6"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  aria-label="Clear search"
+                  className="hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
 
-          {STATUS_FILTERS.map((s) => (
-            <button
-              type="button"
-              key={s}
-              onClick={() => setStatus(s)}
-              aria-pressed={status === s}
-              // `border-transparent` rather than no border keeps the selected pill the same
-              // height as its neighbours.
-              className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
-                status === s
-                  ? 'border-transparent bg-primary text-primary-foreground shadow-glow'
-                  : 'border-border/60 bg-surface/40 text-muted-foreground hover:border-border hover:text-foreground'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
+            {STATUS_FILTERS.map((s) => (
+              <button
+                type="button"
+                key={s}
+                onClick={() => setStatus(s)}
+                aria-pressed={status === s}
+                // `border-transparent` rather than no border keeps the selected pill the same
+                // height as its neighbours.
+                className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
+                  status === s
+                    ? 'border-transparent bg-primary text-primary-foreground shadow-glow'
+                    : 'border-border/60 bg-surface/40 text-muted-foreground hover:border-border hover:text-foreground'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
 
-          {allGroups.length > 1 && (
+            {allGroups.length > 1 && (
+              <DropdownMenu modal={false}>
+                <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary">
+                  {group === 'All' ? 'All groups' : group}
+                  <ChevronDown className="h-3.5 w-3.5 opacity-50" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onSelect={() => setGroup('All')}
+                    className={group === 'All' ? 'text-primary' : ''}
+                  >
+                    All groups
+                  </DropdownMenuItem>
+                  {allGroups.map((g) => (
+                    <DropdownMenuItem
+                      key={g}
+                      onSelect={() => setGroup(g)}
+                      className={group === g ? 'text-primary' : ''}
+                    >
+                      {g}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                    Hide groups
+                  </DropdownMenuLabel>
+                  {allGroups.map((g) => (
+                    <DropdownMenuCheckboxItem
+                      key={g}
+                      checked={hiddenGroups.includes(g)}
+                      onCheckedChange={() => toggleHiddenGroup(g)}
+                      onSelect={(event) => event.preventDefault()}
+                    >
+                      {g}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
             <DropdownMenu modal={false}>
               <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary">
-                {group === 'All' ? 'All groups' : group}
+                <ArrowUpDown className="h-3.5 w-3.5" />
+                {SORTS.find((s) => s.value === sort)?.label}
                 <ChevronDown className="h-3.5 w-3.5 opacity-50" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onSelect={() => setGroup('All')}
-                  className={group === 'All' ? 'text-primary' : ''}
-                >
-                  All groups
-                </DropdownMenuItem>
-                {allGroups.map((g) => (
-                  <DropdownMenuItem
-                    key={g}
-                    onSelect={() => setGroup(g)}
-                    className={group === g ? 'text-primary' : ''}
-                  >
-                    {g}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                  Hide groups
-                </DropdownMenuLabel>
-                {allGroups.map((g) => (
-                  <DropdownMenuCheckboxItem
-                    key={g}
-                    checked={hiddenGroups.includes(g)}
-                    onCheckedChange={() => toggleHiddenGroup(g)}
-                    onSelect={(event) => event.preventDefault()}
-                  >
-                    {g}
-                  </DropdownMenuCheckboxItem>
-                ))}
+                {SORTS.map((s) => {
+                  const active = sort === s.value;
+                  return (
+                    <DropdownMenuItem
+                      key={s.value}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        if (active) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+                        else {
+                          setSort(s.value);
+                          setSortDir('desc');
+                        }
+                      }}
+                      className={`flex items-center justify-between ${active ? 'text-primary' : ''}`}
+                    >
+                      {s.label}
+                      {active && <SortDirectionIcon direction={sortDir} />}
+                    </DropdownMenuItem>
+                  );
+                })}
               </DropdownMenuContent>
             </DropdownMenu>
-          )}
-
-          <DropdownMenu modal={false}>
-            <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-full border border-border/60 bg-surface/40 px-3 py-1.5 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary">
-              <ArrowUpDown className="h-3.5 w-3.5" />
-              {SORTS.find((s) => s.value === sort)?.label}
-              <ChevronDown className="h-3.5 w-3.5 opacity-50" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {SORTS.map((s) => {
-                const active = sort === s.value;
-                return (
-                  <DropdownMenuItem
-                    key={s.value}
-                    onSelect={(e) => {
-                      e.preventDefault();
-                      if (active) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-                      else {
-                        setSort(s.value);
-                        setSortDir('desc');
-                      }
-                    }}
-                    className={`flex items-center justify-between ${active ? 'text-primary' : ''}`}
-                  >
-                    {s.label}
-                    {active && <SortDirectionIcon direction={sortDir} />}
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          </div>
         </div>
+        {selected.length > 0 && (
+          <div
+            className="mt-2 flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-background p-3 text-xs shadow-lg"
+            role="toolbar"
+            aria-label="Selected chapter actions"
+          >
+            <span role="status" className="font-semibold">
+              {selected.length} selected
+            </span>
+            <button
+              type="button"
+              disabled={batchBusy || !downloadsAvailable}
+              onClick={() => void batch('download')}
+              className="inline-flex items-center gap-1 text-primary disabled:opacity-40"
+            >
+              <Download size={14} />
+              Download
+            </button>
+            <button
+              type="button"
+              disabled={batchBusy}
+              onClick={() => void batch('read')}
+              className="text-primary"
+            >
+              Mark read
+            </button>
+            <button
+              type="button"
+              disabled={batchBusy}
+              onClick={() => void batch('unread')}
+              className="text-primary"
+            >
+              Mark unread
+            </button>
+            <button type="button" disabled={batchBusy} onClick={() => setSelected([])}>
+              Clear selection ({selected.length})
+            </button>
+          </div>
+        )}
       </div>
-      {selected.length > 0 ? (
-        <div
-          className="sticky top-36 z-20 mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-background/95 p-3 text-xs shadow-lg backdrop-blur sm:top-24"
-          role="toolbar"
-          aria-label="Selected chapter actions"
-        >
-          <span role="status" className="font-semibold">
-            {selected.length} selected
-          </span>
-          <button
-            type="button"
-            disabled={batchBusy || !downloadsAvailable}
-            onClick={() => void batch('download')}
-            className="inline-flex items-center gap-1 text-primary disabled:opacity-40"
-          >
-            <Download size={14} />
-            Download
-          </button>
-          <button
-            type="button"
-            disabled={batchBusy}
-            onClick={() => void batch('read')}
-            className="text-primary"
-          >
-            Mark read
-          </button>
-          <button
-            type="button"
-            disabled={batchBusy}
-            onClick={() => void batch('unread')}
-            className="text-primary"
-          >
-            Mark unread
-          </button>
-          <button type="button" disabled={batchBusy} onClick={() => setSelected([])}>
-            Clear selection ({selected.length})
-          </button>
-        </div>
-      ) : (
-        <p className="mt-3 text-xs text-muted-foreground">
+      {selected.length === 0 && (
+        <p className="mt-1 text-xs text-muted-foreground">
           {coarsePointer
             ? 'Long-press a chapter to select it.'
             : 'Hold a chapter or press Space to select. Right-click for actions.'}

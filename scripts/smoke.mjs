@@ -727,7 +727,7 @@ try {
     });
     const libraryLoadStartedAt = performance.now();
     await page.goto(`${webUrl}/`);
-    await page.getByRole('heading', { name: 'My Library' }).waitFor();
+    await page.getByRole('heading', { name: 'Library', level: 1 }).waitFor();
     await page.getByText('Showing 1000', { exact: true }).waitFor();
     await page.locator('main a[href^="/manga/perf-title-"]').first().waitFor();
     const initiallyMountedLibraryCards = await page
@@ -785,7 +785,8 @@ try {
       .waitFor({ state: 'detached' });
     // Upcoming groups titles by expected release day, past-due ones first, and leaves out
     // estimates for titles that aren't in the library.
-    await page.getByRole('link', { name: 'Upcoming releases' }).click();
+    await page.getByRole('button', { name: 'More library pages' }).click();
+    await page.getByRole('menuitem', { name: 'Upcoming releases' }).click();
     await page.getByRole('heading', { name: 'Overdue', level: 2 }).waitFor();
     await page.getByText('Performance title 0001', { exact: true }).waitFor();
     await page.getByText('Performance title 0000', { exact: true }).waitFor();
@@ -853,14 +854,17 @@ try {
     await page
       .getByRole('toolbar', { name: 'Selected library titles' })
       .waitFor({ state: 'hidden' });
+    // Unread lives in the Filters menu with the other ways to narrow the list.
+    await page.getByRole('button', { name: /^Filters/ }).click();
     await page.getByRole('button', { name: 'Unread', exact: true }).click();
     assert.equal(
       await page.getByRole('button', { name: 'Unread', exact: true }).getAttribute('aria-pressed'),
       'true',
     );
     await page.getByRole('button', { name: 'Unread', exact: true }).click();
+    await page.keyboard.press('Escape');
     await page.goto(`${webUrl}/discover`);
-    await page.getByRole('heading', { name: 'Sources' }).waitFor();
+    await page.getByRole('heading', { name: 'Discover', level: 1 }).waitFor();
     try {
       await page.getByText('Smoke Source').first().waitFor();
     } catch (error) {
@@ -947,13 +951,18 @@ try {
     const mobileLayout = await page.evaluate(() => ({
       navBottom: document.querySelector('nav').getBoundingClientRect().bottom,
       contentTop: document.querySelector('main').firstElementChild.getBoundingClientRect().top,
-      searchWidth: document.querySelector('nav input').getBoundingClientRect().width,
     }));
     assert.ok(
       mobileLayout.contentTop >= mobileLayout.navBottom,
       'Mobile nav must not cover page content',
     );
-    assert.ok(mobileLayout.searchWidth >= 70, 'Mobile search must remain usable');
+    // On a phone the search field waits behind a Search button, so the bar stays one row.
+    await page.locator('nav').getByRole('button', { name: 'Search', exact: true }).click();
+    const searchWidth = await page.evaluate(
+      () => document.querySelector('nav input').getBoundingClientRect().width,
+    );
+    assert.ok(searchWidth >= 70, 'Mobile search must remain usable');
+    await page.locator('nav').getByRole('button', { name: 'Search', exact: true }).click();
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto(`${webUrl}/settings`);
     await page.getByRole('button', { name: 'Privacy', exact: true }).click();
@@ -1259,13 +1268,12 @@ try {
       [137, 80, 78, 71],
       'The uploaded cover is the page image',
     );
-    // A chapter of very tall pages read page by page: the reader offers the long strip,
-    // and taking it switches this title over.
+    // A chapter of very tall pages, with a paged layout configured: it opens as a long strip
+    // on its own (a strip page in a spread is a sliver), and says so.
     await page.goto(`${webUrl}/reader/smoke-1?ch=3&chapterId=smoke-chapter-3`);
     await page
-      .getByText('This looks like a webtoon.', { exact: false })
+      .getByText('This looks like a webtoon, so it opened as one long strip.')
       .waitFor({ timeout: 30_000 });
-    await page.getByRole('button', { name: 'Use long strip' }).click();
     await page.waitForFunction(
       () => document.querySelectorAll('[data-unit]').length === 0,
       undefined,
@@ -1274,13 +1282,18 @@ try {
         timeout: 30_000,
       },
     );
-    assert.equal(await page.getByText('This looks like a webtoon.', { exact: false }).count(), 0);
+    await page.getByRole('button', { name: 'Got it' }).click();
+    assert.equal(await page.getByText('This looks like a webtoon', { exact: false }).count(), 0);
     // Undo this stage's per-title choices so later stages read smoke-1 as before.
     await page.evaluate(() => {
       const key = 'projekt-manga:state:v1';
       const state = JSON.parse(localStorage.getItem(key) ?? '{}');
       for (const name of Object.keys(state.settings ?? {}))
-        if (name.includes('reader-override:') || name.includes('webtoon-suggestion-dismissed:'))
+        if (
+          name.includes('reader-override:') ||
+          name.includes('webtoon-suggestion-dismissed:') ||
+          name.includes('webtoon-detected:')
+        )
           delete state.settings[name];
       localStorage.setItem(key, JSON.stringify(state));
     });

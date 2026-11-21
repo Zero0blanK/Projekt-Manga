@@ -36,7 +36,12 @@ export function SelectMenu({
   disabled?: boolean;
   className?: string;
 }) {
-  const shown = options.find((option) => option.value === value)?.label ?? placeholder;
+  // One entry per value: a repeated one (from a source's own list, say) would be the same
+  // choice twice, and React can't tell the two rows apart.
+  const choices = options.filter(
+    (option, index) => options.findIndex((other) => other.value === option.value) === index,
+  );
+  const shown = choices.find((option) => option.value === value)?.label ?? placeholder;
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger
@@ -51,8 +56,13 @@ export function SelectMenu({
         <span className="truncate">{shown}</span>
         <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-50" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-72 min-w-40">
-        {options.map((option) => (
+      {/* Level with its button and at least as wide, whatever width the button is given; a
+          small button (the year picker) gets no wider floor than itself. */}
+      <DropdownMenuContent
+        align="start"
+        className="max-h-72 min-w-(--radix-dropdown-menu-trigger-width)"
+      >
+        {choices.map((option) => (
           <DropdownMenuItem
             key={option.value}
             aria-current={option.value === value ? 'true' : undefined}

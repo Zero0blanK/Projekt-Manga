@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import { LibraryPageClient } from './client';
-import { libraryPreloadScript } from '@/lib/library-preload';
 
 export const metadata: Metadata = {
   title: 'My Library — Projekt Manga',
@@ -12,12 +11,7 @@ export const metadata: Metadata = {
   },
 };
 
+// The library's first page starts downloading from the root layout: see lib/library-preload.ts.
 export default function LibraryPage() {
-  return (
-    <>
-      {/* Runs as the HTML arrives: see lib/library-preload.ts. */}
-      <script dangerouslySetInnerHTML={{ __html: libraryPreloadScript() }} />
-      <LibraryPageClient />
-    </>
-  );
+  return <LibraryPageClient />;
 }

@@ -57,9 +57,12 @@ import { useNextChapterPreload } from '@/components/reader/use-next-chapter-prel
 import { useReaderChrome } from '@/components/reader/use-reader-chrome';
 import { ReaderShortcuts } from '@/components/reader/reader-shortcuts';
 import { WebtoonSuggestion } from '@/components/reader/webtoon-suggestion';
+import { resolveWebtoonLayout } from '@/lib/webtoon-layout';
 import { setPageAsCover } from '@/components/reader/set-page-as-cover';
 import { LinkedSourceFallback } from '@/components/reader/linked-source-fallback';
 import { ReaderContextMenu } from '@/components/reader/reader-context-menu';
+
+const parseFlag = (raw: unknown) => raw === true;
 
 function positiveIntParam(searchParams: URLSearchParams, key: string): number | undefined {
   const raw = Number(searchParams.get(key));
@@ -87,7 +90,9 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
     '',
   );
   const {
-    effectiveLayout,
+    effectiveLayout: configuredLayout,
+    pageLayout,
+    titlePageLayout,
     readingDirection,
     immersiveMode: immersiveSetting,
     preloadNextChapter,
@@ -127,7 +132,20 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   const [chapter, setChapter] = useState(requestedChapter);
   const [page, setPage] = useState(requestedPage ?? 1);
   const { zoom, setZoom, zoomIn, zoomOut, zoomReset } = useReaderZoom();
-  const [looksLikeWebtoon, setLooksLikeWebtoon] = useState(false);
+  // Tall strip pages spotted while reading page by page (this visit), or on an earlier
+  // visit to this title, so later chapters open straight into the long strip.
+  const [webtoonSeen, setWebtoonSeen] = useState(false);
+  const [webtoonRemembered, setWebtoonRemembered] = useProfilePreference(
+    `webtoon-detected:${manga.source}:${manga.id}`,
+    parseFlag,
+    false,
+  );
+  const looksLikeWebtoon = webtoonSeen || webtoonRemembered;
+  const effectiveLayout = resolveWebtoonLayout({
+    layout: configuredLayout,
+    webtoon: looksLikeWebtoon,
+    titleLayout: titlePageLayout,
+  });
   // Seeded from the setting, then toggled for the session by the "F" key. The initial
   // useState value is the *pre-hydration* default (the store only reads localStorage in an
   // effect), so it has to be re-synced once the real setting arrives — otherwise turning
@@ -602,7 +620,9 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
         <WebtoonSuggestion
           source={manga.source}
           mangaId={manga.id}
-          visible={looksLikeWebtoon && effectiveLayout !== 'Long strip'}
+          visible={effectiveLayout === 'Long strip' && configuredLayout !== 'Long strip'}
+          pagedLayout={pageLayout}
+          readingDirection={readingDirection}
           base={{
             zoomBehavior,
             brightness,
@@ -804,7 +824,10 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
               fitOverride={zoomBehavior}
               autoAdvanceSecondsLeft={autoAdvanceCountdown.secondsLeft}
               onCancelAutoAdvance={autoAdvanceCountdown.cancel}
-              onLooksLikeWebtoon={() => setLooksLikeWebtoon(true)}
+              onLooksLikeWebtoon={() => {
+                setWebtoonSeen(true);
+                setWebtoonRemembered(true);
+              }}
             />
           )}
         </ReaderContextMenu>

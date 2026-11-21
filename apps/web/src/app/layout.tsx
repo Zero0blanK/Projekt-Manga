@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { AppShell } from '@/components/app-shell';
 import { QueryProvider } from '@/components/query-provider';
 import { CoverPrivacyProvider } from '@/components/discover/cover-privacy-provider';
+import { libraryPreloadScript } from '@/lib/library-preload';
 import { SPLASH_INIT_SCRIPT } from '@/lib/splash';
 import { THEME_INIT_SCRIPT } from '@/lib/theme';
 // Bundled with the app (no font host), so the Frost and Ink interface styles work offline.
@@ -49,6 +50,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             — see SPLASH_INIT_SCRIPT. SplashIntro renders unconditionally as server HTML, so
             without this the real page would show briefly before React took over. */}
         <script dangerouslySetInnerHTML={{ __html: SPLASH_INIT_SCRIPT }} />
+        {/* Starts the library's first page downloading with the HTML when the library is the
+            page being opened — see lib/library-preload.ts. Here rather than in the library
+            page so it never renders on a client-side navigation, where React won't run it
+            and warns about it. */}
+        <script dangerouslySetInnerHTML={{ __html: libraryPreloadScript() }} />
       </head>
       <body>
         <QueryProvider>

@@ -149,7 +149,9 @@ export function ContinueReadingHero({
               <p className="mt-1 text-xs text-muted-foreground">Not started yet</p>
             )}
             <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-              <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+              {/* Its own line on a phone: beside the buttons it was squeezed into a column a
+                  word or two wide. */}
+              <p className="min-w-0 basis-full text-xs text-muted-foreground sm:flex-1 sm:basis-auto">
                 {[
                   started ? pageLabel : null,
                   remaining > 0

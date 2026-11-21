@@ -5,6 +5,7 @@ import {
   Field,
   Group,
   Select,
+  OptionSelect,
   Toggle,
   NumberSelect,
   Range,
@@ -16,7 +17,7 @@ import {
   READER_TRANSLATE_TARGET,
   TRANSLATE_LANGUAGES,
 } from '@/lib/page-translation';
-import { useMangaLibrary } from '@/lib/library-store';
+import { useMangaLibrary, useSources } from '@/lib/library-store';
 import {
   DEFAULT_PAGE_PREFETCH,
   DEFAULT_CHAPTER_PREFETCH,
@@ -78,7 +79,14 @@ export function ReaderPanel() {
   // Vertical reading forces the long-strip viewer, so the paged-only options below
   // don't apply — same rule the reader itself uses to pick a viewer.
   const longStrip = readingDirection === 'Vertical (webtoon)' || pageLayout === 'Long strip';
-  const sources = [...new Set(manga.map((entry) => entry.source))].sort();
+  // Stored by id (the setting key is per id), shown by the installed source's name —
+  // "MangaGeko", not "mangageko". The id stands in until the source list loads, or for
+  // a source that is no longer installed.
+  const { sources: installed } = useSources();
+  const sourceName = (id: string) => installed.find((source) => source.id === id)?.name ?? id;
+  const sources = [...new Set(manga.map((entry) => entry.source))]
+    .map((id) => ({ value: id, label: sourceName(id) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
   const leftTap = useSetting('readerTapLeft', 'Direction');
   const centerTap = useSetting('readerTapCenter', 'Controls');
   const rightTap = useSetting('readerTapRight', 'Opposite');
@@ -104,14 +112,14 @@ export function ReaderPanel() {
               label="Per-source direction"
               hint="Override the default for titles from one source"
             >
-              <Select
+              <OptionSelect
                 settingKey="readerDirectionSource"
                 options={sources}
-                defaultValue={sources[0]}
+                defaultValue={sources[0].value}
               />
             </Field>
             {directionSource && (
-              <Field label={`Direction for ${directionSource}`}>
+              <Field label={`Direction for ${sourceName(directionSource)}`}>
                 <Select
                   settingKey={`readerDirection:${directionSource}`}
                   options={['Use default', 'Right to left', 'Left to right', 'Vertical (webtoon)']}

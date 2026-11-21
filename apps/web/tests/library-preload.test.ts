@@ -40,6 +40,15 @@ describe('preloading the library', () => {
     expect(runScript()).toBeNull();
   });
 
+  it('does nothing when another page is being opened, since every page loads it', () => {
+    window.history.replaceState(null, '', '/settings');
+    try {
+      expect(runScript()).toBeNull();
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
+  });
+
   it('writes a URL into the inline script so it can never end the element', () => {
     const hostile = 'https://x.test/api/</script><script>alert(1)</script><!--';
     const literal = scriptString(hostile);

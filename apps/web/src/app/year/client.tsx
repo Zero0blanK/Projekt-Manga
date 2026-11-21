@@ -106,8 +106,6 @@ export function YearInMangaClient() {
   return (
     <PageShell>
       <PageHeader
-        icon={Sparkles}
-        eyebrow="Year in manga"
         title={`Your ${shown} in manga`}
         description="Made on this device from your reading history. Nothing is uploaded."
         actions={

@@ -127,7 +127,8 @@ export function FilterPills({
             }`}
           >
             {f.label}
-            {!counting && (
+            {/* An empty shelf shows no "0": a row of zeros is noise beside the one that counts. */}
+            {!counting && count > 0 && (
               <span className={`ml-1.5 tabular-nums ${on ? 'opacity-80' : 'opacity-60'}`}>
                 {count}
               </span>
@@ -157,9 +158,11 @@ export function FilterPills({
                 }`}
               >
                 {c}
-                <span className={`ml-1.5 tabular-nums ${on ? 'opacity-80' : 'opacity-60'}`}>
-                  {count}
-                </span>
+                {count > 0 && (
+                  <span className={`ml-1.5 tabular-nums ${on ? 'opacity-80' : 'opacity-60'}`}>
+                    {count}
+                  </span>
+                )}
               </button>
             </ContextMenuTrigger>
             <ContextMenuContent>
