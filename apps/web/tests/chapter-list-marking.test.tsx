@@ -141,4 +141,23 @@ describe('marking chapters in the library list', () => {
     expect(mocks.toast).toHaveBeenCalledWith({ description: 'Updated 2 chapters; 1 failed' });
     expect(mocks.toastWithUndo).not.toHaveBeenCalled();
   });
+
+  it('forgets the page a chapter was left on once it is marked unread', async () => {
+    mocks.getMangaChapters.mockResolvedValue([
+      record(1),
+      { ...record(2), is_read: true, last_page_read: 20 },
+    ]);
+    mocks.markChapterAsUnread.mockResolvedValue({ count: 1 });
+    render(<ChapterList manga={manga} />);
+    const row = () => screen.getByRole('link', { name: /Chapter 2/ });
+    await screen.findByRole('link', { name: /Chapter 2/ });
+    expect(row().textContent).not.toMatch(/Page \d/);
+
+    await act(async () => fireEvent.click(menu('Mark as unread')[0]));
+
+    expect(mocks.markChapterAsUnread).toHaveBeenCalled();
+    expect(readCount()).toBe(0);
+    // Not "Page 20 of 20": unread means not started.
+    expect(row().textContent).not.toMatch(/Page \d/);
+  });
 });

@@ -1454,10 +1454,7 @@ try {
     // Group B's release of the same chapter, not chapter 5.
     await setReaderSetting('pageLayout', 'Long strip');
     await page.goto(chapterFour(1));
-    await page
-      .getByText('Chapter 4 · Chapter 4', { exact: false })
-      .first()
-      .waitFor({ timeout: 30_000 });
+    await page.getByText('Chapter 4', { exact: true }).first().waitFor({ timeout: 30_000 });
     const groupB = page.getByText('Chapter 4 · Group B', { exact: false }).first();
     for (let i = 0; i < 40 && !(await groupB.isVisible()); i++) {
       await page.evaluate(() => {

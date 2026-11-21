@@ -6,6 +6,7 @@ import { ExitReaderButton } from '@/components/reader/exit-reader-button';
 import { PageImageActions } from '@/components/reader/page-image-actions';
 import { ReaderSettingsMenu } from '@/components/reader/reader-settings-menu';
 import { useReaderInput } from '@/components/reader/use-reader-input';
+import { titleShowsNumber } from '@/components/manga-detail/chapter-row';
 import type { Manga } from '@/lib/manga-data';
 import type { MangaChapterRecord } from '@projekt-manga/api-client';
 import { X, Minimize2, List, ZoomIn, ZoomOut, Bookmark } from 'lucide-react';
@@ -68,7 +69,12 @@ export function ReaderHeader({
       <div className="min-w-0">
         <div className="truncate text-sm font-semibold text-white">{manga.title}</div>
         <div className="truncate text-xs text-white/50">
-          Chapter {chapter} · {title}
+          {/* "Chapter 1" alone when that is the name; the number only leads a custom one. */}
+          {!title || title === `Chapter ${chapter}`
+            ? `Chapter ${chapter}`
+            : titleShowsNumber(title, chapter)
+              ? title
+              : `Chapter ${chapter} · ${title}`}
         </div>
       </div>
       <div className="relative ml-auto flex items-center gap-1">

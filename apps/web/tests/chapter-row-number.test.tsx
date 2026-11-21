@@ -57,12 +57,17 @@ describe('chapter number in a row', () => {
     );
 
     const row = (name: RegExp) => screen.getByRole('link', { name });
-    // The visible text, in order: title, then the details line.
-    expect(row(/^Chapter 254, /).textContent).toBe('Chapter 254Unknown date');
+    // The visible text, in order: title, the details line (phones), then the group and date
+    // columns (wide screens); CSS shows one or the other.
+    expect(row(/^Chapter 254, /).textContent).toBe(
+      'Chapter 254Unknown date · Unknown groupUnknown groupUnknown date',
+    );
     expect(row(/^Chapter 253 · The Final Battle/).textContent).toBe(
-      'The Final BattleCh. 253 · Unknown date',
+      'The Final BattleCh. 253 · Unknown date · Unknown groupUnknown groupUnknown date',
     );
     // The accessible names (matched above) keep "Chapter N" either way.
-    expect(row(/^Chapter 252, /).textContent).toBe('Chapter 252Unknown date');
+    expect(row(/^Chapter 252, /).textContent).toBe(
+      'Chapter 252Unknown date · Unknown groupUnknown groupUnknown date',
+    );
   });
 });

@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
 import { SourcePreviewShell } from '@/components/discover/source-preview-shell';
 import { MangaDetailHeaderSkeleton } from '@/components/skeletons';
+import { DETAIL_FRAME_X } from '@/components/manga-detail/detail-frame';
 
 /** Shown while the preview page's own server-side fetch (getSourceMangaDetails, a live
  * scrape) is in flight — this can take noticeably longer than a database read. Opened from
@@ -15,7 +16,7 @@ export default function Loading() {
     <Suspense
       fallback={
         <>
-          <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-8">
+          <div className={`${DETAIL_FRAME_X} pt-4`}>
             <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
               Loading details from the source…

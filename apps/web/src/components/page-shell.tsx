@@ -13,7 +13,7 @@ export function PageShell({ children }: { children: ReactNode }) {
 }
 
 /** The frame's classes, for a page that needs them on an element of its own. */
-export const PAGE_FRAME = 'mx-auto w-full min-w-0 max-w-6xl px-4 py-6 sm:px-6 lg:px-8';
+export const PAGE_FRAME = 'mx-auto w-full min-w-0 max-w-[96rem] px-4 py-6 sm:px-6 lg:px-8';
 
 /**
  * Every page's title block. The title is the page's name, the one the navigation uses, so

@@ -106,7 +106,7 @@ export function MangaCoverDialog({ manga }: { manga: Manga }) {
       <DialogTrigger asChild>
         <button
           type="button"
-          className="block w-full max-w-[220px] cursor-zoom-in text-left transition hover:opacity-90"
+          className="block w-full cursor-zoom-in text-left transition hover:opacity-90"
           aria-label={`View cover for ${manga.title}`}
         >
           <MangaCover manga={manga} chapterBadge={false} statusBadge={false} />
