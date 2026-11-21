@@ -15,7 +15,7 @@ export function MangaSynopsis({ synopsis }: { synopsis: string }) {
   return (
     <>
       <p
-        className={`mt-3 max-w-2xl text-sm leading-relaxed text-foreground/80 ${
+        className={`mt-3 max-w-3xl text-sm leading-relaxed text-foreground/80 ${
           expanded || !clampable ? '' : 'line-clamp-3'
         }`}
       >

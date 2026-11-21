@@ -158,6 +158,11 @@ export function SourceChapterList({
     setReadIds(readChapterIds);
   }, [readChapterIds]);
 
+  // Chapters marked unread here since the parent's history last loaded: the server forgets
+  // their page, so they read as not started rather than showing the page they were left on.
+  const [progressCleared, setProgressCleared] = useState<Set<string>>(new Set());
+  useEffect(() => setProgressCleared(new Set()), [chapterProgress]);
+
   const applyRead = (next: Set<string>) => {
     readIdsRef.current = next;
     setReadIds(next);
@@ -197,11 +202,16 @@ export function SourceChapterList({
     isRead: (c) => readIdsRef.current.has(c.id),
     setRead: (changes) => {
       const next = new Set(readIdsRef.current);
+      const unread: string[] = [];
       for (const [id, read] of changes) {
         if (read) next.add(id);
-        else next.delete(id);
+        else {
+          next.delete(id);
+          unread.push(id);
+        }
       }
       applyRead(next);
+      if (unread.length) setProgressCleared((current) => new Set([...current, ...unread]));
     },
     mark: (c, read) =>
       (read ? markChapterAsRead : markChapterAsUnread)(mangaSlug, c.id, payloadFor(c)),
@@ -528,12 +538,11 @@ export function SourceChapterList({
           {chapterWindow.top > 0 && <li aria-hidden="true" style={{ height: chapterWindow.top }} />}
           {visibleChapters.map((c, index) => {
             const read = readIds.has(c.id);
-            const progress = chapterProgress.get(c.id);
+            const progress = progressCleared.has(c.id) ? undefined : chapterProgress.get(c.id);
             const pageCount =
               c.page_count && c.page_count > 0 ? c.page_count : (progress?.page_count ?? 0);
             const lastPage = progress?.last_page_read ?? 0;
-            const progressLabel =
-              !read && lastPage > 0 && pageCount > lastPage ? `${lastPage} / ${pageCount}` : null;
+            const inProgress = !read && lastPage > 0 && pageCount > lastPage;
             return (
               <ContextMenu key={c.id} modal={false}>
                 <ContextMenuTrigger asChild>
@@ -571,21 +580,11 @@ export function SourceChapterList({
                       <ChapterRowText
                         number={c.chapter_number}
                         title={c.name || `Chapter ${c.chapter_number}`}
-                        meta={[
-                          c.release_date ? formatRelative(c.release_date) : 'Unknown date',
-                          knownGroup(c.scanlator),
-                        ]}
+                        date={c.release_date ? formatRelative(c.release_date) : 'Unknown date'}
+                        group={knownGroup(c.scanlator)}
+                        read={read}
+                        progress={inProgress ? { page: lastPage, total: pageCount } : null}
                       />
-                      {progressLabel && (
-                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium tabular-nums text-primary">
-                          {progressLabel}
-                        </span>
-                      )}
-                      {read && (
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                          Read
-                        </span>
-                      )}
                       <Play className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition group-hover:text-primary group-hover:opacity-100" />
                     </ChapterSelectionLink>
                   </li>

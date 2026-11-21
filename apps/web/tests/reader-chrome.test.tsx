@@ -1,8 +1,16 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useReaderChrome } from '@/components/reader/use-reader-chrome';
+import { STRIP_CHROME_LINGER_MS, useReaderChrome } from '@/components/reader/use-reader-chrome';
 
 const IDLE_MS = 2200;
+const linger = () => act(() => void vi.advanceTimersByTime(STRIP_CHROME_LINGER_MS));
+/** A mouse (or touch) pointer moving to `y` pixels from the top of the window. */
+const pointerAt = (y: number, pointerType = 'mouse') =>
+  act(() => {
+    const event = new MouseEvent('pointermove', { clientY: y });
+    Object.defineProperty(event, 'pointerType', { value: pointerType });
+    window.dispatchEvent(event);
+  });
 
 type Options = Parameters<typeof useReaderChrome>[0];
 const chrome = (options: Partial<Options> = {}) =>
@@ -44,19 +52,57 @@ describe('the reader chrome', () => {
     expect(result.current.shown).toBe(true);
   });
 
-  it('ignores the pointer in a paged layout and follows it in the long strip', () => {
-    const paged = chrome({ longStrip: false });
+  it('ignores the pointer in a paged layout', () => {
+    const { result } = chrome({ longStrip: false });
     idle();
     fire('mousemove');
     fire('touchstart');
-    expect(paged.result.current.shown).toBe(false);
-    paged.unmount();
+    pointerAt(5);
+    expect(result.current.shown).toBe(false);
+  });
 
-    const strip = chrome({ longStrip: true });
-    idle();
-    expect(strip.result.current.shown).toBe(false);
+  it('in the long strip, shows only while the mouse rests on an edge, then goes 3s after', () => {
+    const { result } = chrome({ longStrip: true });
+    linger();
+    expect(result.current.shown).toBe(false);
+
+    // Moving over the page, scrolling with the keys, touching: none of these.
+    pointerAt(window.innerHeight / 2);
     fire('mousemove');
-    expect(strip.result.current.shown).toBe(true);
+    fire('touchstart');
+    act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp' })));
+    expect(result.current.shown).toBe(false);
+
+    // The top edge brings the header, and it stays as long as the pointer does.
+    pointerAt(10);
+    expect(result.current.shown).toBe(true);
+    linger();
+    expect(result.current.shown).toBe(true);
+
+    // Off the edge: still there just short of 3s, gone at 3s.
+    pointerAt(window.innerHeight / 2);
+    act(() => void vi.advanceTimersByTime(STRIP_CHROME_LINGER_MS - 100));
+    expect(result.current.shown).toBe(true);
+    act(() => void vi.advanceTimersByTime(100));
+    expect(result.current.shown).toBe(false);
+
+    // The bottom edge does the same for the progress bar.
+    pointerAt(window.innerHeight - 10);
+    expect(result.current.shown).toBe(true);
+  });
+
+  it('ignores a touch pointer at the edge in the long strip', () => {
+    const { result } = chrome({ longStrip: true });
+    linger();
+    pointerAt(10, 'touch');
+    expect(result.current.shown).toBe(false);
+  });
+
+  it('reveals for Tab in the long strip, for a keyboard user heading to a control', () => {
+    const { result } = chrome({ longStrip: true });
+    linger();
+    act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' })));
+    expect(result.current.shown).toBe(true);
   });
 
   it('does not hide while a control is held, and does once it is let go', () => {
@@ -88,7 +134,7 @@ describe('the reader chrome', () => {
     expect(overButton.result.current.shown).toBe(true);
   });
 
-  it('hides on scrolling down and returns only on scrolling back up', () => {
+  it('hides on scrolling down and does not come back on scrolling up', () => {
     const { result } = chrome({ longStrip: true });
     act(() => result.current.onScrollDirection('down'));
     expect(result.current.shown).toBe(false);
@@ -99,9 +145,10 @@ describe('the reader chrome', () => {
     expect(result.current.shown).toBe(false);
 
     act(() => result.current.onScrollDirection('up'));
-    expect(result.current.shown).toBe(true);
-    idle();
-    fire('mousemove');
+    expect(result.current.shown).toBe(false);
+
+    // Resting on an edge still brings it back after a scroll down hid it.
+    pointerAt(10);
     expect(result.current.shown).toBe(true);
   });
 
