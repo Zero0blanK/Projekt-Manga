@@ -183,7 +183,23 @@ function ChapterListItem({
             }}
             className={`flex h-full min-w-0 flex-1 items-center gap-3 py-1 pl-2 pr-4 ${selected ? '' : 'group'}`}
           >
-            <ChapterRowText number={c.n} title={c.title} meta={[c.date, c.group]} />
+            <ChapterRowText
+              number={c.n}
+              title={c.title}
+              date={c.date}
+              group={c.group}
+              read={c.read}
+              progress={c.read || c.lastPage <= 0 ? null : { page: c.lastPage, total: c.pageCount }}
+            >
+              {isNew && !c.read && (
+                <span
+                  title="New since your last visit"
+                  className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary-foreground"
+                >
+                  New
+                </span>
+              )}
+            </ChapterRowText>
             {missing > 0 && (
               <span
                 title={
@@ -196,30 +212,12 @@ function ChapterListItem({
                 {missing} missing before
               </span>
             )}
-            {isNew && !c.read && (
-              <span
-                title="New since your last visit"
-                className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary-foreground"
-              >
-                New
-              </span>
-            )}
             {downloaded && (
               <span
                 title="Downloaded for offline reading"
                 className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
               >
                 <CheckCircle2 className="h-3 w-3" /> Offline
-              </span>
-            )}
-            {progress && (
-              <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium tabular-nums text-primary">
-                {progress}
-              </span>
-            )}
-            {c.read && (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                Read
               </span>
             )}
             <Play className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition group-hover:text-primary group-hover:opacity-100" />
@@ -281,6 +279,14 @@ function toRow(c: MangaChapterRecord): ChapterRow {
     pageCount: c.page_count ?? 0,
     url: c.url,
   };
+}
+
+/**
+ * A record with its read state changed. Marking a chapter unread also forgets the page it
+ * was left on, as the server does, so it reads as not started rather than "Page 20 of 20".
+ */
+function withRead(record: MangaChapterRecord, read: boolean): MangaChapterRecord {
+  return read ? { ...record, is_read: true } : { ...record, is_read: false, last_page_read: 0 };
 }
 
 /** Keep a saved position visible even when a pre-library placeholder lacked page count. */
@@ -477,7 +483,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
     isRead: (r) => r.is_read,
     setRead: (changes) =>
       setRecords((prev) =>
-        prev.map((r) => (changes.has(r.id) ? { ...r, is_read: changes.get(r.id)! } : r)),
+        prev.map((r) => (changes.has(r.id) ? withRead(r, changes.get(r.id)!) : r)),
       ),
     mark: (r, read) =>
       (read ? markChapterAsRead : markChapterAsUnread)(manga.slug, r.source_chapter_key, {
@@ -520,7 +526,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
       if (!still()) return;
       const changed = new Set(targets.map((target) => target.id));
       setRecords((current) =>
-        current.map((row) => (changed.has(row.id) ? { ...row, is_read: !read } : row)),
+        current.map((row) => (changed.has(row.id) ? withRead(row, !read) : row)),
       );
       invalidateSavedReadingProgress();
     },
@@ -620,11 +626,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
             });
             if (current())
               setRecords((existing) =>
-                existing.map((row) =>
-                  row.id === c.id
-                    ? { ...row, is_read: read, ...(read ? {} : { last_page_read: 0 }) }
-                    : row,
-                ),
+                existing.map((row) => (row.id === c.id ? withRead(row, read) : row)),
               );
           }
         } catch {
@@ -645,7 +647,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
               if (!current()) return;
               const changed = new Set(changing.map((c) => c.id));
               setRecords((existing) =>
-                existing.map((row) => (changed.has(row.id) ? { ...row, is_read: !read } : row)),
+                existing.map((row) => (changed.has(row.id) ? withRead(row, !read) : row)),
               );
               invalidateSavedReadingProgress();
             },

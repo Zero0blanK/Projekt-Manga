@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Cover } from '@/components/cover';
 import { MangaDetailBackLink } from '@/components/manga-detail/back-link';
+import { DETAIL_FRAME, DETAIL_FRAME_X, DETAIL_GRID } from '@/components/manga-detail/detail-frame';
 import { ChapterListSkeleton, MangaDetailHeaderSkeleton } from '@/components/skeletons';
 import { Skeleton } from '@/components/ui/skeleton';
 import { sourcePreviewSeed } from '@/lib/source-preview-seed';
@@ -47,7 +48,7 @@ export function SourcePreviewShell() {
   if (!seed) {
     return (
       <>
-        <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-8">
+        <div className={`${DETAIL_FRAME_X} pt-4`}>
           <LoadingStatus />
         </div>
         <MangaDetailHeaderSkeleton />
@@ -57,12 +58,12 @@ export function SourcePreviewShell() {
 
   return (
     <div className="relative" aria-busy="true">
-      <div className="relative mx-auto max-w-6xl px-4 py-6 sm:px-8">
+      <div className={DETAIL_FRAME}>
         <MangaDetailBackLink fallbackHref="/discover" fallbackLabel="Discover" />
         {/* The same grid as MangaDetailLayout, so nothing moves when the details arrive. */}
-        <div className="mt-6 grid grid-cols-[7rem_minmax(0,1fr)] items-start gap-x-4 gap-y-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-6 md:grid-cols-[220px_minmax(0,1fr)] md:gap-x-8">
+        <div className={DETAIL_GRID}>
           <div className="md:row-span-2">
-            <div className="relative aspect-[2/3] w-full max-w-[220px] overflow-hidden rounded-xl shadow-cover">
+            <div className="relative aspect-[2/3] w-full overflow-hidden rounded-xl shadow-cover">
               <Cover
                 sourceId={sourceId}
                 src={seed.thumbnailUrl}
