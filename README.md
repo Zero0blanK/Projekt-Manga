@@ -32,6 +32,8 @@ run. Choose **More info → Run anyway**.
 - **Bring your own sources.** No source ships with the app. Add a repository by its URL in
   Discover and install the sources you want. Each one runs in its own sandboxed process, can only
   reach the sites it declares, and can be updated without a new app release.
+- **Suwayomi extensions**, through a Suwayomi-Server you host or a built-in engine the app
+  downloads and runs for you on request (Settings › Extensions).
 - **Library** with shelves, categories, filters for unread, downloaded, publication status and
   tags, and "new since your last visit" markers on each title.
 - **Reader** for paged and long-strip formats: reading direction, fit and zoom, two-page spreads,
