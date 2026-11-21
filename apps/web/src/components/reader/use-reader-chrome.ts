@@ -4,6 +4,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** How long the reader chrome stays up after the last thing the reader did. */
 const CHROME_IDLE_MS = 2200;
+/** In the long strip: how long the chrome stays after the pointer leaves its edge. */
+export const STRIP_CHROME_LINGER_MS = 3000;
+/**
+ * The bands along the top and bottom of the window where, in the long strip, a resting
+ * mouse brings the header or the progress bar up. A little taller than the bars, so they
+ * can be reached for without aiming.
+ */
+export const STRIP_TOP_EDGE_PX = 96;
+export const STRIP_BOTTOM_EDGE_PX = 80;
 
 /**
  * Whether the reader's chrome (header and progress bar) is showing, and everything that
@@ -112,16 +121,29 @@ export function useReaderChrome({
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const immersiveRef = useRef(immersive);
   immersiveRef.current = immersive;
+  const longStripRef = useRef(longStrip);
+  longStripRef.current = longStrip;
 
   const revealChrome = useCallback(() => {
     setChromeShown(true);
     if (hideTimer.current) clearTimeout(hideTimer.current);
     if (!immersiveRef.current) return;
-    hideTimer.current = setTimeout(() => {
-      // Never mid-interaction — a slider being dragged, or focus sitting in the bar.
-      if (chromeEngaged.current) return;
-      setChromeShown(false);
-    }, CHROME_IDLE_MS);
+    hideTimer.current = setTimeout(
+      () => {
+        hideTimer.current = null;
+        // Never mid-interaction — a slider being dragged, or focus sitting in the bar.
+        if (chromeEngaged.current) return;
+        setChromeShown(false);
+      },
+      longStripRef.current ? STRIP_CHROME_LINGER_MS : CHROME_IDLE_MS,
+    );
+  }, []);
+
+  /** Up, with no countdown: the pointer is resting on the chrome's edge. */
+  const holdChrome = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+    setChromeShown(true);
   }, []);
 
   const hideChrome = useCallback(() => {
@@ -134,9 +156,10 @@ export function useReaderChrome({
   const onScrollDirection = useCallback(
     (direction: 'up' | 'down') => {
       if (!hideChromeOnScroll) return;
+      // Scrolling back up is reading too — re-reading a panel — so it doesn't bring the
+      // bars over the page; resting the pointer on an edge does that.
       if (direction === 'up') {
         scrolledAway.current = false;
-        revealChrome();
         return;
       }
       // Scrolling down only hides when the reader is not at the controls. Hover counts
@@ -146,7 +169,7 @@ export function useReaderChrome({
       scrolledAway.current = true;
       hideChrome();
     },
-    [hideChromeOnScroll, revealChrome, hideChrome],
+    [hideChromeOnScroll, hideChrome],
   );
 
   /**
@@ -161,8 +184,12 @@ export function useReaderChrome({
    * it. Key presses still reveal it: paging with the arrow keys is reading, and a
    * keyboard user has no tap zone.
    *
-   * The long strip keeps pointer and touch reveals, because there scrolling is the
-   * reading gesture and hide-on-scroll is what the chrome follows.
+   * The long strip is read by scrolling, and arrow keys and the mouse wheel are how, so
+   * neither brings the bars back over the page. There a mouse resting in the band along
+   * the top or bottom edge does: the bars stay while it is there and go
+   * STRIP_CHROME_LINGER_MS after it leaves. Tab still reveals them, for a keyboard user
+   * on their way to a control, and on a touch screen the tap zone's "Controls" toggles
+   * them as before.
    */
   useEffect(() => {
     if (!immersive) {
@@ -175,18 +202,38 @@ export function useReaderChrome({
       if (scrolledAway.current) return;
       revealChrome();
     };
-    reveal();
-    window.addEventListener('keydown', reveal);
-    if (longStrip) {
-      window.addEventListener('mousemove', reveal);
-      window.addEventListener('touchstart', reveal);
+    revealChrome();
+    if (!longStrip) {
+      window.addEventListener('keydown', reveal);
+      return () => window.removeEventListener('keydown', reveal);
     }
-    return () => {
-      window.removeEventListener('keydown', reveal);
-      window.removeEventListener('mousemove', reveal);
-      window.removeEventListener('touchstart', reveal);
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Tab') revealChrome();
     };
-  }, [immersive, longStrip, revealChrome]);
+    let atEdge = false;
+    const onPointer = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') return;
+      const nearEdge =
+        event.clientY <= STRIP_TOP_EDGE_PX ||
+        event.clientY >= window.innerHeight - STRIP_BOTTOM_EDGE_PX;
+      if (nearEdge || chromeHovered.current) {
+        atEdge = true;
+        scrolledAway.current = false;
+        holdChrome();
+      } else if (atEdge) {
+        // Just left the edge: start the count down from here.
+        atEdge = false;
+        revealChrome();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('pointermove', onPointer);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('pointermove', onPointer);
+    };
+  }, [immersive, longStrip, revealChrome, holdChrome]);
 
   const toggle = useCallback(() => setChromeShown((value) => !value), []);
 

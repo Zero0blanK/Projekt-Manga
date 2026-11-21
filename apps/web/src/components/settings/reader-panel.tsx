@@ -416,7 +416,7 @@ export function ReaderPanel() {
         </Field>
         <Field
           label="Hide controls when scrolling down"
-          hint="Hide them when scrolling down, show them when scrolling up"
+          hint="Hide them as soon as you scroll down. In long strip they come back when you point at the top or bottom edge"
           nested
         >
           <Toggle settingKey="readerHideChromeOnScroll" defaultOn />
