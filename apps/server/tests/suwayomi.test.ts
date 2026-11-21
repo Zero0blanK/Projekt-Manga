@@ -311,6 +311,8 @@ describe('Suwayomi settings', () => {
     const saved = await connect({ username: 'reader', password: 'hunter2-secret' });
     expect(saved.status).toBe(200);
     expect(saved.body.data).toEqual({
+      // Saving the address form chooses the external server.
+      mode: 'external',
       enabled: true,
       url: base,
       username: 'reader',

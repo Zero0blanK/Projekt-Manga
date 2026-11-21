@@ -2,7 +2,11 @@ import axios from 'axios';
 import type { Readable } from 'node:stream';
 import type { SourceErrorCode } from '@projekt-manga/types';
 import { detectRasterImageType, MAX_IMAGE_BYTES } from '../../utils/imageContent.js';
-import { readSuwayomiConnection, type SuwayomiConnection } from './settings.js';
+import {
+  getSuwayomiSettings,
+  readSuwayomiConnection,
+  type SuwayomiConnection,
+} from './settings.js';
 
 /**
  * Requests to the host's Suwayomi server.
@@ -31,7 +35,12 @@ export class SuwayomiError extends Error {
 export function requireConnection(): SuwayomiConnection {
   const connection = readSuwayomiConnection();
   if (!connection) {
-    throw new SuwayomiError('NETWORK_ERROR', 'The Suwayomi server is not connected');
+    throw new SuwayomiError(
+      'NETWORK_ERROR',
+      getSuwayomiSettings()?.mode === 'built-in'
+        ? "The extension engine isn't running"
+        : 'The Suwayomi server is not connected',
+    );
   }
   return connection;
 }
