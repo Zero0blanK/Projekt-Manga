@@ -1302,7 +1302,10 @@ try {
     await pagedUnits();
     await page.reload();
     await pagedUnits();
-    // Undo this stage's per-title choices so later stages read smoke-1 as before.
+    // Undo this stage's per-title choices so later stages read smoke-1 as before. Leave
+    // the reader first (for a static page of the same origin): a save from the open page
+    // would write its in-memory settings back over the cleanup.
+    await page.goto(`${webUrl}/offline.html`);
     await page.evaluate(() => {
       const key = 'projekt-manga:state:v1';
       const state = JSON.parse(localStorage.getItem(key) ?? '{}');
