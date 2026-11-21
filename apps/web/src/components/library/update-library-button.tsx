@@ -126,7 +126,13 @@ export function UpdateLibraryButton() {
           progress ? `Updating library, ${progress.done} of ${progress.total}` : 'Update library'
         }
         title={progress ? `Updating ${progress.done}/${progress.total}` : 'Update library'}
-        className="grid h-9 w-9 place-items-center rounded-lg bg-primary text-primary-foreground shadow-glow transition hover:opacity-90 disabled:opacity-60"
+        // Outlined like the other list controls: filled, it read as a toggle switched on.
+        // It turns the accent colour only while an update runs.
+        className={`grid h-9 w-9 place-items-center rounded-lg border transition disabled:opacity-60 ${
+          running
+            ? 'border-primary/50 bg-primary/10 text-primary'
+            : 'border-border/60 text-muted-foreground hover:text-foreground'
+        }`}
       >
         <RefreshCw className={`h-4 w-4 ${running ? 'animate-spin' : ''}`} />
       </button>
