@@ -416,7 +416,7 @@ export function HistoryPageClient() {
                   <Clock3 className="h-3.5 w-3.5" /> {filterRange}
                   <ChevronDown className="h-3 w-3 opacity-60" />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuContent align="end">
                   {RANGE_OPTIONS.map((r) => (
                     <DropdownMenuItem
                       key={r}

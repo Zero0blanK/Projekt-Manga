@@ -51,7 +51,12 @@ export function SelectMenu({
         <span className="truncate">{shown}</span>
         <ChevronDown aria-hidden="true" className="h-3.5 w-3.5 shrink-0 opacity-50" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="max-h-72 min-w-40">
+      {/* Level with its button and at least as wide, whatever width the button is given; a
+          small button (the year picker) gets no wider floor than itself. */}
+      <DropdownMenuContent
+        align="start"
+        className="max-h-72 min-w-(--radix-dropdown-menu-trigger-width)"
+      >
         {options.map((option) => (
           <DropdownMenuItem
             key={option.value}

@@ -497,7 +497,7 @@ function CategoryIntervalSetting() {
                 {hours === undefined ? 'Global interval' : `${hours} hours`}
                 <ChevronDown className="h-3.5 w-3.5 opacity-50" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-32">
+              <DropdownMenuContent align="end">
                 <DropdownMenuItem
                   onSelect={() => choose(name, null)}
                   className={`text-xs ${hours === undefined ? 'text-primary' : ''}`}

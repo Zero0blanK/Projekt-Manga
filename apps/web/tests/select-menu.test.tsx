@@ -23,6 +23,18 @@ describe('SelectMenu', () => {
     expect(onChange).toHaveBeenCalledWith('b');
   });
 
+  it('opens level with its button and at least as wide, whatever width the button has', async () => {
+    const user = userEvent.setup();
+    render(
+      <SelectMenu label="Wide" value="a" options={options} onChange={vi.fn()} className="w-full" />,
+    );
+    await user.click(screen.getByRole('button', { name: 'Wide: Alpha' }));
+    const menu = await screen.findByRole('menu');
+    expect(menu).toHaveAttribute('data-align', 'start');
+    expect(menu.className).toContain('min-w-(--radix-dropdown-menu-trigger-width)');
+    expect(menu.className).not.toContain('min-w-[max(');
+  });
+
   it('draws one arrow, and falls back to the placeholder for an unlisted value', () => {
     render(
       <SelectMenu
