@@ -12,14 +12,27 @@ import { decryptToken, encryptToken } from '../../utils/tokenCrypto.js';
  * write-only and encrypted at rest with the tracker-token key; no response carries it.
  */
 
+/**
+ * Where Suwayomi sources come from:
+ * - `built-in`: the extension engine this server downloads and runs (engine/);
+ * - `external`: a Suwayomi server the user runs, at the saved address and login;
+ * - `off`: no Suwayomi sources.
+ * A file saved before modes existed has none, and reads as `external`.
+ */
+export type SuwayomiMode = 'built-in' | 'external' | 'off';
+const MODES: readonly SuwayomiMode[] = ['built-in', 'external', 'off'];
+
 interface StoredSettings {
+  mode: SuwayomiMode;
   enabled: boolean;
-  url: string;
+  /** The external server's address; kept while another mode is chosen, to switch back. */
+  url: string | null;
   username: string | null;
   password_encrypted: string | null;
 }
 
 export interface SuwayomiSettingsSummary {
+  mode: SuwayomiMode;
   enabled: boolean;
   url: string;
   username: string | null;
@@ -55,11 +68,16 @@ export function normalizeBaseUrl(raw: string): string {
 function sanitize(raw: unknown): StoredSettings | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const value = raw as Record<string, unknown>;
+  const mode = MODES.includes(value.mode as SuwayomiMode)
+    ? (value.mode as SuwayomiMode)
+    : 'external';
   const url = suwayomiServerUrlSchema.safeParse(value.url);
-  if (!url.success) return null;
+  // An external connection needs its address; the other modes keep one only to go back.
+  if (!url.success && mode === 'external') return null;
   return {
+    mode,
     enabled: value.enabled === true,
-    url: normalizeBaseUrl(url.data),
+    url: url.success ? normalizeBaseUrl(url.data) : null,
     username:
       typeof value.username === 'string' && value.username && !/[:\r\n]/.test(value.username)
         ? value.username
@@ -95,8 +113,9 @@ function readPassword(stored: StoredSettings): { password?: string; readable: bo
 
 function summarize(stored: StoredSettings): SuwayomiSettingsSummary {
   return {
+    mode: stored.mode,
     enabled: stored.enabled,
-    url: stored.url,
+    url: stored.url ?? '',
     username: stored.username,
     has_password: stored.password_encrypted !== null,
     password_readable: readPassword(stored).readable,
@@ -142,9 +161,42 @@ export async function saveSuwayomiSettings(
   // A saved password belongs to the server it was entered for; never send it to a new one.
   if (previous && previous.url !== url) password_encrypted = null;
   if (body.password && username) password_encrypted = encryptToken(body.password);
-  const next: StoredSettings = { enabled: body.enabled, url, username, password_encrypted };
+  // Saving the external form chooses the external server.
+  const next: StoredSettings = {
+    mode: 'external',
+    enabled: body.enabled,
+    url,
+    username,
+    password_encrypted,
+  };
   await writeStored(next);
   return summarize(next);
+}
+
+/** Chooses where Suwayomi sources come from, keeping the external server's details. */
+export async function setSuwayomiMode(mode: SuwayomiMode): Promise<SuwayomiSettingsSummary> {
+  const previous = readStored();
+  const next: StoredSettings = previous
+    ? { ...previous, mode }
+    : { mode, enabled: mode !== 'off', url: null, username: null, password_encrypted: null };
+  if (mode === 'external' && !next.url) {
+    throw new Error('Save the Suwayomi server address first');
+  }
+  await writeStored(next);
+  return summarize(next);
+}
+
+/** Announces that the built-in engine's connection changed (it started or stopped), so
+ * cached source lists are dropped like after a settings change. */
+export function notifySuwayomiConnectionChange(): void {
+  for (const listener of listeners) listener();
+}
+
+let builtInConnection: () => SuwayomiConnection | null = () => null;
+
+/** The engine registers how to reach it while it runs (engine/index.ts). */
+export function setBuiltInConnectionProvider(provider: () => SuwayomiConnection | null): void {
+  builtInConnection = provider;
 }
 
 export async function removeSuwayomiSettings(): Promise<void> {
@@ -154,7 +206,8 @@ export async function removeSuwayomiSettings(): Promise<void> {
 /** The connection the API uses, or null when none is saved or it is turned off. */
 export function readSuwayomiConnection(): SuwayomiConnection | null {
   const stored = readStored();
-  if (!stored?.enabled) return null;
+  if (stored?.mode === 'built-in') return builtInConnection();
+  if (!stored?.enabled || stored.mode !== 'external' || !stored.url) return null;
   const { password } = readPassword(stored);
   const authorization =
     stored.username && password !== undefined

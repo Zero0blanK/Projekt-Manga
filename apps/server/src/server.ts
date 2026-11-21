@@ -23,6 +23,11 @@ import { startBackupScheduler } from './services/backup.service.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  bootBuiltInEngine,
+  killBuiltInEngineNow,
+  shutdownBuiltInEngine,
+} from './services/suwayomi/engine/index.js';
 
 const env = loadEnv();
 
@@ -169,6 +174,8 @@ async function main() {
   trackerService.initializeTrackerPolling();
   startExtensionUpdateChecks();
   startBackupScheduler();
+  // The extension engine, when it is chosen, installed and set to start with the server.
+  bootBuiltInEngine();
 
   // Overload chosen rather than always passing a host: `listen(port)` binds every
   // interface, and passing an explicit '0.0.0.0' instead would quietly drop IPv6.
@@ -222,14 +229,21 @@ function shutdown(signal: string) {
       `[server] Connections did not close within ${SHUTDOWN_GRACE_MS}ms, exiting anyway`,
     );
     disposeAllSandboxedSources();
+    killBuiltInEngineNow();
     process.exit(0);
   }, SHUTDOWN_GRACE_MS);
   forceExit.unref();
 
   const finish = () => {
-    clearTimeout(forceExit);
     disposeAllSandboxedSources();
-    process.exit(0);
+    // The extension engine is a child process too: stopped gently (it has its own grace
+    // period, inside this one) so it never outlives the server.
+    void shutdownBuiltInEngine()
+      .catch(() => killBuiltInEngineNow())
+      .finally(() => {
+        clearTimeout(forceExit);
+        process.exit(0);
+      });
   };
 
   if (!httpServer) {
@@ -250,6 +264,8 @@ function shutdown(signal: string) {
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+// Whatever the exit path, the engine never outlives this process.
+process.on('exit', () => killBuiltInEngineNow());
 
 main().catch((error) => {
   console.error('Fatal startup error:', error);
