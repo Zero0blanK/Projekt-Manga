@@ -92,11 +92,19 @@ function graphqlError(message: string): SuwayomiError {
       "This site wants a Cloudflare check, and Suwayomi's Cloudflare bypass is off. Turn on FlareSolverr in Suwayomi's settings (it needs a FlareSolverr server running) and try again.",
     );
   }
+  // Any package-qualified exception class name goes, not only java./kotlin. ones: names
+  // from the libraries extensions are built on say nothing to the reader, and repeating the
+  // same message after one ("HTTP error 404" twice) is dropped with it.
   const gist = message
     .split(/\s+at\s+[\w$.]+\(/)[0]
     .replace(/^Exception while fetching data \([^)]*\)\s*:\s*/i, '')
-    .replace(/(?:java|kotlin)(?:\.\w+)+(?:Exception|Error):\s*/g, '');
-  const text = gist
+    .replace(/(?:[a-z_][\w$]*\.)+[A-Z][\w$]*(?:Exception|Error)\b:?\s*/g, '');
+  const lines = gist
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const text = [...new Set(lines)]
+    .join(' ')
     .replace(/https?:\/\/\S+/g, '[url]')
     .trim()
     .slice(0, 300);

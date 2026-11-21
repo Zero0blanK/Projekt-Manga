@@ -2558,6 +2558,129 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /suwayomi/mode:
+    put:
+      tags: [Suwayomi]
+      summary: 'Choose where Suwayomi sources come from: the built-in engine, an external server, or off'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/engine:
+    get:
+      tags: [Suwayomi]
+      summary: "The built-in extension engine's status, versions and download progress"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      tags: [Suwayomi]
+      summary: 'Remove the built-in extension engine (keep_data=true keeps its extensions)'
+      parameters:
+        - {
+            name: keep_data,
+            in: query,
+            required: false,
+            schema: { type: string, enum: ['true', 'false'] },
+          }
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/engine/install:
+    post:
+      tags: [Suwayomi]
+      summary: 'Download and install the built-in extension engine (runs in the background)'
+      responses:
+        '202':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/engine/update:
+    post:
+      tags: [Suwayomi]
+      summary: 'Install the versions offered by check-updates (runs in the background)'
+      responses:
+        '202':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/engine/cancel:
+    post:
+      tags: [Suwayomi]
+      summary: 'Cancel the engine download in progress'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/engine/check-updates:
+    post:
+      tags: [Suwayomi]
+      summary: 'Compare the installed engine with the latest releases; installs nothing'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/engine/start:
+    post:
+      tags: [Suwayomi]
+      summary: 'Start the built-in extension engine'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/engine/stop:
+    post:
+      tags: [Suwayomi]
+      summary: 'Stop the built-in extension engine'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/engine/settings:
+    put:
+      tags: [Suwayomi]
+      summary: "The engine's memory limit and whether it starts with the server"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
+  /suwayomi/engine/repositories:
+    get:
+      tags: [Suwayomi]
+      summary: "The engine's extension repositories"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+    put:
+      tags: [Suwayomi]
+      summary: "Set the engine's extension repositories (index URLs added by the user)"
+      responses:
+        '200':
+          $ref: '#/components/responses/Ok'
+        default:
+          $ref: '#/components/responses/Error'
+
   /translate/settings:
     get:
       tags: [Translate]

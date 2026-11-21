@@ -1,4 +1,4 @@
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import net from 'node:net';
@@ -182,6 +182,32 @@ export async function stopStaleEngine(
   return 'stopped';
 }
 
+/**
+ * Stops the engine and anything it started (a helper process it spawned would otherwise
+ * outlive it and keep its files open). Only this one engine's tree: on Windows `taskkill`
+ * on its own pid with /T, elsewhere a signal to its own process group.
+ */
+function killTree(child: ChildProcess, signal: 'SIGTERM' | 'SIGKILL', sync = false): void {
+  const pid = child.pid;
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    // Windows has no gentle signal for a console Java process; the whole tree ends now.
+    const args = ['/PID', String(pid), '/T', '/F'];
+    try {
+      if (sync) spawnSync('taskkill.exe', args, { windowsHide: true, timeout: 5_000 });
+      else execFile('taskkill.exe', args, { windowsHide: true }, () => undefined);
+    } catch {
+      child.kill('SIGKILL');
+    }
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    child.kill(signal);
+  }
+}
+
 /** The engine's output, appended to logs/engine.log, which rolls over at 2 MB. */
 class EngineLog {
   private out: fs.WriteStream | null = null;
@@ -353,6 +379,9 @@ class EngineProcess {
       cwd: dataDir,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      // Its own process group outside Windows, so stopping it reaches anything it started
+      // (see killTree). On Windows the tree is found by its pid instead.
+      detached: process.platform !== 'win32',
     });
     this.child = child;
     child.stdout?.on('data', (chunk: Buffer) => this.log.write(chunk));
@@ -402,7 +431,7 @@ class EngineProcess {
     const child = this.child;
     this.child = null;
     this.connection = null;
-    if (child && child.exitCode === null) child.kill('SIGKILL');
+    if (child && child.exitCode === null) killTree(child, 'SIGKILL');
     void fsp.rm(enginePaths.pidFile(), { force: true });
   }
 
@@ -416,12 +445,12 @@ class EngineProcess {
     this.connection = null;
     if (child && child.exitCode === null) {
       const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
-      child.kill('SIGTERM');
+      killTree(child, 'SIGTERM');
       const grace = new Promise<'timeout'>((resolve) =>
         setTimeout(() => resolve('timeout'), STOP_GRACE_MS).unref(),
       );
       if ((await Promise.race([exited, grace])) === 'timeout') {
-        child.kill('SIGKILL');
+        killTree(child, 'SIGKILL');
         await exited;
       }
     }
@@ -435,7 +464,7 @@ class EngineProcess {
   /** Synchronous last resort for process exit: no waiting is possible there. */
   killNow(): void {
     this.stopping = true;
-    if (this.child && this.child.exitCode === null) this.child.kill('SIGKILL');
+    if (this.child && this.child.exitCode === null) killTree(this.child, 'SIGKILL', true);
     try {
       fs.rmSync(enginePaths.pidFile(), { force: true });
     } catch {
