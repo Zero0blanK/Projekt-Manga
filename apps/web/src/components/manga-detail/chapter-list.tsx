@@ -281,6 +281,14 @@ function toRow(c: MangaChapterRecord): ChapterRow {
   };
 }
 
+/**
+ * A record with its read state changed. Marking a chapter unread also forgets the page it
+ * was left on, as the server does, so it reads as not started rather than "Page 20 of 20".
+ */
+function withRead(record: MangaChapterRecord, read: boolean): MangaChapterRecord {
+  return read ? { ...record, is_read: true } : { ...record, is_read: false, last_page_read: 0 };
+}
+
 /** Keep a saved position visible even when a pre-library placeholder lacked page count. */
 function chapterProgressLabel(c: ChapterRow): string | null {
   if (c.read || c.lastPage <= 0) return null;
@@ -475,7 +483,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
     isRead: (r) => r.is_read,
     setRead: (changes) =>
       setRecords((prev) =>
-        prev.map((r) => (changes.has(r.id) ? { ...r, is_read: changes.get(r.id)! } : r)),
+        prev.map((r) => (changes.has(r.id) ? withRead(r, changes.get(r.id)!) : r)),
       ),
     mark: (r, read) =>
       (read ? markChapterAsRead : markChapterAsUnread)(manga.slug, r.source_chapter_key, {
@@ -518,7 +526,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
       if (!still()) return;
       const changed = new Set(targets.map((target) => target.id));
       setRecords((current) =>
-        current.map((row) => (changed.has(row.id) ? { ...row, is_read: !read } : row)),
+        current.map((row) => (changed.has(row.id) ? withRead(row, !read) : row)),
       );
       invalidateSavedReadingProgress();
     },
@@ -618,11 +626,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
             });
             if (current())
               setRecords((existing) =>
-                existing.map((row) =>
-                  row.id === c.id
-                    ? { ...row, is_read: read, ...(read ? {} : { last_page_read: 0 }) }
-                    : row,
-                ),
+                existing.map((row) => (row.id === c.id ? withRead(row, read) : row)),
               );
           }
         } catch {
@@ -643,7 +647,7 @@ export function ChapterList({ manga }: { manga: Manga }) {
               if (!current()) return;
               const changed = new Set(changing.map((c) => c.id));
               setRecords((existing) =>
-                existing.map((row) => (changed.has(row.id) ? { ...row, is_read: !read } : row)),
+                existing.map((row) => (changed.has(row.id) ? withRead(row, !read) : row)),
               );
               invalidateSavedReadingProgress();
             },

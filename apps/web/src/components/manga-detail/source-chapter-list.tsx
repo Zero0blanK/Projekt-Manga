@@ -158,6 +158,11 @@ export function SourceChapterList({
     setReadIds(readChapterIds);
   }, [readChapterIds]);
 
+  // Chapters marked unread here since the parent's history last loaded: the server forgets
+  // their page, so they read as not started rather than showing the page they were left on.
+  const [progressCleared, setProgressCleared] = useState<Set<string>>(new Set());
+  useEffect(() => setProgressCleared(new Set()), [chapterProgress]);
+
   const applyRead = (next: Set<string>) => {
     readIdsRef.current = next;
     setReadIds(next);
@@ -197,11 +202,16 @@ export function SourceChapterList({
     isRead: (c) => readIdsRef.current.has(c.id),
     setRead: (changes) => {
       const next = new Set(readIdsRef.current);
+      const unread: string[] = [];
       for (const [id, read] of changes) {
         if (read) next.add(id);
-        else next.delete(id);
+        else {
+          next.delete(id);
+          unread.push(id);
+        }
       }
       applyRead(next);
+      if (unread.length) setProgressCleared((current) => new Set([...current, ...unread]));
     },
     mark: (c, read) =>
       (read ? markChapterAsRead : markChapterAsUnread)(mangaSlug, c.id, payloadFor(c)),
@@ -528,7 +538,7 @@ export function SourceChapterList({
           {chapterWindow.top > 0 && <li aria-hidden="true" style={{ height: chapterWindow.top }} />}
           {visibleChapters.map((c, index) => {
             const read = readIds.has(c.id);
-            const progress = chapterProgress.get(c.id);
+            const progress = progressCleared.has(c.id) ? undefined : chapterProgress.get(c.id);
             const pageCount =
               c.page_count && c.page_count > 0 ? c.page_count : (progress?.page_count ?? 0);
             const lastPage = progress?.last_page_read ?? 0;

@@ -39,3 +39,14 @@ describe('chapter row read state', () => {
     expect(screen.getByText('Page 4')).toBeInTheDocument();
   });
 });
+
+describe('chapter row scanlation group', () => {
+  it('names the group, and says so when the source names none', () => {
+    const { rerender } = render(
+      <ChapterRowText number={1} title="Chapter 1" read={false} group="Test Scans" />,
+    );
+    expect(screen.getAllByText('Test Scans').length).toBeGreaterThan(0);
+    rerender(<ChapterRowText number={1} title="Chapter 1" read={false} group="" />);
+    expect(screen.getAllByText(/Unknown group/).length).toBeGreaterThan(0);
+  });
+});

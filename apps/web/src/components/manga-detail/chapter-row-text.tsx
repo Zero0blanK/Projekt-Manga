@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Check } from 'lucide-react';
+import { Check, Users } from 'lucide-react';
 import { titleShowsNumber } from './chapter-row';
 
 /** How far into a chapter the reader got, when partway through it. */
@@ -14,7 +14,7 @@ export interface ChapterRowProgress {
  *
  * Read state leads the row, where the eye already is: a dot for unread, a ring filled to
  * the page reached for a chapter partway through, and a check with the title dimmed once
- * read. On wide screens the date and group sit in their own aligned columns rather than
+ * read. On wide screens the scanlation group and date sit in their own aligned columns rather than
  * under the title, so a long list reads like a table.
  */
 export function ChapterRowText({
@@ -36,12 +36,16 @@ export function ChapterRowText({
   children?: ReactNode;
 }) {
   const numberLabel = titleShowsNumber(title, number) ? null : `Ch. ${number}`;
-  const meta = [numberLabel, date, group].filter((part): part is string => !!part);
+  const groupName = group?.trim() || 'Unknown group';
   const progressText = progress
     ? progress.total >= progress.page && progress.total > 0
       ? `Page ${progress.page} of ${progress.total}`
       : `Page ${progress.page}`
     : null;
+  // Always shown: where the reader got to, and the number when the title doesn't say it.
+  const lead = [progressText, numberLabel].filter((part): part is string => !!part);
+  // Under the title on narrow screens only; wide screens give these their own columns.
+  const narrow = [date, groupName].filter((part): part is string => !!part);
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -57,28 +61,27 @@ export function ChapterRowText({
           </span>
           {children}
         </div>
-        {(meta.length > 0 || progressText) && (
-          <div
-            className={`truncate text-xs tabular-nums text-muted-foreground ${
-              progressText ? '' : 'lg:hidden'
-            } ${read ? 'opacity-70' : ''}`}
-          >
-            {progressText && <span className="font-medium text-primary">{progressText}</span>}
-            {/* Wide screens show the date and group in columns, so only the number stays. */}
-            <span className={progressText ? 'lg:hidden' : ''}>
-              {progressText && meta.length > 0 ? ' · ' : ''}
-              {meta.join(' · ')}
-            </span>
-            {progressText && numberLabel && (
-              <span className="hidden lg:inline"> · {numberLabel}</span>
-            )}
-          </div>
-        )}
+        <div
+          className={`truncate text-xs tabular-nums text-muted-foreground ${
+            lead.length ? '' : 'lg:hidden'
+          } ${read ? 'opacity-70' : ''}`}
+        >
+          {progressText && <span className="font-medium text-primary">{progressText}</span>}
+          {numberLabel && (progressText ? ` · ${numberLabel}` : numberLabel)}
+          <span className="lg:hidden">
+            {lead.length ? ' · ' : ''}
+            {narrow.join(' · ')}
+          </span>
+        </div>
       </div>
       <span
-        className={`hidden w-48 shrink-0 truncate text-xs text-muted-foreground lg:block ${read ? 'opacity-70' : ''}`}
+        title={group ? `Scanlation group: ${group}` : 'The source doesn’t name a group'}
+        className={`hidden w-52 shrink-0 items-center gap-1.5 text-xs lg:flex ${
+          group ? 'text-foreground/75' : 'text-muted-foreground/60'
+        } ${read ? 'opacity-70' : ''}`}
       >
-        {group}
+        <Users className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span className="truncate">{groupName}</span>
       </span>
       <span
         className={`hidden w-28 shrink-0 text-right text-xs tabular-nums text-muted-foreground lg:block ${read ? 'opacity-70' : ''}`}
