@@ -90,3 +90,55 @@ jobs:
           else
             gh issue create --title "$title" --body "First failed run: $RUN_URL"
           fi
+
+  extension-engine:
+    name: Built-in extension engine (real downloads)
+    # Linux: the engine runs on the Java runtime built for it, the same flow as a hosted or
+    # Docker server. Downloads about 235 MB and reaches real sites, so it runs nightly only.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            npm ci && exit 0
+            echo "::warning::npm ci failed (attempt $attempt of 3); retrying"
+            sleep $((attempt * 30))
+          done
+          exit 1
+
+      - name: Build the server
+        run: npm run build --workspace=@projekt-manga/server
+        env:
+          DATABASE_URL: file:./data/ci-generate.db
+
+      # Which repository and extension to try is set as repository variables, so nothing
+      # third-party is written into the code. Without them the script reports a skip.
+      - name: Install, run and remove the engine
+        run: node scripts/engine-e2e.mjs
+        env:
+          ENGINE_E2E_REPOSITORY: ${{ vars.ENGINE_E2E_REPOSITORY }}
+          ENGINE_E2E_EXTENSION: ${{ vars.ENGINE_E2E_EXTENSION }}
+
+      - name: Report a failed night
+        if: failure() && github.event_name == 'schedule'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Nightly extension engine check is failing'
+          issue=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "Failed again: $RUN_URL"
+          else
+            gh issue create --title "$title" --body "First failed run: $RUN_URL"
+          fi
