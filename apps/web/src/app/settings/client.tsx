@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { PAGE_FRAME } from '@/components/page-shell';
 import { SettingsNav, SECTION_IDS, type SectionId } from '@/components/settings/settings-nav';
 import { AccountPanel } from '@/components/settings/account-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
@@ -128,7 +129,7 @@ export function SettingsPageClient() {
   };
 
   return (
-    <div className="mx-auto min-w-0 max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+    <div className={PAGE_FRAME}>
       <h1 className="text-display text-3xl text-foreground sm:text-4xl lg:text-5xl">Settings</h1>
       {focusMessage && (
         <p role="status" className="mt-2 text-xs text-muted-foreground">
