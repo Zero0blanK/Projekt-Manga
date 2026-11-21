@@ -1455,7 +1455,7 @@ try {
     await setReaderSetting('pageLayout', 'Long strip');
     await page.goto(chapterFour(1));
     await page
-      .getByText('Chapter 4 · Chapter 4', { exact: false })
+      .getByText('Chapter 4', { exact: true })
       .first()
       .waitFor({ timeout: 30_000 });
     const groupB = page.getByText('Chapter 4 · Group B', { exact: false }).first();
