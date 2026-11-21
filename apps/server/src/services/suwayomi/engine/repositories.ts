@@ -47,6 +47,7 @@ export async function setEngineRepositories(urls: string[]): Promise<EngineRepos
       connection(),
     );
   }
+  let changed = current.some((store) => !wanted.includes(store.url));
   for (const url of wanted) {
     if (current.some((store) => store.url === url)) continue;
     await suwayomiGraphql(
@@ -54,6 +55,16 @@ export async function setEngineRepositories(urls: string[]): Promise<EngineRepos
         addExtensionStore(input: { indexUrl: $url }) { extensionStore { indexUrl } }
       }`,
       { url },
+      connection(),
+    );
+    changed = true;
+  }
+  // The engine reads a repository's extension list only when asked; without this, Discover
+  // showed none until someone pressed Refresh there.
+  if (changed) {
+    await suwayomiGraphql(
+      'mutation { fetchExtensions(input: {}) { extensions { pkgName } } }',
+      {},
       connection(),
     );
   }

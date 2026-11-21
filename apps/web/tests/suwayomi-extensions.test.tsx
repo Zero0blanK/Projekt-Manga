@@ -94,4 +94,21 @@ describe('Suwayomi extensions in Discover', () => {
     expect(container).toBeEmptyDOMElement();
     expect(getSuwayomiExtensions).not.toHaveBeenCalled();
   });
+  it('points to the extension engine settings when the built-in engine is not running', async () => {
+    getSuwayomiSettings.mockResolvedValue({
+      mode: 'built-in',
+      enabled: true,
+      url: '',
+      username: null,
+      has_password: false,
+      password_readable: true,
+    });
+    getSuwayomiExtensions.mockRejectedValue(new Error("The extension engine isn't running"));
+    render(<SuwayomiExtensions name="" filters={{ language: '', rating: '' }} />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent("Couldn't reach the extension engine.");
+    expect(
+      within(alert).getByRole('link', { name: /Settings › Extensions › Extension engine/ }),
+    ).toHaveAttribute('href', '/settings#extensions');
+  });
 });
