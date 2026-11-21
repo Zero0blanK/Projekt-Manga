@@ -213,13 +213,13 @@ export function TranslationService() {
     }, "Couldn't remove the translation service.");
 
   const keySaved = saved?.provider === provider && saved.has_key;
-  const current = PROVIDERS.find((p) => p.provider === provider)!;
+  const current = PROVIDERS.find((p) => p.provider === provider) ?? PROVIDERS[0];
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
         {saved
-          ? `Pages are translated with your ${PROVIDERS.find((p) => p.provider === saved.provider)?.label} service.`
+          ? `Pages are translated with your ${PROVIDERS.find((p) => p.provider === saved.provider)?.label ?? 'own'} service.`
           : status?.server_configured
             ? 'Pages are translated with the service this server provides. Add your own to use it instead.'
             : status?.provider === 'local'
