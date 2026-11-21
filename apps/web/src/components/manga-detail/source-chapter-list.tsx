@@ -532,8 +532,7 @@ export function SourceChapterList({
             const pageCount =
               c.page_count && c.page_count > 0 ? c.page_count : (progress?.page_count ?? 0);
             const lastPage = progress?.last_page_read ?? 0;
-            const progressLabel =
-              !read && lastPage > 0 && pageCount > lastPage ? `${lastPage} / ${pageCount}` : null;
+            const inProgress = !read && lastPage > 0 && pageCount > lastPage;
             return (
               <ContextMenu key={c.id} modal={false}>
                 <ContextMenuTrigger asChild>
@@ -571,21 +570,11 @@ export function SourceChapterList({
                       <ChapterRowText
                         number={c.chapter_number}
                         title={c.name || `Chapter ${c.chapter_number}`}
-                        meta={[
-                          c.release_date ? formatRelative(c.release_date) : 'Unknown date',
-                          knownGroup(c.scanlator),
-                        ]}
+                        date={c.release_date ? formatRelative(c.release_date) : 'Unknown date'}
+                        group={knownGroup(c.scanlator)}
+                        read={read}
+                        progress={inProgress ? { page: lastPage, total: pageCount } : null}
                       />
-                      {progressLabel && (
-                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium tabular-nums text-primary">
-                          {progressLabel}
-                        </span>
-                      )}
-                      {read && (
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                          Read
-                        </span>
-                      )}
                       <Play className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition group-hover:text-primary group-hover:opacity-100" />
                     </ChapterSelectionLink>
                   </li>

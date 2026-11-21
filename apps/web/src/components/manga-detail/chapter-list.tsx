@@ -183,7 +183,23 @@ function ChapterListItem({
             }}
             className={`flex h-full min-w-0 flex-1 items-center gap-3 py-1 pl-2 pr-4 ${selected ? '' : 'group'}`}
           >
-            <ChapterRowText number={c.n} title={c.title} meta={[c.date, c.group]} />
+            <ChapterRowText
+              number={c.n}
+              title={c.title}
+              date={c.date}
+              group={c.group}
+              read={c.read}
+              progress={c.read || c.lastPage <= 0 ? null : { page: c.lastPage, total: c.pageCount }}
+            >
+              {isNew && !c.read && (
+                <span
+                  title="New since your last visit"
+                  className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary-foreground"
+                >
+                  New
+                </span>
+              )}
+            </ChapterRowText>
             {missing > 0 && (
               <span
                 title={
@@ -196,30 +212,12 @@ function ChapterListItem({
                 {missing} missing before
               </span>
             )}
-            {isNew && !c.read && (
-              <span
-                title="New since your last visit"
-                className="shrink-0 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary-foreground"
-              >
-                New
-              </span>
-            )}
             {downloaded && (
               <span
                 title="Downloaded for offline reading"
                 className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
               >
                 <CheckCircle2 className="h-3 w-3" /> Offline
-              </span>
-            )}
-            {progress && (
-              <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium tabular-nums text-primary">
-                {progress}
-              </span>
-            )}
-            {c.read && (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                Read
               </span>
             )}
             <Play className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition group-hover:text-primary group-hover:opacity-100" />

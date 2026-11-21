@@ -43,7 +43,7 @@ describe('source-only chapter progress', () => {
       );
     });
 
-    expect(screen.getByText('3 / 10')).toBeInTheDocument();
+    expect(screen.getByText('Page 3 of 10')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Chapter Seven/ })).toHaveAttribute(
       'href',
       '/discover/preview/source-a/source-native-id/read?ch=7&chapterId=chapter-7',

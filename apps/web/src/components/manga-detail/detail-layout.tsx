@@ -10,6 +10,7 @@ import {
   GenrePills,
 } from '@/components/manga-detail/manga-info';
 import { MangaSynopsis } from '@/components/manga-detail/synopsis';
+import { DETAIL_FRAME, DETAIL_GRID } from '@/components/manga-detail/detail-frame';
 
 /**
  * The shared shell for both manga detail pages. The library page and the source preview
@@ -40,13 +41,13 @@ export function MangaDetailLayout({
         }}
       />
 
-      <div className="relative mx-auto max-w-6xl px-4 py-6 sm:px-8">
+      <div className={DETAIL_FRAME}>
         <MangaDetailBackLink fallbackHref={backHref} fallbackLabel={backLabel} />
 
         {/* On phones the cover sits beside the title instead of above it, and the rest
             spans the full width below, so the chapter list isn't pushed far down. From md
             up the info column runs beside the cover. */}
-        <div className="mt-6 grid grid-cols-[7rem_minmax(0,1fr)] items-start gap-x-4 gap-y-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-6 md:grid-cols-[220px_minmax(0,1fr)] md:gap-x-8">
+        <div className={DETAIL_GRID}>
           <div className="md:row-span-2">
             <MangaCoverDialog manga={manga} />
           </div>
