@@ -95,6 +95,12 @@ class DownloadService {
   private static readonly FOLDER_CHECK_CONCURRENCY = 8;
 
   private static resolveDefaultDownloadDir(): string {
+    // Tests never use the real Downloads folder: a test run would create it, and the
+    // restore scan, which looks in every folder downloads were saved to, found the
+    // developer's own downloads there and counted them with the test's (it failed on any
+    // machine that has some). Each test process gets a folder of its own instead.
+    if (process.env.NODE_ENV === 'test')
+      return path.join(os.tmpdir(), `projektmanga-test-downloads-${process.pid}`);
     return path.join(os.homedir(), 'Downloads', 'ProjektManga');
   }
 
@@ -126,8 +132,16 @@ class DownloadService {
       }
     }
     this.pathPolicy = new DownloadPathPolicy(
-      path.join(path.dirname(databaseFile), 'download-roots.json'),
-      [this.downloadDir, DownloadService.resolveDefaultDownloadDir()],
+      // Tests never save this list, and they don't load the developer's either: it names the
+      // folders their own server saved downloads to, which a test must not scan.
+      process.env.NODE_ENV === 'test'
+        ? path.join(os.tmpdir(), `projektmanga-test-download-roots-${process.pid}.json`)
+        : path.join(path.dirname(databaseFile), 'download-roots.json'),
+      // The default folder only when it is there: approving a missing folder throws, and a
+      // download folder set elsewhere (DOWNLOAD_DIR) leaves the default unused and absent.
+      [this.downloadDir, DownloadService.resolveDefaultDownloadDir()].filter((dir) =>
+        fs.existsSync(dir),
+      ),
       process.env.NODE_ENV !== 'test',
     );
   }
