@@ -11,7 +11,6 @@ import { ActiveDownloadsList } from '@/components/downloads/active-downloads-lis
 import { CompletedDownloadsList } from '@/components/downloads/completed-downloads-list';
 import { PageShell, PageHeader, PageBody } from '@/components/page-shell';
 import { RowListSkeleton } from '@/components/skeletons';
-import { Download } from 'lucide-react';
 import { isAborted, reportError } from '@/lib/report-error';
 
 export function DownloadsPageClient() {
@@ -31,9 +30,7 @@ export function DownloadsPageClient() {
   return (
     <PageShell>
       <PageHeader
-        icon={Download}
-        eyebrow="Downloads"
-        title="Offline library"
+        title="Downloads"
         description="Read anywhere — even without a connection."
         actions={<OpenFolderButton path={rootFolder} label="Download folder" withText />}
       />

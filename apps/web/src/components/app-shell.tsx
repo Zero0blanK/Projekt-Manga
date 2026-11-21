@@ -182,7 +182,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         const map: Record<string, string> = {
           l: '/',
           d: '/discover',
-          h: '/recents',
+          h: '/history',
           w: '/downloads',
           b: '/bookmarks',
           s: '/settings',
@@ -227,7 +227,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <RestoreStatusCard />
       <div>
         <FloatingNav />
-        <main className="min-w-0 pt-36 sm:pt-24">{children}</main>
+        <main className="min-w-0 pt-24">{children}</main>
       </div>
       {/* Only once the splash has gone: it covers the prompt, and the click that skips it
           would otherwise land outside the prompt. Not during a restore: installing restarts

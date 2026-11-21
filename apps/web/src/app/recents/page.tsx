@@ -1,11 +1,7 @@
-import type { Metadata } from 'next';
-import { RecentsPageClient } from './client';
+import { redirect } from 'next/navigation';
 
-export const metadata: Metadata = {
-  title: 'Recents — Projekt Manga',
-  description: "Newly updated titles in your library, and what you've been reading.",
-};
-
+// Recents was merged into History: "continue reading" is on the Library and History, and
+// newly updated titles are in Notifications and the Library's rail. Old links still land.
 export default function RecentsPage() {
-  return <RecentsPageClient />;
+  redirect('/history');
 }

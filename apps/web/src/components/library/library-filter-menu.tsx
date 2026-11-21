@@ -18,18 +18,35 @@ const CHIP_OFF = 'border-border/60 text-muted-foreground hover:text-foreground';
 const CHIP_ON = 'border-primary/50 bg-primary/10 text-primary';
 const CHIP_EXCLUDED = 'border-destructive/50 bg-destructive/10 text-destructive line-through';
 
-/** Publication status and tags, from what's actually in the library. */
+/** A yes/no filter shown first in the menu, such as "Unread". */
+export interface QuickFilter {
+  label: string;
+  description: string;
+  on: boolean;
+  set: (on: boolean) => void;
+}
+
+/**
+ * Everything that narrows the library in one place: the quick filters (unread, downloaded),
+ * publication status, and tags from what's actually in the library.
+ */
 export function LibraryFilterMenu({
   library,
   filters,
   onChange,
+  quick = [],
 }: {
   library: Manga[];
   filters: LibraryFilters;
   onChange: (next: LibraryFilters) => void;
+  quick?: QuickFilter[];
 }) {
   const tags = useMemo(() => libraryTags(library), [library]);
-  const active = libraryFilterCount(filters);
+  const active = libraryFilterCount(filters) + quick.filter((entry) => entry.on).length;
+  const clear = () => {
+    onChange(NO_LIBRARY_FILTERS);
+    for (const entry of quick) if (entry.on) entry.set(false);
+  };
   const toggleStatus = (status: Manga['status']) =>
     onChange({
       ...filters,
@@ -44,7 +61,7 @@ export function LibraryFilterMenu({
         <button
           type="button"
           aria-label={active > 0 ? `Filters, ${active} active` : 'Filters'}
-          title="Filter by status and tag"
+          title="Filter the library"
           className={`relative grid h-9 w-9 place-items-center rounded-lg border transition ${
             active > 0
               ? 'border-primary/50 bg-primary/10 text-primary'
@@ -60,12 +77,32 @@ export function LibraryFilterMenu({
           <button
             type="button"
             disabled={active === 0}
-            onClick={() => onChange(NO_LIBRARY_FILTERS)}
+            onClick={clear}
             className="text-xs text-primary disabled:opacity-50"
           >
             Clear
           </button>
         </div>
+
+        {quick.length > 0 && (
+          <>
+            <h3 className="mt-3 text-xs font-medium text-muted-foreground">Show only</h3>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {quick.map((entry) => (
+                <button
+                  key={entry.label}
+                  type="button"
+                  aria-pressed={entry.on}
+                  title={entry.description}
+                  onClick={() => entry.set(!entry.on)}
+                  className={`${CHIP} ${entry.on ? CHIP_ON : CHIP_OFF}`}
+                >
+                  {entry.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         <h3 className="mt-3 text-xs font-medium text-muted-foreground">Status</h3>
         <div className="mt-1.5 flex flex-wrap gap-1.5">

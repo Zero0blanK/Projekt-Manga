@@ -243,7 +243,7 @@ function SingleRow({
       </div>
       <Link
         href={e.resumeHref}
-        className="flex shrink-0 items-center gap-1.5 rounded-full bg-foreground px-3 py-1.5 text-[11px] font-semibold text-background transition hover:opacity-90"
+        className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:opacity-90"
       >
         <Play className="h-3 w-3 fill-current" /> Resume
       </Link>
@@ -315,7 +315,7 @@ function GroupedRow({
 
       <Link
         href={latest.resumeHref}
-        className="flex shrink-0 items-center gap-1.5 rounded-full bg-foreground px-3 py-1.5 text-[11px] font-semibold text-background transition hover:opacity-90"
+        className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition hover:opacity-90"
       >
         <Play className="h-3 w-3 fill-current" /> Resume
       </Link>
@@ -393,9 +393,7 @@ export function HistoryPageClient() {
   return (
     <PageShell>
       <PageHeader
-        icon={Clock3}
-        eyebrow="Reading history"
-        title="Where you've been"
+        title="History"
         description={
           <>
             <span className="text-foreground">{history.length}</span>{' '}

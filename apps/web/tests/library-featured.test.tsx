@@ -135,7 +135,9 @@ describe('Library featured title', () => {
     const grid = await screen.findByTestId('grid');
     expect(grid).toHaveTextContent('older');
     expect(grid).toHaveTextContent('recent');
-    fireEvent.click(screen.getByRole('button', { name: 'Unread' }));
+    // Unread is in the Filters menu, with the other ways to narrow the list.
+    fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Unread' }));
     expect(screen.getByTestId('grid')).toHaveTextContent('older');
     expect(screen.getByTestId('grid')).not.toHaveTextContent('recent');
     expect(screen.getByRole('button', { name: 'Unread' })).toHaveAttribute('aria-pressed', 'true');

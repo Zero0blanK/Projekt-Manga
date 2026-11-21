@@ -727,7 +727,7 @@ try {
     });
     const libraryLoadStartedAt = performance.now();
     await page.goto(`${webUrl}/`);
-    await page.getByRole('heading', { name: 'My Library' }).waitFor();
+    await page.getByRole('heading', { name: 'Library', level: 1 }).waitFor();
     await page.getByText('Showing 1000', { exact: true }).waitFor();
     await page.locator('main a[href^="/manga/perf-title-"]').first().waitFor();
     const initiallyMountedLibraryCards = await page
@@ -785,7 +785,8 @@ try {
       .waitFor({ state: 'detached' });
     // Upcoming groups titles by expected release day, past-due ones first, and leaves out
     // estimates for titles that aren't in the library.
-    await page.getByRole('link', { name: 'Upcoming releases' }).click();
+    await page.getByRole('button', { name: 'More library pages' }).click();
+    await page.getByRole('menuitem', { name: 'Upcoming releases' }).click();
     await page.getByRole('heading', { name: 'Overdue', level: 2 }).waitFor();
     await page.getByText('Performance title 0001', { exact: true }).waitFor();
     await page.getByText('Performance title 0000', { exact: true }).waitFor();
@@ -853,14 +854,17 @@ try {
     await page
       .getByRole('toolbar', { name: 'Selected library titles' })
       .waitFor({ state: 'hidden' });
+    // Unread lives in the Filters menu with the other ways to narrow the list.
+    await page.getByRole('button', { name: /^Filters/ }).click();
     await page.getByRole('button', { name: 'Unread', exact: true }).click();
     assert.equal(
       await page.getByRole('button', { name: 'Unread', exact: true }).getAttribute('aria-pressed'),
       'true',
     );
     await page.getByRole('button', { name: 'Unread', exact: true }).click();
+    await page.keyboard.press('Escape');
     await page.goto(`${webUrl}/discover`);
-    await page.getByRole('heading', { name: 'Sources' }).waitFor();
+    await page.getByRole('heading', { name: 'Discover', level: 1 }).waitFor();
     try {
       await page.getByText('Smoke Source').first().waitFor();
     } catch (error) {

@@ -30,7 +30,7 @@ const GROUPS: Array<{ title: string; note?: string; rows: Array<[string, string[
     rows: [
       ['Library', ['G', 'L']],
       ['Discover', ['G', 'D']],
-      ['Recents', ['G', 'H']],
+      ['History', ['G', 'H']],
       ['Downloads', ['G', 'W']],
       ['Bookmarks', ['G', 'B']],
       ['Settings', ['G', 'S']],

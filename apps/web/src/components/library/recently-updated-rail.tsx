@@ -19,7 +19,7 @@ export function RecentlyUpdatedRail() {
         <div className="flex items-center justify-between">
           <h3 className="text-display text-2xl text-foreground">Recently Updated</h3>
           <Link
-            href="/recents"
+            href="/notifications"
             className="flex items-center gap-1 text-xs text-primary hover:opacity-80"
           >
             More <ChevronRight className="h-3 w-3" />

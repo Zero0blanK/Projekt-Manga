@@ -15,8 +15,14 @@ describe('historyThumbnailUrl', () => {
     ).toContain('/api/cache/legacy-thumbnail/fixture/known-slug');
   });
 
-  it('continues proxying an absolute upstream cover URL', () => {
+  it('shows a title the server has a row for through its cover cache', () => {
     expect(historyThumbnailUrl('https://covers.example/a.jpg', 'fixture', 'manga-1')).toContain(
+      '/api/cache/thumbnail/manga-1',
+    );
+  });
+
+  it('proxies an upstream cover for a title read only from a source', () => {
+    expect(historyThumbnailUrl('https://covers.example/a.jpg', 'fixture', null)).toContain(
       '/api/source/image-proxy?',
     );
   });

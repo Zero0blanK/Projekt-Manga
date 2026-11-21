@@ -23,14 +23,13 @@ import {
 } from '@/lib/library-filters';
 import { useDownloadRows } from '@/components/downloads/row-data';
 import { RecentlyUpdatedRail } from '@/components/library/recently-updated-rail';
-import { EmptyState } from '@/components/page-shell';
+import { EmptyState, PAGE_FRAME, PageHeader } from '@/components/page-shell';
+import { LibraryMoreMenu } from '@/components/library/library-more-menu';
 import { LoadError } from '@/components/load-error';
 import { MangaGridSkeleton } from '@/components/skeletons';
 import { creditLinkedReading, mostRecentlyReadLibraryManga } from '@/lib/recent-reading';
 import { LibrarySelectionBar, parseDensity } from '@/components/library/library-tools';
 import { useProfilePreference } from '@/lib/profile-preferences';
-import { ArrowRightLeft, CalendarDays, Download, Eye, Shuffle } from 'lucide-react';
-import { useRouter } from 'next/navigation';
 import { useCurrentUser } from '@/lib/session-resource';
 import { useHistory } from '@/lib/shared-queries';
 import { useQuery } from '@tanstack/react-query';
@@ -40,7 +39,6 @@ const progressOf = (m: Manga) => m.progress ?? 0;
 const unreadOf = (m: Manga) => Math.max(0, m.chapters - Math.round((m.progress ?? 0) * m.chapters));
 
 export function LibraryPageClient() {
-  const router = useRouter();
   const showRecentlyUpdated = useSetting(SHOW_RECENTLY_UPDATED, false) === true;
   const [filter, setFilter] = useState<string>('all');
   const { user, loading: sessionLoading } = useCurrentUser();
@@ -168,27 +166,21 @@ export function LibraryPageClient() {
 
   return (
     <div className="flex min-w-0">
-      <div className="min-w-0 flex-1 px-4 py-6 sm:px-8">
-        <FilterPills filter={filter} onChange={setFilter} />
-
-        <div className="mt-6 flex flex-wrap items-end justify-between gap-4 sm:mt-8">
-          <div>
-            <h1 className="text-display text-4xl leading-none text-foreground sm:text-5xl">
-              My Library
-            </h1>
-            {/* Counts of 0 while the library is still arriving (slow on a slow connection)
-                read as an empty library. */}
-            {loading && mangaLibrary.length === 0 ? (
-              <p role="status" className="mt-2 text-sm text-muted-foreground">
-                Loading your library…
-              </p>
+      <div className={`${PAGE_FRAME} flex-1`}>
+        <PageHeader
+          title="Library"
+          description={
+            // Counts of 0 while the library is still arriving (slow on a slow connection)
+            // read as an empty library.
+            loading && mangaLibrary.length === 0 ? (
+              <p role="status">Loading your library…</p>
             ) : filling ? (
-              <p role="status" className="mt-2 text-sm text-muted-foreground">
+              <p role="status">
                 <span className="text-foreground">{mangaLibrary.length}</span> titles so far ·
                 loading the rest…
               </p>
             ) : (
-              <p className="mt-2 text-sm text-muted-foreground">
+              <p>
                 <span className="text-foreground">{mangaLibrary.length}</span>{' '}
                 {mangaLibrary.length === 1 ? 'title' : 'titles'} ·{' '}
                 <span className="text-foreground">{reading.length}</span> in progress ·{' '}
@@ -199,50 +191,35 @@ export function LibraryPageClient() {
                   {bookmarks.length} bookmarked
                 </Link>
               </p>
-            )}
-          </div>
-          <div className="-mx-4 flex max-w-[calc(100%+2rem)] items-center gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:max-w-full sm:flex-wrap sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
+            )
+          }
+          actions={historyRows && <ReadingGoalProgress history={historyRows} compact />}
+        >
+          {/* Which shelf, then how the list is sorted, narrowed and shown. Places elsewhere
+              (bookmarks, upcoming, migrate, local comics) are in the More menu, so this row
+              is only the list's own controls. */}
+          <FilterPills filter={filter} onChange={setFilter} />
+          <div className="-mx-4 mt-4 flex max-w-[calc(100%+2rem)] items-center gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:max-w-full sm:flex-wrap sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden [&>*]:shrink-0">
             <SortMenu />
-            {/* Icon buttons matching ViewToggle/SortMenu so the toolbar reads as one row. With
-                no visible text, each carries both an aria-label (screen readers) and a title
-                (hover): aria-label alone shows nothing on hover, and title alone is not
-                reliably announced. */}
-            {(
-              [
-                ['Unread', 'Show only titles with unread chapters', Eye, onlyUnread, setOnlyUnread],
-                [
-                  'Downloaded',
-                  'Show only titles with downloaded chapters',
-                  Download,
-                  onlyDownloaded,
-                  setOnlyDownloaded,
-                ],
-              ] as const
-            ).map(([label, description, Icon, on, set]) => (
-              <button
-                key={label}
-                type="button"
-                // Name is what the control is called, so "click Unread" works for voice
-                // control and matches the word a reader would use for it; the longer
-                // phrase becomes its description rather than its name.
-                aria-label={label}
-                aria-pressed={on}
-                title={description}
-                onClick={() => set(!on)}
-                className={`grid h-9 w-9 place-items-center rounded-lg border transition ${
-                  on
-                    ? 'border-primary/50 bg-primary/10 text-primary'
-                    : 'border-border/60 text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-              </button>
-            ))}
             {mangaLibrary.length > 0 && (
               <LibraryFilterMenu
                 library={mangaLibrary}
                 filters={libraryFilters}
                 onChange={setLibraryFilters}
+                quick={[
+                  {
+                    label: 'Unread',
+                    description: 'Show only titles with unread chapters',
+                    on: onlyUnread,
+                    set: setOnlyUnread,
+                  },
+                  {
+                    label: 'Downloaded',
+                    description: 'Show only titles with downloaded chapters',
+                    on: onlyDownloaded,
+                    set: setOnlyDownloaded,
+                  },
+                ]}
               />
             )}
             <ViewToggle />
@@ -258,47 +235,9 @@ export function LibraryPageClient() {
                 Find manga
               </Link>
             )}
-            {historyRows && <ReadingGoalProgress history={historyRows} compact />}
-            {mangaLibrary.length > 1 && (
-              <button
-                type="button"
-                aria-label="Random title"
-                title="Open a random library title"
-                onClick={() =>
-                  router.push(
-                    `/manga/${encodeURIComponent(mangaLibrary[Math.floor(Math.random() * mangaLibrary.length)].id)}`,
-                  )
-                }
-                className="grid h-9 w-9 place-items-center rounded-lg border border-border/60 text-muted-foreground transition hover:text-foreground"
-              >
-                <Shuffle className="h-4 w-4" />
-              </button>
-            )}
-            {mangaLibrary.length > 0 && (
-              <Link
-                href="/upcoming"
-                aria-label="Upcoming releases"
-                title="Upcoming releases"
-                className="grid h-9 w-9 place-items-center rounded-lg border border-border/60 text-muted-foreground transition hover:text-foreground"
-              >
-                <CalendarDays className="h-4 w-4" />
-              </Link>
-            )}
-            {mangaLibrary.length > 0 && (
-              <Link
-                href="/migrate"
-                aria-label="Migrate a source"
-                title="Move every title from one source to another"
-                className="grid h-9 w-9 place-items-center rounded-lg border border-border/60 text-muted-foreground transition hover:text-foreground"
-              >
-                <ArrowRightLeft className="h-4 w-4" />
-              </Link>
-            )}
-            <Link href="/local" className="rounded-full border border-border px-3 py-2 text-xs">
-              Local comics
-            </Link>
+            <LibraryMoreMenu library={mangaLibrary} />
           </div>
-        </div>
+        </PageHeader>
 
         {featured && <ContinueReadingHero manga={featured} recentRead={recentRead ?? undefined} />}
 

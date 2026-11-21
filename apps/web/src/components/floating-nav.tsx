@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Library, Compass, Clock3, UserCog } from 'lucide-react';
+import { Library, Compass, Clock3, Search, UserCog } from 'lucide-react';
 import { authorLine } from '@/lib/manga-data';
 import { useMangaLibrary } from '@/lib/library-store';
 import { NavButton, type NavItem } from '@/components/nav/nav-button';
@@ -13,7 +13,7 @@ import { NavDownloads } from '@/components/nav/nav-downloads';
 const leftItems: NavItem[] = [
   { label: 'Library', to: '/', icon: Library },
   { label: 'Discover', to: '/discover', icon: Compass },
-  { label: 'Recents', to: '/recents', icon: Clock3 },
+  { label: 'History', to: '/history', icon: Clock3 },
 ];
 
 // Bookmarks isn't here: the Library page's "N bookmarked" count already links to it, and
@@ -36,6 +36,8 @@ export function FloatingNav() {
   const [shortcutLabel, setShortcutLabel] = useState('Ctrl+K');
   // Only one dropdown can be open at a time — opening one closes whichever else was open.
   const [activePanel, setActivePanel] = useState<Panel>(null);
+  // Phones only: whether the search field is showing (see the Search button below).
+  const [mobileSearch, setMobileSearch] = useState(false);
   const panel = (name: Exclude<Panel, null>) => ({
     open: activePanel === name,
     onOpenChange: (v: boolean) => setActivePanel((p) => (v ? name : p === name ? null : p)),
@@ -59,6 +61,7 @@ export function FloatingNav() {
     );
     setSearch('');
     setActivePanel(null);
+    setMobileSearch(false);
   }, [pathname]);
 
   useEffect(() => {
@@ -90,7 +93,8 @@ export function FloatingNav() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        inputRef.current?.focus();
+        setMobileSearch(true);
+        requestAnimationFrame(() => inputRef.current?.focus());
         setActivePanel('search');
       }
       if (e.key === 'Escape') {
@@ -115,7 +119,26 @@ export function FloatingNav() {
           <NavButton key={item.to} item={item} active={isActive(item.to)} />
         ))}
 
-        <div className="order-last w-full sm:order-none sm:min-w-0 sm:flex-1">
+        {/* On a phone the search field would take a second row above every page, so it
+            waits behind this button; from sm up it sits in the bar as always. */}
+        <button
+          type="button"
+          aria-label="Search"
+          aria-expanded={mobileSearch}
+          onClick={() => {
+            setMobileSearch((open) => !open);
+            if (!mobileSearch) requestAnimationFrame(() => inputRef.current?.focus());
+          }}
+          className={`grid h-11 w-11 shrink-0 place-items-center rounded-full transition sm:hidden ${
+            mobileSearch ? 'bg-accent text-foreground' : 'text-muted-foreground'
+          }`}
+        >
+          <Search className="h-5 w-5" />
+        </button>
+
+        <div
+          className={`${mobileSearch ? 'order-last w-full' : 'hidden'} sm:order-none sm:block sm:w-auto sm:min-w-0 sm:flex-1`}
+        >
           <NavSearch
             inputRef={inputRef}
             search={search}

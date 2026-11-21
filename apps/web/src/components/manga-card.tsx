@@ -233,7 +233,9 @@ export function MangaCover({
         {/* On a narrow cover the status gives way to counts on the same row. */}
         {statusBadge && (
           <div
-            className={`min-w-0 truncate rounded-md bg-black/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white/90 backdrop-blur ${top && !right ? 'ml-auto' : ''} ${top ? 'hidden @[10rem]:block' : ''}`}
+            // Shown only where it fits whole: cut to "ONGOI…" it says nothing. A small cover
+            // (the Continue card's) has no room for it; beside the count chips it needs more.
+            className={`min-w-0 truncate rounded-md bg-black/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-white/90 backdrop-blur ${top && !right ? 'ml-auto' : ''} ${top ? 'hidden @[12rem]:block' : 'hidden @[7rem]:block'}`}
           >
             {manga.status}
           </div>
