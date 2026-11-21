@@ -42,7 +42,7 @@ export function ChapterSelectionLink({
           if (!disabled) onSelect();
         }
       }}
-      className={`flex h-full min-w-0 flex-1 items-center gap-4 px-4 py-3 ${selected ? '' : 'group'}`}
+      className={`flex h-full min-w-0 flex-1 items-center gap-3 py-1 pl-2 pr-4 ${selected ? '' : 'group'}`}
     >
       {children}
     </Link>

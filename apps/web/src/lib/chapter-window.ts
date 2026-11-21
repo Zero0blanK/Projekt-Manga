@@ -2,7 +2,8 @@
 
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 
-const ROW_HEIGHT = 72;
+/** Must match the chapter rows' `h-12` in manga-detail/chapter-list and source-chapter-list. */
+export const ROW_HEIGHT = 48;
 const OVERSCAN = 8;
 
 export function useChapterWindow(count: number, filterKey: string) {
@@ -48,8 +49,10 @@ export function useChapterWindow(count: number, filterKey: string) {
     if (!ref.current || next < 0) return;
     event.preventDefault();
     const top = window.scrollY + ref.current.getBoundingClientRect().top + next * ROW_HEIGHT;
-    const toolbar = document.querySelector<HTMLElement>('[aria-label="Selected chapter actions"]');
-    const offset = (window.innerWidth < 640 ? 144 : 96) + (toolbar?.offsetHeight ?? 0) + 16;
+    // Clear of the held chapter toolbar (which carries the selection actions too).
+    const toolbar = document.querySelector<HTMLElement>('[data-chapter-toolbar]');
+    const stickyTop = toolbar ? Number.parseFloat(getComputedStyle(toolbar).top) : NaN;
+    const offset = (Number.isFinite(stickyTop) ? stickyTop : 76) + (toolbar?.offsetHeight ?? 0) + 8;
     window.scrollTo({ top: Math.max(0, top - offset), behavior: 'instant' });
     const rows = Math.ceil(window.innerHeight / ROW_HEIGHT) + OVERSCAN * 2;
     const nextStart = Math.max(0, next - OVERSCAN);

@@ -59,8 +59,8 @@ export function ChapterListSkeleton({ count = 8 }: { count?: number }) {
   return (
     <ul className="mt-4 divide-y divide-border/50 overflow-hidden rounded-xl border border-border/60 bg-surface/40">
       {Array.from({ length: count }, (_, i) => (
-        <li key={i} className="flex items-center gap-4 px-4 py-3">
-          <Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
+        <li key={i} className="flex h-12 items-center gap-3 pl-3 pr-4">
+          <Skeleton className="h-6 w-6 shrink-0 rounded-md" />
           <div className="min-w-0 flex-1 space-y-1.5">
             <Skeleton className="h-3.5 w-2/5" />
             <Skeleton className="h-2.5 w-1/5" />
