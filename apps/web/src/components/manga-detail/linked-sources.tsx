@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowDown, ArrowUp, Layers, Plus, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Layers, X } from 'lucide-react';
 import {
   getMangaChapters,
   getMangaLinks,
@@ -28,8 +28,8 @@ const EXTRA_LIMIT = 30;
 /**
  * Linked sources (other sources' copies of this title), on its page. Lists them in the
  * order they are tried, lets them be reordered or unlinked, and shows the chapters only
- * a linked source has, each opening in that source's reader. Shown only once there is
- * something to show, or as a single "link another source" action.
+ * a linked source has, each opening in that source's reader. Shown only once there is a
+ * link; new links are made from the Migrate button.
  */
 export function LinkedSources({ manga }: { manga: Manga }) {
   const { sources } = useSources();
@@ -135,35 +135,18 @@ export function LinkedSources({ manga }: { manga: Manga }) {
       </p>
     );
 
-  const linkHref = `/manga/${encodeURIComponent(manga.id)}/migrate`;
-  if (links.length === 0)
-    return (
-      <div className="mb-4">
-        <Link
-          href={linkHref}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary"
-        >
-          <Plus size={14} aria-hidden /> Link another source
-        </Link>
-      </div>
-    );
+  // Linking another source goes through the title's Migrate button, so nothing to show
+  // until there is a link.
+  if (links.length === 0) return null;
 
   return (
     <section
       aria-labelledby="linked-sources"
       className="mb-6 rounded-xl border border-border/60 p-4"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="linked-sources" className="flex items-center gap-2 text-sm font-semibold">
-          <Layers size={16} aria-hidden /> Linked sources
-        </h2>
-        <Link
-          href={linkHref}
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary"
-        >
-          <Plus size={14} aria-hidden /> Link another
-        </Link>
-      </div>
+      <h2 id="linked-sources" className="flex items-center gap-2 text-sm font-semibold">
+        <Layers size={16} aria-hidden /> Linked sources
+      </h2>
       <p className="mt-1 text-xs text-muted-foreground">
         When this title lacks a chapter or won&apos;t load, the reader offers it from these, top
         first.
