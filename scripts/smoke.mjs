@@ -1284,7 +1284,28 @@ try {
     );
     await page.getByRole('button', { name: 'Got it' }).click();
     assert.equal(await page.getByText('This looks like a webtoon', { exact: false }).count(), 0);
-    // Undo this stage's per-title choices so later stages read smoke-1 as before.
+    // Picking a paged layout from the header's layout menu applies to this title at once
+    // (the global layout alone wouldn't show on a webtoon), and sticks after a reload.
+    const layoutMenu = page.getByRole('button', { name: 'Reader settings' });
+    if (!(await layoutMenu.isVisible())) {
+      // The header hides while reading; a tap in the middle of the page shows it.
+      const { width, height } = page.viewportSize() ?? { width: 1280, height: 720 };
+      await page.mouse.click(width / 2, height / 2);
+    }
+    await layoutMenu.click();
+    await page.getByRole('menuitem', { name: 'Two-page spread' }).click();
+    const pagedUnits = () =>
+      page.waitForFunction(() => document.querySelectorAll('[data-unit]').length > 0, undefined, {
+        polling: 250,
+        timeout: 30_000,
+      });
+    await pagedUnits();
+    await page.reload();
+    await pagedUnits();
+    // Undo this stage's per-title choices so later stages read smoke-1 as before. Leave
+    // the reader first (for a static page of the same origin): a save from the open page
+    // would write its in-memory settings back over the cleanup.
+    await page.goto(`${webUrl}/offline.html`);
     await page.evaluate(() => {
       const key = 'projekt-manga:state:v1';
       const state = JSON.parse(localStorage.getItem(key) ?? '{}');
@@ -1292,6 +1313,7 @@ try {
         if (
           name.includes('reader-override:') ||
           name.includes('webtoon-suggestion-dismissed:') ||
+          name.includes('webtoon-long-strip-notice-dismissed:') ||
           name.includes('webtoon-detected:')
         )
           delete state.settings[name];

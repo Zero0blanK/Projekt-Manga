@@ -26,7 +26,13 @@ export function ReaderHeader({
   pageImageUrl,
   bookmarked,
   onToggleBookmark,
+  onChooseLayout,
+  currentLayout,
 }: {
+  /** Passed to the layout menu: handles a layout choice for this title (returns true). */
+  onChooseLayout?: (layout: string) => boolean;
+  /** The layout being shown, for the menu's highlight. */
+  currentLayout?: string;
   manga: Manga;
   chapters: MangaChapterRecord[];
   chapter: number;
@@ -130,7 +136,7 @@ export function ReaderHeader({
             page={page}
           />
         )}
-        <ReaderSettingsMenu />
+        <ReaderSettingsMenu onChooseLayout={onChooseLayout} currentLayout={currentLayout} />
         <ExitReaderButton
           fallbackHref={`/manga/${manga.id}`}
           label="Exit reader"
