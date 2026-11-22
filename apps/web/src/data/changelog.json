@@ -1,6 +1,137 @@
 {
-  "$comment": "Release notes for Settings > Changelog. Newest first — the first entry's version and date are also what the About panel reports. IMPORTANT: the first entry's version must match `version` in apps/desktop/package.json, which is what app.getVersion() returns and what the updater compares against a GitHub release; if the two drift, the About panel reports one version while the update check reasons about another (tests/changelog.test.ts guards this). Each entry: version (semver), date (YYYY-MM-DD), and changes grouped by type. Types: added | changed | fixed | removed. Add the next entry above this one when a version is actually published — not while it is still being built.",
+  "$comment": "Release notes for Settings > Changelog. Newest first — the first entry's version and date are also what the About panel reports. IMPORTANT: the first entry's version must match `version` in apps/desktop/package.json, which is what app.getVersion() returns and what the updater compares against a GitHub release; if the two drift, the About panel reports one version while the update check reasons about another (tests/changelog.test.ts guards this). Each entry: version (semver), date (YYYY-MM-DD), and changes grouped by type. Types: added | improved | changed | fixed | removed. Add the next entry above this one when a version is actually published — not while it is still being built.",
   "releases": [
+    {
+      "version": "1.4.0",
+      "date": "2026-11-22",
+      "summary": "A built-in extension engine, a library that works offline in the browser, one layout across every page, and clearer source lists, chapter rows and long-strip controls.",
+      "changes": [
+        {
+          "type": "added",
+          "text": "A built-in extension engine: Settings › Extensions › Extension engine can download and run Suwayomi for you, so its extensions work without a server of your own. Nothing downloads until you press Download (about 235 MB), and updates are never automatic"
+        },
+        {
+          "type": "added",
+          "text": "The built-in engine's extension repositories are added and removed in the same panel, and their extensions show in Discover straight away"
+        },
+        {
+          "type": "added",
+          "text": "The library works offline in the browser: it opens with no connection from a copy kept on the device, and reading progress made offline is sent once you are back online"
+        },
+        {
+          "type": "added",
+          "text": "Downloaded chapters open offline in the browser, including ones never opened there before"
+        },
+        {
+          "type": "added",
+          "text": "Smooth wheel scrolling on every page and in the long-strip reader, following Settings › Appearance › Smooth scrolling"
+        },
+        {
+          "type": "added",
+          "text": "A More menu on the library page with Bookmarks, Upcoming, Year in manga, Local comics, Migrate and a random title"
+        },
+        {
+          "type": "added",
+          "text": "A back-to-top button in the bottom-right corner once a page is scrolled down, and clicking the current page's item in the nav goes back to the top"
+        },
+        {
+          "type": "added",
+          "text": "Importing a backup offers to install a source it uses that isn't installed yet, right there in the import"
+        },
+        {
+          "type": "added",
+          "text": "The translation models can be removed in Settings › Reader › Page translation, beside Download"
+        },
+        {
+          "type": "improved",
+          "text": "Discover › Add sources is one list: every source, from your repositories and the extension engine, by language, each showing who made it"
+        },
+        {
+          "type": "improved",
+          "text": "A multilingual extension from the engine is one card under Multilingual, in the language picked from the card's Display languages, instead of a card per language"
+        },
+        {
+          "type": "improved",
+          "text": "Every page has the same layout and header, titled with the page's name, and uses more of a large screen. Title pages show a larger cover"
+        },
+        {
+          "type": "improved",
+          "text": "Chapter lists show read state where each row starts (a dot for unread, a ring with the page reached, a check for read), and the scanlation group and date in their own columns"
+        },
+        {
+          "type": "improved",
+          "text": "In the long strip, the header and progress bar stay out of the way while you scroll. Point at the top or bottom edge to bring them up; they go 3 seconds after you move away"
+        },
+        {
+          "type": "improved",
+          "text": "A source's filters lay their dropdowns side by side across the width, and show every genre and tag at once"
+        },
+        {
+          "type": "improved",
+          "text": "Translating a page for the first time asks before downloading the translation models, and translates on this device if you choose Not now"
+        },
+        {
+          "type": "improved",
+          "text": "The warning before installing from an unsigned repository has \"Don't ask again\", and Settings › Extensions can turn it back on"
+        },
+        {
+          "type": "improved",
+          "text": "The library loads faster and shows its first titles at once, and opening a source title on a slow connection shows that it is opening"
+        },
+        {
+          "type": "changed",
+          "text": "Recents is now part of History, and the Unread and Downloaded filters are in the library’s Filters menu"
+        },
+        {
+          "type": "changed",
+          "text": "A webtoon opens as a long strip, and a paged layout picked from the reader header keeps that title paged"
+        },
+        {
+          "type": "removed",
+          "text": "\"Link another source\" on title pages. Linking is done from the Migrate button"
+        },
+        {
+          "type": "removed",
+          "text": "The source switcher on a source's Latest and Popular pages, and Select sources on Installed sources"
+        },
+        {
+          "type": "fixed",
+          "text": "A page whose content didn't load says so and offers Try again, instead of looking empty, and error pages tell being offline, a crash and a failed load apart"
+        },
+        {
+          "type": "fixed",
+          "text": "The app recovers within seconds when its server starts after it"
+        },
+        {
+          "type": "fixed",
+          "text": "Menus line up with the button that opens them, and a source card's Display languages menu shows in full in the Frost and Ink styles"
+        },
+        {
+          "type": "fixed",
+          "text": "A title's description offers Show more only when there is more to show"
+        },
+        {
+          "type": "fixed",
+          "text": "Year in manga shows its chapters-by-month chart again"
+        },
+        {
+          "type": "fixed",
+          "text": "A chapter marked unread no longer shows the page it was left on"
+        },
+        {
+          "type": "fixed",
+          "text": "The reader header names the chapter once, not \"Chapter 1 · Chapter 1\""
+        },
+        {
+          "type": "fixed",
+          "text": "Settings no longer fails to open when the translation service has no provider chosen"
+        },
+        {
+          "type": "fixed",
+          "text": "Source icons in SVG format show again"
+        }
+      ]
+    },
     {
       "version": "1.3.0",
       "date": "2026-11-15",

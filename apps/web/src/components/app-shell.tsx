@@ -36,6 +36,7 @@ import { updateBridge } from '@/lib/desktop-update';
 import { registerServiceWorker } from '@/lib/service-worker';
 import dynamic from 'next/dynamic';
 import { SmoothScroll } from '@/components/smooth-scroll';
+import { BackToTop } from '@/components/back-to-top';
 import { useScrollBehavior } from '@/lib/scroll';
 import { DesktopIntegration } from '@/components/desktop-integration';
 import { ServerStartingScreen } from '@/components/server-starting-screen';
@@ -237,6 +238,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <LibraryUpdateDial />
         {/* The reader stays clear, and the downloads page already shows the queue. */}
         {!isReaderPath && !pathname.startsWith('/downloads') && <DownloadDial />}
+        {/* The reader scrolls its own strip, and has its own page controls. */}
+        {!isReaderPath && <BackToTop />}
       </div>
       {!isReaderPath && <ConnectionBanner />}
       <Toaster />

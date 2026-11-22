@@ -3,17 +3,24 @@
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { CircleArrowUp, PackageCheck, PackageOpen, RefreshCw } from 'lucide-react';
-import { ApiError, buildInstalledExtensionIconUrl } from '@projekt-manga/api-client';
+import { buildInstalledExtensionIconUrl, type SuwayomiExtension } from '@projekt-manga/api-client';
 import { describeLoadError } from '@/lib/load-error';
 import type { ExtensionListingEntry } from '@projekt-manga/schemas';
 import { extensionActions, useSourceCatalog, type CatalogEntry } from '@/lib/extensions-store';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AddRepositoryForm } from '@/components/extensions/add-repository-form';
 import { repairSourceName, sourceLanguageGroup, sourceLanguageName } from '@/lib/source-language';
-import { compareLanguageGroups } from '@/lib/discover-filters';
+import { compareLanguageGroups, type DiscoverFilters } from '@/lib/discover-filters';
 import { toast } from '@/hooks/use-toast';
-import { useConfirm } from '@/hooks/use-confirm';
-import { repositoryPublisher } from '@/lib/repository-url';
+import { useUnsignedInstallConfirm } from '@/hooks/use-unsigned-install-confirm';
+import { repositoryAuthor } from '@/lib/repository-url';
+import {
+  ENGINE_AUTHOR,
+  matchesEngineFilters,
+  useEngineExtensionActions,
+  useSuwayomiExtensions,
+} from '@/lib/engine-extensions';
+import { EngineStatusNotice, ExtensionIcon, GrowingList } from './suwayomi-extensions';
 import {
   emptySourceFilters,
   matchesSourceFilters,
@@ -93,53 +100,109 @@ function detailLine(entry: ExtensionListingEntry): string {
   return `v${entry.version} · ${sourceLanguageName(entry.lang)}${ratingSuffix(entry.content_rating, entry.isNSFW)}`;
 }
 
+/** Where a row sits on the page: Updates, Installed or Available. */
+type SectionLabel = 'Updates' | 'Installed' | 'Available';
+
+/**
+ * One row of the merged list: a source from an extension repository, or an extension from
+ * the extension engine. They differ only in who made them and how they install.
+ */
+type CatalogRow =
+  | { kind: 'repository'; key: string; name: string; lang: string; item: CatalogEntry }
+  | { kind: 'engine'; key: string; name: string; lang: string; extension: SuwayomiExtension };
+
+function sectionOf(row: CatalogRow): SectionLabel {
+  if (row.kind === 'repository') {
+    if (row.item.installedId === null) return 'Available';
+    return row.item.updateAvailable ? 'Updates' : 'Installed';
+  }
+  if (!row.extension.installed) return 'Available';
+  return row.extension.has_update ? 'Updates' : 'Installed';
+}
+
+const SECTIONS: Array<{ label: SectionLabel; Icon: typeof PackageOpen }> = [
+  { label: 'Updates', Icon: CircleArrowUp },
+  { label: 'Installed', Icon: PackageCheck },
+  { label: 'Available', Icon: PackageOpen },
+];
+
+const ROW_LIST_CLASS =
+  'divide-y divide-border/60 overflow-hidden rounded-2xl border border-border/60 bg-surface/40';
+
+/**
+ * Discover › Extensions: every source that can be installed, from the extension
+ * repositories and from the extension engine, in one list. Updates, Installed and
+ * Available each hold both, by language, and each row says who made it.
+ */
 export function SourceCatalog({
   filters = emptySourceFilters,
   language = '',
   repositoryId = null,
+  showRepositories = true,
+  showEngine = false,
 }: {
   filters?: SourceFiltersValue;
   /** A language group from Discover's filter bar, or '' for every language. */
   language?: string;
   /** Only this repository's sources, or null for every repository. */
   repositoryId?: string | null;
+  /** The extension repositories' sources (off when the filter picks the engine alone). */
+  showRepositories?: boolean;
+  /** The extension engine's extensions, when there is an engine this reader may manage. */
+  showEngine?: boolean;
 }) {
   const { repositories, entries, loading, hasNoRepositories } = useSourceCatalog();
-  /** Each source row names its publisher, so it needs its repository by id. */
+  const engine = useSuwayomiExtensions(showEngine);
+  const engineActions = useEngineExtensionActions();
+  const withEngine = showEngine && engine.enabled;
+  /** Each source row names its author, so it needs its repository by id. */
   const repositoryById = new Map(repositories.map((repository) => [repository.id, repository]));
   const [privacy] = useContentPrivacy();
-  const { confirm, dialog } = useConfirm();
-  const visibleEntries = entries.filter(
-    (item) =>
-      (!privacy.hideAdult || !isAdultSource(item.entry.content_rating, item.entry.isNSFW)) &&
-      matchesSourceFilters(item.entry, item.installedId !== null, filters) &&
-      (!repositoryId || item.repositoryId === repositoryId),
-  );
-  const languageGroups = [
-    ...new Set(visibleEntries.map((item) => sourceLanguageGroup(item.entry.lang))),
-  ].sort(compareLanguageGroups);
+  const { confirmUnsigned, dialog } = useUnsignedInstallConfirm();
   const activeLanguage = language || 'all';
-  const groups = activeLanguage === 'all' ? languageGroups : [activeLanguage];
-  const resultCount = visibleEntries.filter(
-    (item) => activeLanguage === 'all' || sourceLanguageGroup(item.entry.lang) === activeLanguage,
-  ).length;
-  const sections = [
-    {
-      label: 'Updates',
-      Icon: CircleArrowUp,
-      matches: (item: CatalogEntry) => item.installedId !== null && item.updateAvailable,
-    },
-    {
-      label: 'Installed',
-      Icon: PackageCheck,
-      matches: (item: CatalogEntry) => item.installedId !== null && !item.updateAvailable,
-    },
-    {
-      label: 'Available',
-      Icon: PackageOpen,
-      matches: (item: CatalogEntry) => item.installedId === null,
-    },
-  ];
+  const inLanguage = (lang: string) =>
+    activeLanguage === 'all' || sourceLanguageGroup(lang) === activeLanguage;
+  const visibleEntries = showRepositories
+    ? entries.filter(
+        (item) =>
+          (!privacy.hideAdult || !isAdultSource(item.entry.content_rating, item.entry.isNSFW)) &&
+          matchesSourceFilters(item.entry, item.installedId !== null, filters) &&
+          (!repositoryId || item.repositoryId === repositoryId) &&
+          // A repository that failed to load is reported below the list instead.
+          !repositoryById.get(item.repositoryId)?.fetchError,
+      )
+    : [];
+  const engineExtensions = withEngine
+    ? (engine.list.data ?? []).filter((extension) =>
+        matchesEngineFilters(
+          extension,
+          filters.name,
+          // Language is applied to every row below. The engine has no "mixed" rating, so
+          // that filter matches none of its extensions.
+          { language: '', rating: filters.rating as DiscoverFilters['rating'] },
+          privacy.hideAdult,
+        ),
+      )
+    : [];
+  const rows: CatalogRow[] = [
+    ...visibleEntries.map((item): CatalogRow => ({
+      kind: 'repository',
+      key: `${item.repositoryId}:${item.entry.source_key}`,
+      name: repairSourceName(item.entry.name),
+      lang: item.entry.lang,
+      item,
+    })),
+    ...engineExtensions.map((extension): CatalogRow => ({
+      kind: 'engine',
+      key: `engine:${extension.pkg_name}`,
+      name: extension.name,
+      lang: extension.lang,
+      extension,
+    })),
+  ]
+    .filter((row) => inLanguage(row.lang))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const resultCount = rows.length;
   // Keyed per row so one install doesn't disable every other button — a single boolean
   // would freeze the whole list while one source downloads.
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
@@ -188,14 +251,7 @@ export function SourceCatalog({
   const handleInstall = (item: CatalogEntry) =>
     runRow(`${item.repositoryId}:${item.entry.source_key}`, 'install', async () => {
       try {
-        await extensionActions.install(item.repositoryId, item.entry.source_key, () =>
-          confirm({
-            title: 'Install from an unsigned repository?',
-            description:
-              'This repository does not sign its sources, so nothing verifies who wrote this code. Only install it if you trust the repository.',
-            confirmLabel: 'Install anyway',
-          }),
-        );
+        await extensionActions.install(item.repositoryId, item.entry.source_key, confirmUnsigned);
         toast({ description: `${repairSourceName(item.entry.name)} installed.` });
       } catch (error) {
         toast({
@@ -256,19 +312,169 @@ export function SourceCatalog({
   const refreshingAll = busyKeys.has('repo:all');
   const handleRefreshAll = () =>
     run('repo:all', async () => {
-      const results = await Promise.allSettled(
-        repositories.map((repository) => extensionActions.refreshRepository(repository.id)),
-      );
+      const lists = [
+        ...repositories.map(
+          (repository) => () => extensionActions.refreshRepository(repository.id),
+        ),
+        ...(withEngine ? [engineActions.refresh] : []),
+      ];
+      const results = await Promise.allSettled(lists.map((refresh) => refresh()));
       const failed = results.filter((result) => result.status === 'rejected').length;
       toast({
         description:
           failed === 0
-            ? `${repositories.length} ${repositories.length === 1 ? 'repository' : 'repositories'} refreshed.`
-            : `${failed} of ${repositories.length} could not be refreshed.`,
+            ? `${lists.length} ${lists.length === 1 ? 'list' : 'lists'} refreshed.`
+            : `${failed} of ${lists.length} could not be refreshed.`,
       });
     });
 
-  if (loading) {
+  /** The install, update and remove buttons of one row, whichever list it came from. */
+  const rowActionsFor = (row: CatalogRow) => {
+    const buttonClass =
+      'min-h-9 cursor-pointer rounded-lg border border-border/60 px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50';
+    const removeClass =
+      'min-h-9 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive transition hover:bg-destructive/20 disabled:opacity-50';
+    if (row.kind === 'engine') {
+      const { extension } = row;
+      const busy = engineActions.busy.has(extension.pkg_name);
+      return (
+        <>
+          {extension.installed && extension.has_update && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void engineActions.change(extension, 'update')}
+              aria-label={`Update ${row.name}`}
+              className={buttonClass}
+            >
+              {busy ? '…' : 'Update'}
+            </button>
+          )}
+          {extension.installed ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void engineActions.change(extension, 'uninstall')}
+              aria-label={`Remove ${row.name}`}
+              className={removeClass}
+            >
+              {busy ? 'Removing…' : 'Remove'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={busy || extension.obsolete}
+              onClick={() => void engineActions.change(extension, 'install')}
+              aria-label={`Install ${row.name}`}
+              className={buttonClass}
+            >
+              {busy ? 'Installing…' : 'Install'}
+            </button>
+          )}
+        </>
+      );
+    }
+    const { item, key } = row;
+    const busy = busyKeys.has(key);
+    return (
+      <>
+        {item.installedId !== null && item.updateAvailable && (
+          <button
+            type="button"
+            onClick={() => handleUpdate(item)}
+            disabled={busy}
+            aria-label={`Update ${row.name}`}
+            className={buttonClass}
+          >
+            {busy ? '…' : 'Update'}
+          </button>
+        )}
+        {item.installedId !== null ? (
+          <button
+            type="button"
+            onClick={() => handleUninstall(item)}
+            disabled={busy}
+            aria-label={`Remove ${row.name}`}
+            className={removeClass}
+          >
+            {rowActions[key] === 'remove' ? 'Removing…' : 'Remove'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => handleInstall(item)}
+            disabled={busy || item.conflictsWithInstalled}
+            aria-label={`Install ${row.name}`}
+            className={buttonClass}
+          >
+            {rowActions[key] === 'install' ? 'Installing…' : 'Install'}
+          </button>
+        )}
+      </>
+    );
+  };
+
+  const renderRow = (row: CatalogRow) => {
+    const repository = row.kind === 'repository' ? repositoryById.get(row.item.repositoryId) : null;
+    const author =
+      row.kind === 'engine' ? ENGINE_AUTHOR : repository ? repositoryAuthor(repository) : null;
+    const updateAvailable =
+      row.kind === 'engine'
+        ? row.extension.installed && row.extension.has_update
+        : row.item.updateAvailable;
+    const detail =
+      row.kind === 'engine'
+        ? `v${row.extension.version} · ${sourceLanguageName(row.extension.lang)}${row.extension.is_nsfw ? ' · NSFW' : ''}${row.extension.obsolete ? ' · Obsolete' : ''}`
+        : detailLine(row.item.entry);
+    return (
+      <li key={row.key} className="flex items-start justify-between gap-4 px-5 py-3">
+        <div className="flex min-w-0 gap-2.5">
+          {row.kind === 'engine' ? (
+            <ExtensionIcon url={row.extension.icon_url} />
+          ) : (
+            <SourceIcon
+              sourceKey={row.item.entry.source_key}
+              url={row.item.entry.icon_url}
+              installedId={row.item.installedId}
+            />
+          )}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="max-w-full truncate text-sm font-medium text-foreground">
+                {row.name}
+              </span>
+              <span className="text-xs text-muted-foreground">{detail}</span>
+              {updateAvailable && (
+                <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                  Update
+                </span>
+              )}
+            </div>
+            {author && (
+              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <span className="truncate">{author}</span>
+                {repository?.badge_label && (
+                  <span className="shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-medium">
+                    {repository.badge_label}
+                  </span>
+                )}
+              </p>
+            )}
+            {row.kind === 'repository' && row.item.conflictsWithInstalled && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Another repository already provides{' '}
+                <span className="text-foreground">{row.item.entry.source_key}</span>. Remove that
+                one first — two sources cannot share an id.
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">{rowActionsFor(row)}</div>
+      </li>
+    );
+  };
+
+  if (loading && !withEngine) {
     return (
       <section className="mt-12">
         <h2 className="text-sm font-semibold text-foreground">Available sources</h2>
@@ -280,7 +486,7 @@ export function SourceCatalog({
     );
   }
 
-  if (hasNoRepositories) {
+  if (hasNoRepositories && !withEngine) {
     return (
       <section className="mt-12 rounded-2xl border border-dashed border-border/60 p-8 text-center">
         <PackageOpen className="mx-auto h-7 w-7 text-muted-foreground" />
@@ -327,20 +533,29 @@ export function SourceCatalog({
         <p role="status" className="mt-2 text-xs text-muted-foreground">
           {resultCount} catalog results
         </p>
-        {resultCount === 0 && (
+        {withEngine && !engine.list.data?.length && (
+          <div className="mt-4">
+            <EngineStatusNotice builtIn={engine.builtIn} list={engine.list} />
+          </div>
+        )}
+        {loading && showRepositories && (
+          <div className="mt-4 space-y-2">
+            <Skeleton className="h-16 w-full rounded-xl" />
+            <Skeleton className="h-16 w-full rounded-xl" />
+          </div>
+        )}
+        {resultCount === 0 && !loading && (
           <p className="mt-4 text-sm text-muted-foreground">
             No sources match the current filters.
           </p>
         )}
         <div className="mt-4 space-y-6">
-          {sections.map(({ label: sectionLabel, Icon, matches }) => {
-            const sectionEntries = visibleEntries.filter(
-              (item) =>
-                matches(item) &&
-                (activeLanguage === 'all' ||
-                  sourceLanguageGroup(item.entry.lang) === activeLanguage),
-            );
-            if (!sectionEntries.length) return null;
+          {SECTIONS.map(({ label: sectionLabel, Icon }) => {
+            const sectionRows = rows.filter((row) => sectionOf(row) === sectionLabel);
+            if (!sectionRows.length) return null;
+            const languageGroups = [
+              ...new Set(sectionRows.map((row) => sourceLanguageGroup(row.lang))),
+            ].sort(compareLanguageGroups);
             return (
               <section
                 key={sectionLabel}
@@ -351,131 +566,28 @@ export function SourceCatalog({
                   <Icon aria-hidden="true" className="size-4 text-primary" />
                   {sectionLabel}
                   <span className="text-xs font-normal text-muted-foreground">
-                    {sectionEntries.length}
+                    {sectionRows.length}
                   </span>
                 </h3>
-                {groups
-                  .filter((group) =>
-                    sectionEntries.some((item) => sourceLanguageGroup(item.entry.lang) === group),
-                  )
-                  .map((group) => (
-                    <section
-                      key={group}
-                      aria-label={`${sourceLanguageName(group)} sources`}
-                      className="space-y-3"
-                    >
-                      <h4 className="text-sm font-semibold text-foreground">
-                        {sourceLanguageName(group)}
-                      </h4>
-                      {(() => {
-                        // One flat list per language group rather than a card per
-                        // repository: a per-repository header would repeat its name and
-                        // Refresh button for every section-and-language combination.
-                        // Attribution is shown on each source row instead.
-                        const rows = sectionEntries.filter(
-                          (item) =>
-                            sourceLanguageGroup(item.entry.lang) === group &&
-                            !repositoryById.get(item.repositoryId)?.fetchError,
-                        );
-                        if (!rows.length) return null;
-                        return (
-                          <ul className="divide-y divide-border/60 overflow-hidden rounded-2xl border border-border/60 bg-surface/40">
-                            {rows.map((item) => {
-                              const key = `${item.repositoryId}:${item.entry.source_key}`;
-                              const busy = busyKeys.has(key);
-                              const installed = item.installedId !== null;
-                              const repository = repositoryById.get(item.repositoryId);
-                              const publisher = repository ? repositoryPublisher(repository) : null;
-
-                              return (
-                                <li
-                                  key={key}
-                                  className="flex items-start justify-between gap-4 px-5 py-3"
-                                >
-                                  <div className="flex min-w-0 gap-2.5">
-                                    <SourceIcon
-                                      sourceKey={item.entry.source_key}
-                                      url={item.entry.icon_url}
-                                      installedId={item.installedId}
-                                    />
-                                    <div className="min-w-0">
-                                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                        <span className="max-w-full truncate text-sm font-medium text-foreground">
-                                          {repairSourceName(item.entry.name)}
-                                        </span>
-                                        <span className="text-xs text-muted-foreground">
-                                          {detailLine(item.entry)}
-                                        </span>
-                                        {item.updateAvailable && (
-                                          <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                                            Update
-                                          </span>
-                                        )}
-                                      </div>
-                                      {publisher && (
-                                        <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                                          <span className="truncate">By. {publisher}</span>
-                                          {repository?.badge_label && (
-                                            <span className="shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-medium">
-                                              {repository.badge_label}
-                                            </span>
-                                          )}
-                                        </p>
-                                      )}
-                                      {item.conflictsWithInstalled && (
-                                        <p className="mt-1 text-xs text-muted-foreground">
-                                          Another repository already provides{' '}
-                                          <span className="text-foreground">
-                                            {item.entry.source_key}
-                                          </span>
-                                          . Remove that one first — two sources cannot share an id.
-                                        </p>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  <div className="flex shrink-0 items-center gap-2">
-                                    {installed && item.updateAvailable && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleUpdate(item)}
-                                        disabled={busy}
-                                        aria-label={`Update ${repairSourceName(item.entry.name)}`}
-                                        className="min-h-9 cursor-pointer rounded-lg border border-border/60 px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
-                                      >
-                                        {busy ? '…' : 'Update'}
-                                      </button>
-                                    )}
-                                    {installed ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleUninstall(item)}
-                                        disabled={busy}
-                                        aria-label={`Remove ${repairSourceName(item.entry.name)}`}
-                                        className="min-h-9 cursor-pointer rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive transition hover:bg-destructive/20 disabled:opacity-50"
-                                      >
-                                        {rowActions[key] === 'remove' ? 'Removing…' : 'Remove'}
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleInstall(item)}
-                                        disabled={busy || item.conflictsWithInstalled}
-                                        aria-label={`Install ${repairSourceName(item.entry.name)}`}
-                                        className="min-h-9 cursor-pointer rounded-lg border border-border/60 px-3 py-1 text-xs font-medium text-foreground transition hover:bg-accent disabled:opacity-50"
-                                      >
-                                        {rowActions[key] === 'install' ? 'Installing…' : 'Install'}
-                                      </button>
-                                    )}
-                                  </div>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        );
-                      })()}
-                    </section>
-                  ))}
+                {languageGroups.map((group) => (
+                  <section
+                    key={group}
+                    aria-label={`${sourceLanguageName(group)} sources`}
+                    className="space-y-3"
+                  >
+                    <h4 className="text-sm font-semibold text-foreground">
+                      {sourceLanguageName(group)}
+                    </h4>
+                    {/* One list per language, whoever made the sources: each row says who
+                        did. The engine can list over a thousand, so rows are added as the
+                        end of the list nears the screen. */}
+                    <GrowingList
+                      rows={sectionRows.filter((row) => sourceLanguageGroup(row.lang) === group)}
+                      className={ROW_LIST_CLASS}
+                      render={renderRow}
+                    />
+                  </section>
+                ))}
               </section>
             );
           })}

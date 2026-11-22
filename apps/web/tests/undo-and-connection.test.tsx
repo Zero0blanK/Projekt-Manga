@@ -21,7 +21,6 @@ vi.mock('@/lib/extensions-store', () => ({
 
 const { toastWithUndo } = await import('@/lib/undo-toast');
 const { ConnectionBanner } = await import('@/components/connection-banner');
-const { SourceBulkBar } = await import('@/components/discover/source-bulk-bar');
 const { queryClient } = await import('@/lib/query-client');
 
 beforeEach(() => {
@@ -92,38 +91,5 @@ describe('ConnectionBanner', () => {
       '/downloads',
     );
     onLine.mockRestore();
-  });
-});
-
-describe('SourceBulkBar', () => {
-  const records = [{ id: 'a' }, { id: 'b' }] as never[];
-
-  it('updates every selected install and reports how many changed', async () => {
-    const user = userEvent.setup();
-    mocks.checkForUpdate.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-    render(<SourceBulkBar ids={['a', 'b']} records={records} onPin={vi.fn()} onClose={vi.fn()} />);
-    await user.click(screen.getByRole('button', { name: 'Update' }));
-    await waitFor(() =>
-      expect(mocks.toast).toHaveBeenCalledWith({ description: '1 source updated.' }),
-    );
-  });
-
-  it('removes after confirming, and keeps going past a failure', async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-    mocks.uninstall.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('no'));
-    render(<SourceBulkBar ids={['a', 'b']} records={records} onPin={vi.fn()} onClose={onClose} />);
-    await user.click(screen.getByRole('button', { name: 'Remove' }));
-    await waitFor(() => expect(mocks.uninstall).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-      expect(mocks.toast).toHaveBeenCalledWith({ description: "1 source couldn't be removed." }),
-    );
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('only pins when nothing selected is an install', () => {
-    render(<SourceBulkBar ids={['suwayomi:1']} records={[]} onPin={vi.fn()} onClose={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Pin' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Remove' })).toBeDisabled();
   });
 });

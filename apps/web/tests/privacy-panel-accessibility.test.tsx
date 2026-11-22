@@ -84,6 +84,9 @@ vi.mock('@/components/settings/wipe-data-dialog', () => ({
   WipeDataDialog: () => <button>Choose data to wipe…</button>,
 }));
 vi.mock('@/lib/library-store', () => ({ useMangaLibrary: () => ({ manga: [], loading: false }) }));
+vi.mock('@/components/settings/install-missing-source', () => ({
+  InstallMissingSource: () => null,
+}));
 vi.mock('@/hooks/use-toast', () => ({ toast }));
 
 const { PrivacyPanel } = await import('@/components/settings/privacy-panel');

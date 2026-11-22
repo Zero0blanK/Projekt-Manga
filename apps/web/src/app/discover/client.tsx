@@ -14,6 +14,12 @@ import {
   sourceLanguageName,
 } from '@/lib/source-language';
 import { EMPTY_IDS, parseIdList, useProfilePreference } from '@/lib/profile-preferences';
+import {
+  collapseEngineLanguages,
+  engineGroupKey,
+  parseEngineLanguageChoices,
+  type EngineLanguageChoices,
+} from '@/lib/engine-language-groups';
 import { useCurrentUser } from '@/lib/session-resource';
 import { useContentPrivacy, isAdultSource } from '@/components/discover/content-privacy';
 import { emptySourceFilters } from '@/components/discover/source-filters';
@@ -23,12 +29,8 @@ import { SourceCardsSkeleton } from '@/components/skeletons';
 import { NoSourcesEmptyState } from '@/components/discover/no-sources-empty-state';
 import { LoadError } from '@/components/load-error';
 import { SourceCatalog } from '@/components/discover/source-catalog';
-import {
-  SuwayomiExtensions,
-  useSuwayomiExtensions,
-} from '@/components/discover/suwayomi-extensions';
+import { ENGINE_AUTHOR, useSuwayomiExtensions } from '@/lib/engine-extensions';
 import { InstalledSourceCard } from '@/components/discover/installed-source-card';
-import { SourceBulkBar } from '@/components/discover/source-bulk-bar';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Pin, Search, X } from 'lucide-react';
 import type { DisplaySource } from '@/lib/manga-data';
@@ -44,11 +46,14 @@ import {
   type DiscoverFilters,
 } from '@/lib/discover-filters';
 import { summarizeSourceHealth } from '@/lib/source-health-status';
-import { repositoryPublisher } from '@/lib/repository-url';
+import { repositoryAuthor } from '@/lib/repository-url';
 import { PAGE_FRAME, PageHeader } from '@/components/page-shell';
 
 /** The Extensions tab's filters in the URL, apart from Installed sources' own. */
 const EXTENSION_FILTER_PREFIX = 'x';
+
+/** No language chosen yet for any multilingual engine extension. */
+const NO_ENGINE_LANGUAGES: EngineLanguageChoices = {};
 
 export function DiscoverPageClient() {
   const params = useSearchParams(),
@@ -73,14 +78,17 @@ export function DiscoverPageClient() {
   const installedByKey = installedExtensionsByKey(installed);
   const [privacy] = useContentPrivacy();
   const [pins, setPins] = useProfilePreference('pinnedSources', parseIdList, EMPTY_IDS);
+  const [engineLanguages, setEngineLanguages] = useProfilePreference(
+    'engineSourceLanguages',
+    parseEngineLanguageChoices,
+    NO_ENGINE_LANGUAGES,
+  );
   const [incognito, setIncognito] = useProfilePreference(
     'incognitoSources',
     parseIdList,
     EMPTY_IDS,
   );
   const [name, setName] = useState('');
-  // Null until "Select sources" is on; then the ticked source ids.
-  const [picked, setPicked] = useState<string[] | null>(null);
   // Kept in the URL too, so Back from a source returns to the same filtered list.
   const [filters, setFilters] = useState<DiscoverFilters>(() => readDiscoverFilters(params));
   const [extensionFilters, setExtensionFilters] = useState<DiscoverFilters>(() =>
@@ -132,6 +140,14 @@ export function DiscoverPageClient() {
       !privacy.hideAdult ||
       !isAdultSource(installedByKey.get(source.id)?.content_rating, source.isNSFW),
   );
+  // A multilingual engine extension is one card, in the language chosen for it.
+  const folded = collapseEngineLanguages(visible, engineLanguages, {
+    language: filters.language,
+    preferredLanguage: typeof navigator === 'undefined' ? '' : navigator.language,
+  });
+  // A multilingual extension's card stays under Multilingual whichever language it shows.
+  const sectionOf = (source: DisplaySource) =>
+    folded.languagesOf.has(source.id) ? 'multi' : sourceLanguageGroup(source.lang);
   const originOf = (source: DisplaySource) =>
     source.provider === 'suwayomi'
       ? SUWAYOMI_ORIGIN
@@ -151,12 +167,14 @@ export function DiscoverPageClient() {
     source.provider === 'suwayomi' &&
     extensionSites.has(siteKey(source)) &&
     filters.origin !== SUWAYOMI_ORIGIN;
-  const sources = visible
+  const sources = folded.sources
     .filter(
       (source) =>
         !isFoldedDuplicate(source) &&
         source.name.toLocaleLowerCase().includes(name.trim().toLocaleLowerCase()) &&
-        (!filters.language || sourceLanguageGroup(source.lang) === filters.language) &&
+        (!filters.language ||
+          sourceLanguageGroup(source.lang) === filters.language ||
+          sectionOf(source) === filters.language) &&
         (!filters.origin || originOf(source) === filters.origin) &&
         (!filters.rating || ratingOf(source) === filters.rating) &&
         (!filters.health || isFailing(source)),
@@ -166,9 +184,7 @@ export function DiscoverPageClient() {
   // Pinned sources get their own section, in pin order, and leave their language's.
   const pinnedSources = pins.flatMap((id) => sources.filter((source) => source.id === id));
   const unpinned = sources.filter((source) => !pins.includes(source.id));
-  const languageGroups = [
-    ...new Set(unpinned.map((source) => sourceLanguageGroup(source.lang))),
-  ].sort(byLanguage);
+  const languageGroups = [...new Set(unpinned.map(sectionOf))].sort(byLanguage);
   const filterLanguages = [
     ...new Set(visible.map((source) => sourceLanguageGroup(source.lang))),
   ].sort(byLanguage);
@@ -178,10 +194,10 @@ export function DiscoverPageClient() {
       .filter((repository) => [...ids].includes(repository.id))
       .map((repository) => ({
         value: repositoryOrigin(repository.id),
-        label: repositoryPublisher(repository),
+        label: repositoryAuthor(repository),
       }))
       .sort((a, b) => a.label.localeCompare(b.label)),
-    ...(withSuwayomi ? [{ value: SUWAYOMI_ORIGIN, label: 'Suwayomi' }] : []),
+    ...(withSuwayomi ? [{ value: SUWAYOMI_ORIGIN, label: ENGINE_AUTHOR }] : []),
   ];
   const installedOrigins = originChoices(
     new Set(installed.map((row) => row.repository_id)),
@@ -237,6 +253,10 @@ export function DiscoverPageClient() {
         (item) =>
           !privacy.hideAdult || !isAdultSource(item.entry.content_rating, item.entry.isNSFW),
       )}
+      languageEditions={folded.languagesOf.get(source.id)}
+      onChooseEdition={(id) =>
+        setEngineLanguages((current) => ({ ...current, [engineGroupKey(source)]: id }))
+      }
       pinned={pins.includes(source.id)}
       privateReading={incognito.includes(source.id)}
       onTogglePin={() => setPins((current) => toggle(current, source.id))}
@@ -246,8 +266,6 @@ export function DiscoverPageClient() {
         shownPins.indexOf(source.id) >= 0 && shownPins.indexOf(source.id) < shownPins.length - 1
       }
       onMovePin={(direction) => reorder(source.id, direction)}
-      picked={picked?.includes(source.id)}
-      onPick={picked ? () => setPicked((current) => toggle(current ?? [], source.id)) : undefined}
     />
   );
   const section = (key: string, label: string, list: DisplaySource[], icon?: ReactNode) => (
@@ -366,14 +384,6 @@ export function DiscoverPageClient() {
             </div>
           ) : (
             <div className="space-y-8">
-              <button
-                type="button"
-                aria-pressed={picked !== null}
-                className="text-sm text-primary pointer-coarse:min-h-11"
-                onClick={() => setPicked((current) => (current ? null : []))}
-              >
-                {picked ? 'Cancel selection' : 'Select sources'}
-              </button>
               {pinnedSources.length > 0 &&
                 section(
                   'pinned',
@@ -385,21 +395,10 @@ export function DiscoverPageClient() {
                 section(
                   language,
                   sourceLanguageName(language),
-                  unpinned.filter((source) => sourceLanguageGroup(source.lang) === language),
+                  unpinned.filter((source) => sectionOf(source) === language),
                 ),
               )}
             </div>
-          )}
-          {picked && (
-            <SourceBulkBar
-              ids={picked}
-              records={picked.flatMap((id) => installedByKey.get(id) ?? [])}
-              onPin={() => {
-                setPins((current) => [...new Set([...current, ...picked])]);
-                setPicked([]);
-              }}
-              onClose={() => setPicked(null)}
-            />
           )}
         </TabsContent>
         <TabsContent value="extensions" className="mt-6">
@@ -411,14 +410,13 @@ export function DiscoverPageClient() {
             origins={extensionOrigins}
             filtered={false}
           />
-          {extensionFilters.origin !== SUWAYOMI_ORIGIN && (
-            <SourceCatalog
-              filters={{ ...emptySourceFilters, name, rating: extensionFilters.rating }}
-              language={extensionFilters.language}
-              repositoryId={extensionRepository}
-            />
-          )}
-          {!extensionRepository && <SuwayomiExtensions name={name} filters={extensionFilters} />}
+          <SourceCatalog
+            filters={{ ...emptySourceFilters, name, rating: extensionFilters.rating }}
+            language={extensionFilters.language}
+            repositoryId={extensionRepository}
+            showRepositories={extensionFilters.origin !== SUWAYOMI_ORIGIN}
+            showEngine={!extensionRepository}
+          />
         </TabsContent>
       </Tabs>
     </div>

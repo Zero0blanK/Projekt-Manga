@@ -179,7 +179,7 @@ describe('Source pin ordering and device persistence', () => {
     render(<DiscoverPageClient />);
     await user.click(screen.getByRole('button', { name: /^Source repository/ }));
     const options = await screen.findAllByRole('menuitem');
-    expect(options.map((option) => option.textContent)).toEqual(['All', 'Alice', 'Bob']);
+    expect(options.map((option) => option.textContent)).toEqual(['All', '@Alice', '@Bob']);
     await user.click(options[2]);
     expect(sourceOrder()).toEqual(['Source B']);
   });

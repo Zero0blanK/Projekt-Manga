@@ -29,6 +29,7 @@ import {
 } from '@/lib/external-backup';
 import { useMigrationPreferences } from '@/lib/migration-state';
 import { SourceOrderList } from '@/components/settings/source-order-list';
+import { InstallMissingSource } from '@/components/settings/install-missing-source';
 import { saveExternalImportExtras } from '@/lib/external-backup/extras';
 import {
   AlertDialog,
@@ -277,6 +278,28 @@ export function ExternalImport({
   const sourceName = (installed: InstalledSource[], id: string) =>
     installed.find((source) => source.id === id)?.name ?? id;
 
+  /**
+   * After a source is installed from this dialog: matches the backup's sources again, and
+   * picks the new match for any source still left without one. A choice already made stays.
+   */
+  const refreshInstalled = async () => {
+    if (step.kind !== 'map') return;
+    const installed = await getSources();
+    const sources = summariseSources(step.backup, installed);
+    setStep((current) =>
+      current.kind === 'map' && current.backup === step.backup
+        ? { ...current, installed, sources }
+        : current,
+    );
+    setChoices((current) => {
+      const next = new Map(current);
+      for (const source of sources)
+        if (!next.get(source.id) && source.match.kind === 'matched')
+          next.set(source.id, source.match.sourceId);
+      return next;
+    });
+  };
+
   return (
     <>
       <Field
@@ -375,6 +398,13 @@ export function ExternalImport({
                           })),
                         ]}
                       />
+                      {source.match.kind === 'unmatched' && !value && (
+                        <InstallMissingSource
+                          name={source.name}
+                          disabled={!!busy}
+                          onInstalled={refreshInstalled}
+                        />
+                      )}
                       {!value && (
                         <div className="basis-full space-y-1.5 sm:pt-1">
                           {customOrders.has(source.id) ? (

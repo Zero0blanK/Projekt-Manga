@@ -9,7 +9,7 @@ import changelog from '@/data/changelog.json';
  * and a malformed file fails the build instead of the page.
  */
 
-export type ChangeType = 'added' | 'changed' | 'fixed' | 'removed';
+export type ChangeType = 'added' | 'improved' | 'changed' | 'fixed' | 'removed';
 
 export type Change = { type: ChangeType; text: string };
 
@@ -30,6 +30,7 @@ export const CURRENT_RELEASE: Release = RELEASES[0];
 
 export const CHANGE_LABELS: Record<ChangeType, string> = {
   added: 'New',
+  improved: 'Improved',
   changed: 'Changed',
   fixed: 'Fixed',
   removed: 'Removed',

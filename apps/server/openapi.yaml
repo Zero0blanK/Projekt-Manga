@@ -279,6 +279,22 @@ paths:
       responses:
         '200':
           description: The models' state
+    delete:
+      tags: [Reader]
+      summary: Delete local translation's models (admin)
+      description: >-
+        Waits for any page being read, releases the loaded models and deletes their files,
+        so the state is `missing` again. Translation falls back to reading on the device until
+        they are downloaded again.
+      responses:
+        '200':
+          description: The models' state, as GET /translate/local
+        '403':
+          description: Not the server's admin
+        '409':
+          description: The models are still downloading
+        '503':
+          description: Local translation is turned off on this server
 
   /translate/local/download:
     post:

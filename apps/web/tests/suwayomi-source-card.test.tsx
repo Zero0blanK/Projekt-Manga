@@ -40,7 +40,7 @@ describe('a Suwayomi source in Discover', () => {
       />,
     );
 
-    expect(screen.getByText(/Suwayomi/)).toBeInTheDocument();
+    expect(screen.getByText(/@KEI/)).toBeInTheDocument();
     expect(screen.queryByText(/Version unavailable/)).toBeNull();
     const icon = document.querySelector('img');
     expect(icon?.getAttribute('src')).toContain('image-proxy');

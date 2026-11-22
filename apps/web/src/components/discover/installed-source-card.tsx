@@ -40,7 +40,8 @@ import { toast } from '@/hooks/use-toast';
 import { useSourceHealthStatus } from '@/lib/source-health-status';
 import { sourceIconUrl, websiteUrl } from '@/lib/source-url';
 import { CachedSourceIcon } from '@/components/discover/cached-source-icon';
-import { useConfirm } from '@/hooks/use-confirm';
+import { useUnsignedInstallConfirm } from '@/hooks/use-unsigned-install-confirm';
+import { ENGINE_AUTHOR } from '@/lib/engine-extensions';
 /** The extension's own icon when its repository ships one, the lettered tile otherwise. */
 function SourceAvatar({
   sourceKey,
@@ -84,6 +85,8 @@ export function InstalledSourceCard({
   listingIconUrl,
   alternate,
   editionEntries = [],
+  languageEditions,
+  onChooseEdition,
   pinned,
   privateReading,
   onTogglePin,
@@ -91,8 +94,6 @@ export function InstalledSourceCard({
   canMoveUp,
   canMoveDown,
   onMovePin,
-  picked,
-  onPick,
 }: {
   source: DisplaySource;
   record?: InstalledExtension;
@@ -101,6 +102,10 @@ export function InstalledSourceCard({
   /** The same site through the Suwayomi server, shown on this card rather than as its own. */
   alternate?: DisplaySource;
   editionEntries?: CatalogEntry[];
+  /** Every language of this engine extension, when it has several: the card shows one. */
+  languageEditions?: DisplaySource[];
+  /** Shows the extension in another of its languages. */
+  onChooseEdition?: (sourceId: string) => void;
   pinned: boolean;
   privateReading: boolean;
   onTogglePin: () => void;
@@ -109,12 +114,10 @@ export function InstalledSourceCard({
   canMoveDown: boolean;
   onMovePin: (direction: number) => void;
   /** Whether it's ticked for a bulk action; left out when the list isn't selecting. */
-  picked?: boolean;
-  onPick?: () => void;
 }) {
   const [installing, setInstalling] = useState<string | null>(null);
   const pendingInstall = useRef(false);
-  const { confirm, dialog } = useConfirm();
+  const { confirmUnsigned, dialog } = useUnsignedInstallConfirm();
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -143,14 +146,7 @@ export function InstalledSourceCard({
     pendingInstall.current = true;
     setInstalling(key);
     try {
-      await extensionActions.install(edition.repositoryId, key, () =>
-        confirm({
-          title: 'Install from an unsigned repository?',
-          description:
-            'This repository does not sign its sources, so nothing verifies who wrote this code. Only install it if you trust the repository.',
-          confirmLabel: 'Install anyway',
-        }),
-      );
+      await extensionActions.install(edition.repositoryId, key, confirmUnsigned);
       toast({ description: `${repairSourceName(edition.entry.name)} installed.` });
     } catch (error) {
       toast({
@@ -178,15 +174,6 @@ export function InstalledSourceCard({
   return (
     <article className="flex flex-col rounded-2xl border border-border/60 bg-surface/40 p-3 transition hover:border-primary/30">
       <div className="mb-3 flex items-start gap-3">
-        {onPick && (
-          <input
-            type="checkbox"
-            aria-label={`Select ${source.name}`}
-            checked={picked === true}
-            onChange={onPick}
-            className="mt-1 size-4 shrink-0 accent-primary pointer-coarse:size-6"
-          />
-        )}
         <SourceAvatar
           sourceKey={source.id}
           name={source.name}
@@ -204,7 +191,7 @@ export function InstalledSourceCard({
                 languageName(source.lang))}
             <span className="tabular-nums">
               {' · '}
-              {record ? `v${record.version}` : suwayomi ? 'Suwayomi' : 'Version unavailable'}
+              {record ? `v${record.version}` : suwayomi ? ENGINE_AUTHOR : 'Version unavailable'}
             </span>
           </p>
           {alternate && (
@@ -212,7 +199,7 @@ export function InstalledSourceCard({
               href={`/discover/popular?source=${encodeURIComponent(alternate.id)}`}
               className="mt-0.5 block truncate text-xs text-primary hover:underline"
             >
-              Also on Suwayomi
+              Also from {ENGINE_AUTHOR}
             </Link>
           )}
           {(rating === 'nsfw' ||
@@ -277,7 +264,20 @@ export function InstalledSourceCard({
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Display languages</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
-                {hasLanguageFilter ? (
+                {languageEditions && languageEditions.length > 1 ? (
+                  <DropdownMenuRadioGroup
+                    value={source.id}
+                    onValueChange={(id) => onChooseEdition?.(id)}
+                  >
+                    {[...languageEditions]
+                      .sort((x, y) => languageName(x.lang).localeCompare(languageName(y.lang)))
+                      .map((edition) => (
+                        <DropdownMenuRadioItem key={edition.id} value={edition.id}>
+                          {languageName(edition.lang)}
+                        </DropdownMenuRadioItem>
+                      ))}
+                  </DropdownMenuRadioGroup>
+                ) : hasLanguageFilter ? (
                   <DropdownMenuRadioGroup
                     value={displayLanguage}
                     onValueChange={setDisplayLanguage}
