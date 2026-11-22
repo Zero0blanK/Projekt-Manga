@@ -12,6 +12,7 @@ import {
 import { ChangelogChanges, ChangelogText } from '@/components/changelog-changes';
 import { RELEASES, type Release } from '@/lib/changelog';
 import { updateBridge, type UpdateState } from '@/lib/desktop-update';
+import { setAppUpdateProgress } from '@/lib/app-update-progress';
 
 const POLL_MS = 2000;
 /** While nothing is happening: the desktop app keeps checking, so a release can turn up later. */
@@ -20,7 +21,10 @@ const IDLE_POLL_MS = 60_000;
 /**
  * Desktop only: when the update check finds a new version, shows its changelog and asks whether
  * to update now, later (asked again next launch) or never for this version. Nothing downloads
- * until "Update now".
+ * until "Update now", which closes the prompt: the download goes on in the background, shown
+ * by the update dial in the corner (components/app-update-dial.tsx), which then offers
+ * "Restart to update". Nothing restarts by itself; an update left for later installs when the
+ * app next quits. A download that fails brings the prompt back, with the reason.
  *
  * Polls the desktop bridge rather than subscribing, like Settings → About: the bridge is
  * invoke-only.
@@ -59,12 +63,27 @@ export function UpdatePrompt() {
     // `updating` restarts polling so the download progress keeps moving.
   }, [updating]);
 
+  // While it downloads in the background, the dial in the corner shows how far it got.
+  useEffect(() => {
+    setAppUpdateProgress(
+      updating && state?.availableVersion
+        ? {
+            version: state.availableVersion,
+            percent: state.downloadPercent,
+            ready: state.status === 'downloaded',
+          }
+        : null,
+    );
+  }, [updating, state?.availableVersion, state?.downloadPercent, state?.status]);
+  useEffect(() => () => setAppUpdateProgress(null), []);
+
   const open =
+    !updating &&
     !!state?.prompt &&
     !!state.availableVersion &&
     state.availableVersion !== closedVersion &&
     ['available', 'downloading', 'downloaded'].includes(state.status);
-  if (!state || (!open && !updating)) return null;
+  if (!state || !open) return null;
 
   const dismiss = (choice: 'later' | 'skip') => {
     setClosedVersion(state.availableVersion);
@@ -76,7 +95,7 @@ export function UpdatePrompt() {
   };
 
   return (
-    <Dialog open={open || updating} onOpenChange={(next) => !next && !updating && dismiss('later')}>
+    <Dialog open={open} onOpenChange={(next) => !next && dismiss('later')}>
       {/* Only the buttons or Escape answer it; a stray click shouldn't count as "Later". */}
       <DialogContent className="max-w-lg" onInteractOutside={(event) => event.preventDefault()}>
         <DialogHeader>
@@ -94,45 +113,36 @@ export function UpdatePrompt() {
           <ReleaseNotes state={state} />
         </div>
 
-        {state.error && !updating && (
+        {state.error && (
           <p role="alert" className="text-sm text-destructive">
             {state.error}
           </p>
         )}
 
-        {updating ? (
-          <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            {state.status === 'downloaded'
-              ? 'Installing the update. Projekt Manga will close and reopen by itself…'
-              : `Downloading${state.downloadPercent !== null ? ` ${state.downloadPercent}%` : ''}…`}
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => dismiss('skip')}
-              className="mr-auto rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition hover:text-foreground"
-            >
-              Skip this version
-            </button>
-            <button
-              type="button"
-              onClick={() => dismiss('later')}
-              className="rounded-lg border border-border/60 px-4 py-2 text-xs font-medium text-foreground transition hover:bg-accent"
-            >
-              Later
-            </button>
-            <button
-              type="button"
-              onClick={updateNow}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition hover:opacity-90"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Update now
-            </button>
-          </div>
-        )}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => dismiss('skip')}
+            className="mr-auto rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground transition hover:text-foreground"
+          >
+            Skip this version
+          </button>
+          <button
+            type="button"
+            onClick={() => dismiss('later')}
+            className="rounded-lg border border-border/60 px-4 py-2 text-xs font-medium text-foreground transition hover:bg-accent"
+          >
+            Later
+          </button>
+          <button
+            type="button"
+            onClick={updateNow}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition hover:opacity-90"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Update now
+          </button>
+        </div>
       </DialogContent>
     </Dialog>
   );

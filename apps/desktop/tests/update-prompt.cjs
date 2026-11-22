@@ -166,13 +166,24 @@ test('a failed download stays on offer with its reason', async () => {
   assert.match(state.error, /Could not reach GitHub/);
 });
 
-test('"Update now" installs as soon as the download finishes', async () => {
+test('"Update now" downloads in the background, then waits for a restart or a quit', async () => {
   const { updater, listeners, autoUpdater } = loadUpdater();
+  assert.equal(autoUpdater.autoInstallOnAppQuit, false);
   listeners['update-available']({ version: '1.2.0', releaseNotes: '' });
   await updater.updateNow();
-  assert.equal(autoUpdater.installed, 0);
   listeners['update-downloaded']({ version: '1.2.0' });
+  // Nothing restarts the app by itself: it installs when the reader restarts, or on quit.
+  assert.equal(autoUpdater.installed, 0);
+  assert.equal(autoUpdater.autoInstallOnAppQuit, true);
+  updater.installNow();
   assert.equal(autoUpdater.installed, 1);
+});
+
+test('a download nobody asked to install leaves quitting alone', async () => {
+  const { listeners, autoUpdater } = loadUpdater();
+  listeners['update-available']({ version: '1.2.0', releaseNotes: '' });
+  listeners['update-downloaded']({ version: '1.2.0' });
+  assert.equal(autoUpdater.autoInstallOnAppQuit, false);
 });
 
 test('an update installs silently into the folder of the running copy, then reopens the app', async () => {

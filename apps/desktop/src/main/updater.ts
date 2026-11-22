@@ -8,7 +8,9 @@
  * Four constraints here are easy to undo by accident:
  *
  * - **Nothing downloads or installs unless the user asks.** A new version only raises the prompt;
- *   `autoDownload` and `autoInstallOnAppQuit` stay off, so quitting never applies an update.
+ *   `autoDownload` stays off. "Update now" downloads in the background and then waits, as VS Code
+ *   does: the reader restarts from the "Restart to update" notice when it suits them, or the
+ *   update installs when the app next quits (`autoInstallOnAppQuit` is turned on only then).
  * - **Everything is gated on `app.isPackaged`.** electron-updater has no `app-update.yml` in a dev
  *   run and throws on the first call, so an ungated check would make `npm run dev:desktop` fail on
  *   startup for a feature that cannot work there anyway.
@@ -165,7 +167,7 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /** The version "Later" was chosen for during this run; a newer one still gets asked about. */
 let dismissedVersion: string | null = null;
-/** "Update now" was chosen before the download finished: restart as soon as it does. */
+/** "Update now" was chosen: once downloaded, the update installs on restart or on quit. */
 let installWhenDownloaded = false;
 
 /**
@@ -361,7 +363,7 @@ export function initUpdater(): void {
       releaseNotes: releaseNotesToText(info.releaseNotes) ?? state.releaseNotes,
     });
     log(`update downloaded: ${info.version}`);
-    if (installWhenDownloaded) installNow();
+    if (installWhenDownloaded) readyToInstall();
   });
 
   autoUpdater.on('error', (error) => recordFailure(error, 'failed'));
@@ -422,16 +424,26 @@ export function installNow(): void {
 }
 
 /**
- * "Update now" from the launch prompt. Restarts straight away when the update is already
- * downloaded; otherwise starts (or keeps) the download and restarts when it lands.
+ * A downloaded update the reader asked for: it installs when they restart from the notice
+ * (`installNow`), or else when the app next quits. Quitting installs silently and doesn't
+ * reopen the app, since the reader closed it.
+ */
+function readyToInstall(): void {
+  autoUpdater.autoInstallOnAppQuit = true;
+  log('update ready: installs on restart, or when the app quits');
+}
+
+/**
+ * "Update now" from the launch prompt: downloads in the background, then waits for the
+ * reader to restart (or quit). Nothing restarts the app by itself.
  */
 export async function updateNow(): Promise<UpdateState> {
   if (!state.supported) return state;
+  installWhenDownloaded = true;
   if (state.status === 'downloaded') {
-    installNow();
+    readyToInstall();
     return state;
   }
-  installWhenDownloaded = true;
   log('update now requested');
   if (state.status === 'available') return downloadUpdate();
   return state;
