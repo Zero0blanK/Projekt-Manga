@@ -8,6 +8,7 @@ import { ConnectionBanner } from '@/components/connection-banner';
 import { DownloadDial } from '@/components/downloads/download-dial';
 import { SplashIntro } from '@/components/splash-intro';
 import { LibraryUpdateDial } from '@/components/library/library-update-dial';
+import { AppUpdateDial } from '@/components/app-update-dial';
 import { useMangaLibrary } from '@/lib/library-store';
 import { useDesktopApiStarting, useDesktopInitReady, useDocumentReady } from '@/lib/use-app-ready';
 import { queryClient, queryKeys } from '@/lib/query-client';
@@ -235,6 +236,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           the app's server, which would roll the restore back to run again. */}
       {splashDone && !restorePending && hasUpdates && <UpdatePrompt />}
       <div className="pointer-events-none fixed bottom-4 right-4 z-40 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
+        {/* An app update downloading in the background after "Update now". */}
+        <AppUpdateDial />
         <LibraryUpdateDial />
         {/* The reader stays clear, and the downloads page already shows the queue. */}
         {!isReaderPath && !pathname.startsWith('/downloads') && <DownloadDial />}

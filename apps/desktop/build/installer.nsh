@@ -23,3 +23,21 @@ Var pid
     !endif
   !endif
 !macroend
+
+; Reopen the app after an update, by its own path.
+;
+; An in-app update runs this installer silently with --force-run, and electron-builder's
+; template then starts the app through StdUtils.ExecShellAsUser on the Start menu shortcut
+; with "--updated" added. Opened that way, with an argument, the app may not start at all
+; (electron-builder issue #5988), and the update then installs but leaves nothing running.
+; So, as VS Code's installer does, the app is also started straight from its executable.
+; If the template's start works too, the second start only reaches the app's single-instance
+; lock and hands over to the window already open. Per-user installs only: a per-machine one
+; runs elevated here, and Exec would start the app as administrator.
+!macro customInstall
+  ${if} ${Silent}
+  ${andIf} ${isForceRun}
+  ${andIf} $installMode == "CurrentUser"
+    Exec '"$appExe" --updated'
+  ${endIf}
+!macroend

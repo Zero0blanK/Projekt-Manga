@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { UpdateState } from '@/lib/desktop-update';
 
 const { UpdatePrompt } = await import('@/components/update-prompt');
+const { AppUpdateDial } = await import('@/components/app-update-dial');
 
 const baseState: UpdateState = {
   supported: true,
@@ -85,12 +86,25 @@ describe('UpdatePrompt', () => {
     expect(await screen.findByLabelText('Changelog')).toHaveTextContent('Faster reader');
   });
 
-  it('updates now, or remembers Later and Skip', async () => {
+  it('updates now in the background, or remembers Later and Skip', async () => {
     const bridge = installBridge();
-    const { unmount } = render(<UpdatePrompt />);
+    const { unmount } = render(
+      <>
+        <UpdatePrompt />
+        <AppUpdateDial />
+      </>,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
     expect(bridge.updateNow).toHaveBeenCalledOnce();
-    expect(await screen.findByRole('status')).toHaveTextContent('will close and reopen by itself');
+    // The prompt closes; the dial in the corner carries on with the install.
+    await waitFor(() => expect(screen.queryByText('Version 1.1.0 is available')).toBeNull());
+    // Downloaded: nothing restarts by itself; the dial offers it.
+    const ready = await screen.findByRole('status');
+    expect(ready).toHaveTextContent('Version 1.1.0 is ready');
+    expect(bridge.installNow).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Restart to update' }));
+    expect(bridge.installNow).toHaveBeenCalledOnce();
+    expect(screen.getByRole('status')).toHaveTextContent('will close and reopen by itself');
     unmount();
 
     render(<UpdatePrompt />);
@@ -106,6 +120,37 @@ describe('UpdatePrompt', () => {
     fireEvent.pointerDown(document.body);
     expect(bridge.dismiss).not.toHaveBeenCalled();
     expect(screen.getByText('Version 1.1.0 is available')).toBeInTheDocument();
+  });
+
+  it('shows the download in the dial, and brings the prompt back when it fails', async () => {
+    const bridge = installBridge({ status: 'available', downloadPercent: null });
+    render(
+      <>
+        <UpdatePrompt />
+        <AppUpdateDial />
+      </>,
+    );
+    bridge.getState.mockResolvedValue({
+      success: true,
+      data: { ...baseState, status: 'downloading', downloadPercent: 42 },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
+    // It reads "Downloading…" at once, and the percentage from the next check of the updater.
+    await waitFor(
+      () => expect(screen.getByRole('status')).toHaveTextContent('Downloading version 1.1.0: 42%'),
+      { timeout: 4000 },
+    );
+    expect(screen.queryByText('Version 1.1.0 is available')).toBeNull();
+
+    bridge.getState.mockResolvedValue({
+      success: true,
+      data: { ...baseState, status: 'available', downloadPercent: null, error: 'Download failed' },
+    });
+    expect(await screen.findByRole('alert', {}, { timeout: 4000 })).toHaveTextContent(
+      'Download failed',
+    );
+    expect(screen.getByText('Version 1.1.0 is available')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).toBeNull();
   });
 
   it('shows why a download failed and offers it again', async () => {
