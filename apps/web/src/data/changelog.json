@@ -112,6 +112,10 @@
         },
         {
           "type": "fixed",
+          "text": "Year in manga shows its chapters-by-month chart again"
+        },
+        {
+          "type": "fixed",
           "text": "A chapter marked unread no longer shows the page it was left on"
         },
         {

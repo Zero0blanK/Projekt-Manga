@@ -172,7 +172,9 @@ export function YearInMangaClient() {
             <h2 id="year-months" className="text-sm font-semibold">
               Chapters by month
             </h2>
-            <div className="mt-3 flex h-32 items-end gap-2" role="list">
+            {/* Each month's column fills the chart's height, so its bar's percentage has a
+                height to be a share of; on a column sized by its content it came out as 0. */}
+            <div className="mt-3 flex h-40 gap-2" role="list">
               {stats.months.map((count, index) => {
                 const max = Math.max(1, ...stats.months);
                 return (
@@ -180,12 +182,22 @@ export function YearInMangaClient() {
                     key={index}
                     role="listitem"
                     aria-label={`${new Date(stats.year, index).toLocaleDateString(undefined, { month: 'long' })}: ${count}`}
-                    className="flex flex-1 flex-col items-center gap-1"
+                    className="flex h-full min-w-0 flex-1 flex-col items-center gap-1"
                   >
-                    <div
-                      className="w-full rounded-t bg-primary/80"
-                      style={{ height: `${Math.max(count ? 4 : 0, (count / max) * 100)}%` }}
-                    />
+                    <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-end gap-1">
+                      {count > 0 && (
+                        <span
+                          aria-hidden
+                          className="text-[10px] tabular-nums text-muted-foreground"
+                        >
+                          {count}
+                        </span>
+                      )}
+                      <div
+                        className="w-full rounded-t bg-primary/80"
+                        style={{ height: `${count ? Math.max(4, (count / max) * 85) : 0}%` }}
+                      />
+                    </div>
                     <span className="text-xs text-muted-foreground">{MONTHS[index]}</span>
                   </div>
                 );
