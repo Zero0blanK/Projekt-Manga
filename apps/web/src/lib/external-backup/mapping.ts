@@ -38,6 +38,28 @@ export function normaliseSourceName(name: string): string {
 const normaliseLanguage = (lang: string) => lang.trim().toLowerCase().replace('_', '-');
 
 /**
+ * Of the sources that could be installed, the one a backup source most likely is: the same
+ * name, and the backup's language suffix ("MangaDex (EN)") when several languages share
+ * it. Null when none has the name.
+ */
+export function findInstallableSource<T extends { name: string; lang: string }>(
+  name: string,
+  available: readonly T[],
+): T | null {
+  const key = normaliseSourceName(name);
+  if (!key) return null;
+  const candidates = available.filter((source) => normaliseSourceName(source.name) === key);
+  if (candidates.length <= 1) return candidates[0] ?? null;
+  const hint = LANGUAGE_SUFFIX.exec(name)?.[1];
+  const lang = hint ? normaliseLanguage(hint) : null;
+  return (
+    (lang && candidates.find((source) => normaliseLanguage(source.lang) === lang)) ||
+    candidates.find((source) => ['all', 'multi'].includes(normaliseLanguage(source.lang))) ||
+    candidates[0]
+  );
+}
+
+/**
  * Matches one backup source to an installed source by normalised name. The language only
  * counts when the name repeats among installed sources: it is then read from a language
  * suffix on the backup's name ("MangaDex (EN)"). Without one the match is ambiguous, for the

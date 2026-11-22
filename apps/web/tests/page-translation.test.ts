@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
 
 const readPageText = vi.fn();
 const readPageTextWith = vi.fn();
@@ -43,12 +44,14 @@ vi.mock('@projekt-manga/api-client', () => {
 
 import { cleanText, findTextAreas, inReadingOrder } from '@/lib/page-ocr';
 import {
+  answerModelPrompt,
   fitFontSize,
   pageTranslation,
   resetPageTranslations,
   showOriginal,
   translatePage,
   translateTargetFor,
+  useModelPrompt,
 } from '@/lib/page-translation';
 
 afterEach(() => {
@@ -217,20 +220,32 @@ describe('translating a page', () => {
     expect(translateTargetFor('Klingon')).toBe('en');
   });
 
-  it('reads the bubbles on the server once its models are in, else here while they download', async () => {
+  it('asks before downloading the models, and reads here while they download', async () => {
     api.localStatus.mockResolvedValue({
       enabled: true,
       state: 'missing',
-      size: 1,
+      size: 275_000_000,
       targets: ['en'],
     });
     readPageText.mockResolvedValue([{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }]);
     translateTexts.mockResolvedValue({ translations: ['A cat'] });
-    await translatePage('first.png', 'en');
-    expect(readPageText).toHaveBeenCalledWith('first.png');
+    const prompt = renderHook(() => useModelPrompt());
+    const first = translatePage('first.png', 'en');
+    const second = translatePage('first-b.png', 'en');
+    // One question for both pages, with the download's size.
+    await vi.waitFor(() => expect(prompt.result.current).toEqual({ size: 275_000_000 }));
+    expect(api.download).not.toHaveBeenCalled();
+    act(() => answerModelPrompt(true));
+    await Promise.all([first, second]);
+    expect(prompt.result.current).toBeNull();
     expect(api.download).toHaveBeenCalledTimes(1);
+    expect(readPageText).toHaveBeenCalledWith('first.png');
+    prompt.unmount();
 
     api.localStatus.mockResolvedValue({ enabled: true, state: 'ready', size: 1, targets: ['en'] });
+    // A server that can read bubbles but not yet find the text on a page itself.
+    const { ApiError } = await import('@projekt-manga/api-client');
+    api.readPage.mockRejectedValue(new ApiError('Not found', 404));
     api.readBubbles.mockResolvedValue({ texts: ['犬です'] });
     readPageTextWith.mockImplementation(async (_url, read) => {
       const [text] = await read(['png-base64']);
@@ -239,8 +254,45 @@ describe('translating a page', () => {
     translateTexts.mockResolvedValue({ translations: ['A dog'] });
     await translatePage('second.png', 'en');
     expect(api.readBubbles).toHaveBeenCalledWith({ images: ['png-base64'] });
-    expect(readPageText).toHaveBeenCalledTimes(1);
+    expect(readPageText).toHaveBeenCalledTimes(2); // the two pages read here before the models were in
     expect(pageTranslation('second.png')).toMatchObject({ regions: [{ text: 'A dog' }] });
+  });
+
+  it('after "Not now", translates on this device and does not ask again', async () => {
+    api.localStatus.mockResolvedValue({
+      enabled: true,
+      state: 'missing',
+      size: 1,
+      targets: ['en'],
+    });
+    readPageText.mockResolvedValue([{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }]);
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    const prompt = renderHook(() => useModelPrompt());
+    const first = translatePage('one.png', 'en');
+    await vi.waitFor(() => expect(prompt.result.current).not.toBeNull());
+    act(() => answerModelPrompt(false));
+    await first;
+    expect(pageTranslation('one.png')).toMatchObject({ status: 'done' });
+
+    await translatePage('two.png', 'en');
+    expect(prompt.result.current).toBeNull();
+    expect(pageTranslation('two.png')).toMatchObject({ status: 'done' });
+    expect(api.download).not.toHaveBeenCalled();
+    prompt.unmount();
+  });
+
+  it('never downloads without asking, even where no one is there to ask', async () => {
+    api.localStatus.mockResolvedValue({
+      enabled: true,
+      state: 'missing',
+      size: 1,
+      targets: ['en'],
+    });
+    readPageText.mockResolvedValue([{ text: '猫です', x: 0, y: 0, w: 0.1, h: 0.1 }]);
+    translateTexts.mockResolvedValue({ translations: ['A cat'] });
+    await translatePage('unasked.png', 'en');
+    expect(pageTranslation('unasked.png')).toMatchObject({ status: 'done' });
+    expect(api.download).not.toHaveBeenCalled();
   });
 
   it('reads here again on a server from before local translation', async () => {

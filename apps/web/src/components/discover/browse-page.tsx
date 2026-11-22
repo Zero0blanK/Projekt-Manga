@@ -20,13 +20,7 @@ import { FilterPanel } from '@/components/discover/filter-panel';
 import { SourceChallengeNotice } from '@/components/discover/source-challenge-notice';
 import { isChallengeRequired } from '@/lib/source-browser';
 import { countActiveFilters, genreFilterValues, type FilterValues } from '@/lib/filter-values';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Search, Filter, X, ChevronDown } from 'lucide-react';
+import { Search, Filter, X } from 'lucide-react';
 import { MangaGrid } from '@/components/manga-grid';
 import { MangaGridSkeleton } from '@/components/skeletons';
 import { LoadError } from '@/components/load-error';
@@ -452,25 +446,6 @@ export function DiscoverBrowsePage({
               >
                 Filters unavailable · Retry
               </button>
-            )}
-            {displaySources.length > 1 && (
-              <DropdownMenu modal={false}>
-                <DropdownMenuTrigger className="flex h-9 min-w-32 items-center justify-between gap-2 rounded-full border border-border/60 bg-surface/40 px-3 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                  {active?.name ?? 'Select source'}
-                  <ChevronDown className="h-3.5 w-3.5 opacity-50" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {displaySources.map((s) => (
-                    <DropdownMenuItem
-                      key={s.id}
-                      onSelect={() => setSourceId(s.id)}
-                      className={`text-xs ${sourceId === s.id ? 'text-primary' : ''}`}
-                    >
-                      {s.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
             )}
           </>
         }

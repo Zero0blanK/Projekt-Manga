@@ -58,6 +58,14 @@ function loadDetector() {
   return detector;
 }
 
+/** Lets go of the loaded detector, before its file is deleted. The next use loads it again. */
+export async function releaseDetector(): Promise<void> {
+  const loaded = detector;
+  detector = null;
+  const session = await loaded?.then((value) => value.session).catch(() => null);
+  await session?.release().catch(() => undefined);
+}
+
 const area = (r: Rect) => Math.max(0, r.x1 - r.x0) * Math.max(0, r.y1 - r.y0);
 
 function overlap(a: Rect, b: Rect): number {

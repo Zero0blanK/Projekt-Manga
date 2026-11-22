@@ -6,6 +6,7 @@ import { ApiError } from '@projekt-manga/api-client';
 import { Panel, Field, Toggle } from '@/components/settings/field-controls';
 import { HIDE_LIBRARY_IN_SOURCES } from '@/lib/library-titles';
 import { AUTO_OPEN_CHALLENGE_SETTING } from '@/lib/source-browser';
+import { WARN_UNSIGNED_REPOSITORIES } from '@/hooks/use-unsigned-install-confirm';
 import { AddRepositoryForm } from '@/components/extensions/add-repository-form';
 import { ExtensionEngine } from '@/components/settings/extension-engine';
 import { SourceHealthPanel } from '@/components/settings/source-health-panel';
@@ -86,6 +87,12 @@ export function ExtensionsPanel() {
           hint="Desktop app: when a source asks for a Cloudflare check, pass it in the background, showing its window only if the check needs you"
         >
           <Toggle settingKey={AUTO_OPEN_CHALLENGE_SETTING} defaultOn />
+        </Field>
+        <Field
+          label="Warn before installing from unsigned repositories"
+          hint="Ask before installing a source whose repository doesn't sign its sources"
+        >
+          <Toggle settingKey={WARN_UNSIGNED_REPOSITORIES} defaultOn />
         </Field>
       </Panel>
       <Panel

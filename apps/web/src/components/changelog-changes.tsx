@@ -2,6 +2,7 @@ import { CHANGE_LABELS, type Change, type ChangeType } from '@/lib/changelog';
 
 const TYPE_STYLES: Record<ChangeType, string> = {
   added: 'border-primary/40 bg-primary/10 text-primary',
+  improved: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
   changed: 'border-border/70 bg-muted/60 text-foreground',
   fixed: 'border-border/70 bg-muted/40 text-muted-foreground',
   removed: 'border-destructive/40 bg-destructive/10 text-destructive',

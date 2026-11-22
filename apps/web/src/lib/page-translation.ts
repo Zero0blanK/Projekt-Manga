@@ -99,17 +99,82 @@ let serverReads = false;
 /** Whether the server can also find the text on a page itself (its text detector). */
 let serverFindsText = true;
 
+/** After the models are removed in Settings: read here until they are downloaded again. */
+export function forgetLocalModels(): void {
+  serverReads = false;
+}
+
+/**
+ * Asking whether to download the translation models, the first time a page is translated
+ * without them. One question for every page waiting on it, and "Not now" is remembered
+ * until the app is reloaded, so translating a chapter doesn't ask again on every page.
+ */
+export interface ModelPrompt {
+  /** The download's size in bytes. */
+  size: number;
+}
+let modelPrompt: ModelPrompt | null = null;
+let answerPrompt: ((download: boolean) => void) | null = null;
+let pendingAnswer: Promise<boolean> | null = null;
+let declined = false;
+/** How many prompts are on screen to answer it; with none, nothing asks. */
+let promptHosts = 0;
+const promptListeners = new Set<() => void>();
+const announcePrompt = () => promptListeners.forEach((listener) => listener());
+
+function subscribePrompt(listener: () => void) {
+  promptListeners.add(listener);
+  promptHosts += 1;
+  return () => {
+    promptListeners.delete(listener);
+    promptHosts -= 1;
+  };
+}
+
+/** The open question, for the reader's dialog. Mounting it is what lets the question be asked. */
+export function useModelPrompt(): ModelPrompt | null {
+  return useSyncExternalStore(
+    subscribePrompt,
+    () => modelPrompt,
+    () => null,
+  );
+}
+
+/** The reader's answer: download the models now, or carry on reading on this device. */
+export function answerModelPrompt(download: boolean): void {
+  if (!answerPrompt) return;
+  if (download) void downloadLocalTranslation().catch(() => undefined);
+  else declined = true;
+  modelPrompt = null;
+  answerPrompt?.(download);
+  answerPrompt = null;
+  pendingAnswer = null;
+  announcePrompt();
+}
+
+function askToDownloadModels(size: number): Promise<boolean> {
+  if (declined || promptHosts === 0) return Promise.resolve(false);
+  pendingAnswer ??= new Promise<boolean>((resolve) => {
+    answerPrompt = resolve;
+    modelPrompt = { size };
+    announcePrompt();
+  });
+  return pendingAnswer;
+}
+
 /**
  * The page's Japanese text: read by the server's manga-ocr when its models are in, else by
- * Tesseract here. Models not yet downloaded start downloading (local translation's first
- * use), and this page is read here meanwhile.
+ * Tesseract here. When the models aren't downloaded yet, the reader is asked whether to
+ * download them; this page is read here either way, while they download.
  */
 async function readPage(url: string): Promise<TextRegion[]> {
   if (!serverReads) {
     const local = await getLocalTranslationStatus().catch(() => null);
     if (local?.enabled && local.state === 'ready') serverReads = true;
-    else if (local?.enabled && (local.state === 'missing' || local.state === 'error'))
-      void downloadLocalTranslation().catch(() => undefined);
+    else if (local?.enabled && (local.state === 'missing' || local.state === 'error')) {
+      // Every page waiting here gets the same answer; answering starts the download once.
+      await askToDownloadModels(local.size);
+    }
   }
   if (serverReads && serverFindsText) {
     try {
@@ -260,6 +325,10 @@ export function resetPageTranslations() {
   status = null;
   serverReads = false;
   serverFindsText = true;
+  modelPrompt = null;
+  answerPrompt = null;
+  pendingAnswer = null;
+  declined = false;
   listeners.forEach((listener) => listener());
 }
 

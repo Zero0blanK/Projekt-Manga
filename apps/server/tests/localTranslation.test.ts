@@ -122,6 +122,31 @@ describe('local translation', () => {
     expect(left.filter((entry) => String(entry).endsWith('.onnx'))).toEqual([]);
   });
 
+  it('deletes the downloaded models, back to not installed', async () => {
+    // A partial set on disk stands in for the models: each repository's folder exists.
+    for (const file of MODEL_FILES) {
+      const dir = path.join(modelsDir, ...file.repo.split('/'));
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(path.join(dir, 'leftover.bin'), 'x');
+    }
+    const res = await request(app).delete('/api/translate/local');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ enabled: true, state: 'missing' });
+    expect(await fs.readdir(modelsDir)).toEqual([]);
+  });
+
+  it('will not delete the models while they are downloading', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    );
+    void ensureModels().catch(() => undefined);
+    expect((await modelsState()).state).toBe('downloading');
+    const res = await request(app).delete('/api/translate/local');
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/still downloading/);
+  });
+
   it('can be turned off by the host', async () => {
     process.env.LOCAL_TRANSLATION = 'off';
     expect((await request(app).get('/api/translate/local')).body.data).toEqual({

@@ -62,6 +62,7 @@ import { resolveWebtoonLayout } from '@/lib/webtoon-layout';
 import { setPageAsCover } from '@/components/reader/set-page-as-cover';
 import { LinkedSourceFallback } from '@/components/reader/linked-source-fallback';
 import { ReaderContextMenu } from '@/components/reader/reader-context-menu';
+import { TranslationModelPrompt } from '@/components/reader/translation-model-prompt';
 
 const parseFlag = (raw: unknown) => raw === true;
 
@@ -613,6 +614,7 @@ export function ReaderPageClient({ manga }: { manga: Manga }) {
   return (
     <ReaderColorFilterContext.Provider value={colorFilter}>
       <div className="fixed inset-0 z-50 flex flex-col" style={{ background }}>
+        <TranslationModelPrompt />
         {/* Settings > Reader > Brightness. Sits above the pages at z-20; the header,
           progress bar, page counter and paging arrows are all z-30, so the controls stay
           legible however far the brightness is turned down. */}

@@ -58,64 +58,29 @@ function FilterSection({
 const PILL_BASE =
   'rounded-full border px-3 py-1.5 text-xs leading-none transition whitespace-nowrap max-w-full';
 
-/** Options shown before a group collapses. Tag groups run to ~40 entries on some
- * sources, which would otherwise bury every filter below them. */
-const COLLAPSED_LIMIT = 12;
-
 /**
- * Renders a group of option pills directly on the panel — no inner container. Large
- * groups collapse to a preview with a "+N more" toggle rather than scrolling inside a
- * box, so the panel stays scannable no matter how many options a source publishes.
+ * A group of option pills, laid straight on the panel with no inner box, every option
+ * shown: the group has a row of its own, so even a long genre list reads as one block.
  */
 function PillGroup<T>({
   options,
-  isSelected,
   renderPill,
 }: {
   options: T[];
-  /** Selected options are pinned into the collapsed preview — otherwise a choice made
-   * while expanded would vanish from view the moment the group collapsed again. */
-  isSelected: (option: T) => boolean;
   renderPill: (option: T) => React.ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
-
   if (options.length === 0) {
     return <p className="text-xs text-muted-foreground">No options available.</p>;
   }
-
-  const visible = expanded
-    ? options
-    : [...options.filter(isSelected), ...options.filter((o) => !isSelected(o))].slice(
-        0,
-        COLLAPSED_LIMIT,
-      );
-  const hiddenCount = options.length - visible.length;
-
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {visible.map((option) => renderPill(option))}
-      {hiddenCount > 0 && (
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          className={`${PILL_BASE} border-dashed border-border/70 bg-transparent text-muted-foreground hover:text-foreground`}
-        >
-          +{hiddenCount} more
-        </button>
-      )}
-      {expanded && options.length > COLLAPSED_LIMIT && (
-        <button
-          type="button"
-          onClick={() => setExpanded(false)}
-          className={`${PILL_BASE} border-dashed border-border/70 bg-transparent text-muted-foreground hover:text-foreground`}
-        >
-          Show less
-        </button>
-      )}
+      {options.map((option) => renderPill(option))}
     </div>
   );
 }
+
+/** Field types shown as a group of pills, on a row of their own. */
+const PILL_TYPES = new Set<string>(['tri-state', 'multi', 'checkbox', 'radio']);
 
 export function FilterPanel({
   fields,
@@ -145,6 +110,107 @@ export function FilterPanel({
 
   if (fields.length === 0) return null;
 
+  const renderField = (field: MangaFilter) => {
+    const value = draft[field.value];
+
+    if (field.type === 'tri-state') {
+      const tri = isTriState(value) ? value : {};
+      return (
+        <FilterSection key={field.value} label={field.label} hint="click: include · again: exclude">
+          <PillGroup
+            options={field.options ?? []}
+            renderPill={(o) => {
+              const included = tri.include?.includes(o.value);
+              const excluded = tri.exclude?.includes(o.value);
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => set(field.value, cycleTriStateOption(value, o.value))}
+                  className={`${PILL_BASE} ${
+                    included
+                      ? 'border-primary/60 bg-primary/15 text-primary'
+                      : excluded
+                        ? 'border-destructive/60 bg-destructive/15 text-destructive line-through'
+                        : 'border-border/60 bg-background text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              );
+            }}
+          />
+        </FilterSection>
+      );
+    }
+
+    if (field.type === 'multi' || field.type === 'checkbox' || field.type === 'radio') {
+      const selected = Array.isArray(value) ? value : [];
+      return (
+        <FilterSection key={field.value} label={field.label}>
+          <PillGroup
+            options={field.options ?? []}
+            renderPill={(o) => {
+              const on = selected.includes(o.value);
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => {
+                    const next = on
+                      ? selected.filter((x) => x !== o.value)
+                      : [...selected, o.value];
+                    set(field.value, next.length > 0 ? next : undefined);
+                  }}
+                  className={`${PILL_BASE} ${
+                    on
+                      ? 'border-primary/60 bg-primary/15 text-primary'
+                      : 'border-border/60 bg-background text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {o.label}
+                </button>
+              );
+            }}
+          />
+        </FilterSection>
+      );
+    }
+
+    if (field.type === 'select') {
+      return (
+        <FilterSection key={field.value} label={field.label}>
+          <SelectMenu
+            label={field.label}
+            value={typeof value === 'string' ? value : ''}
+            onChange={(next) => set(field.value, next || undefined)}
+            // A source's own list may already start with its "any" choice (value '').
+            options={
+              field.options?.some((option) => option.value === '')
+                ? field.options
+                : [{ value: '', label: 'Any' }, ...(field.options ?? [])]
+            }
+            className="w-full"
+          />
+        </FilterSection>
+      );
+    }
+
+    return (
+      <FilterSection key={field.value} label={field.label}>
+        <input
+          aria-label={field.label}
+          value={typeof value === 'string' ? value : ''}
+          onChange={(e) => set(field.value, e.target.value || undefined)}
+          className="h-9 w-full rounded-lg border border-border/60 bg-background px-2.5 text-xs text-foreground outline-none focus:border-primary/60 placeholder:text-muted-foreground"
+        />
+      </FilterSection>
+    );
+  };
+  /** Dropdowns and text: short controls that sit side by side. */
+  const compact = fields.filter((field) => !PILL_TYPES.has(field.type));
+  const grouped = fields.filter((field) => PILL_TYPES.has(field.type));
+
   return (
     <div className="mt-4 overflow-hidden rounded-2xl border border-border/60 bg-surface/40">
       <div className="flex items-center justify-between border-b border-border/50 px-4 py-2.5">
@@ -161,114 +227,16 @@ export function FilterPanel({
         </button>
       </div>
 
-      {/* The panel itself scrolls once expanded groups make it tall — that's a bound on
-          the whole sheet, not a box around any individual pill group. */}
-      <div className="grid max-h-[30rem] grid-cols-1 gap-x-8 gap-y-6 overflow-y-auto p-4 md:grid-cols-2">
-        {fields.map((field) => {
-          const value = draft[field.value];
-
-          if (field.type === 'tri-state') {
-            const tri = isTriState(value) ? value : {};
-            return (
-              <FilterSection
-                key={field.value}
-                label={field.label}
-                hint="click: include · again: exclude"
-              >
-                <PillGroup
-                  options={field.options ?? []}
-                  isSelected={(o) =>
-                    Boolean(tri.include?.includes(o.value) || tri.exclude?.includes(o.value))
-                  }
-                  renderPill={(o) => {
-                    const included = tri.include?.includes(o.value);
-                    const excluded = tri.exclude?.includes(o.value);
-                    return (
-                      <button
-                        key={o.value}
-                        type="button"
-                        onClick={() => set(field.value, cycleTriStateOption(value, o.value))}
-                        className={`${PILL_BASE} ${
-                          included
-                            ? 'border-primary/60 bg-primary/15 text-primary'
-                            : excluded
-                              ? 'border-destructive/60 bg-destructive/15 text-destructive line-through'
-                              : 'border-border/60 bg-background text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        {o.label}
-                      </button>
-                    );
-                  }}
-                />
-              </FilterSection>
-            );
-          }
-
-          if (field.type === 'multi' || field.type === 'checkbox' || field.type === 'radio') {
-            const selected = Array.isArray(value) ? value : [];
-            return (
-              <FilterSection key={field.value} label={field.label}>
-                <PillGroup
-                  options={field.options ?? []}
-                  isSelected={(o) => selected.includes(o.value)}
-                  renderPill={(o) => {
-                    const on = selected.includes(o.value);
-                    return (
-                      <button
-                        key={o.value}
-                        type="button"
-                        onClick={() => {
-                          const next = on
-                            ? selected.filter((x) => x !== o.value)
-                            : [...selected, o.value];
-                          set(field.value, next.length > 0 ? next : undefined);
-                        }}
-                        className={`${PILL_BASE} ${
-                          on
-                            ? 'border-primary/60 bg-primary/15 text-primary'
-                            : 'border-border/60 bg-background text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        {o.label}
-                      </button>
-                    );
-                  }}
-                />
-              </FilterSection>
-            );
-          }
-
-          if (field.type === 'select') {
-            return (
-              <FilterSection key={field.value} label={field.label}>
-                <SelectMenu
-                  label={field.label}
-                  value={typeof value === 'string' ? value : ''}
-                  onChange={(next) => set(field.value, next || undefined)}
-                  // A source's own list may already start with its "any" choice (value '').
-                  options={
-                    field.options?.some((option) => option.value === '')
-                      ? field.options
-                      : [{ value: '', label: 'Any' }, ...(field.options ?? [])]
-                  }
-                  className="w-full"
-                />
-              </FilterSection>
-            );
-          }
-
-          return (
-            <FilterSection key={field.value} label={field.label}>
-              <input
-                aria-label={field.label}
-                value={typeof value === 'string' ? value : ''}
-                onChange={(e) => set(field.value, e.target.value || undefined)}
-                className="h-9 w-full rounded-lg border border-border/60 bg-background px-2.5 text-xs text-foreground outline-none focus:border-primary/60 placeholder:text-muted-foreground"
-              />
-            </FilterSection>
-          );
-        })}
+      <div className="space-y-6 p-4">
+        {/* Dropdowns and text inputs share rows: two fill the width half and half, and more
+            wrap into as many columns as the width allows. */}
+        {compact.length > 0 && (
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-x-6 gap-y-4">
+            {compact.map(renderField)}
+          </div>
+        )}
+        {/* A pill group (genres, tags…) takes a whole row, so all of it shows at once. */}
+        {grouped.map(renderField)}
       </div>
 
       <div className="flex items-center justify-end gap-3 border-t border-border/50 px-4 py-3">

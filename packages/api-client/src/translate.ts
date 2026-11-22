@@ -59,6 +59,10 @@ export const getLocalTranslationStatus = (signal?: AbortSignal) =>
 export const downloadLocalTranslation = () =>
   request<LocalTranslationStatus>('/translate/local/download', { method: 'POST' });
 
+/** Deletes local translation's models (admin only), back to not installed. */
+export const removeLocalTranslation = () =>
+  request<LocalTranslationStatus>('/translate/local', { method: 'DELETE' });
+
 /** The Japanese in one page's speech bubbles, read by the server's manga-ocr. */
 export const readBubbleTexts = (body: TranslateReadBody, signal?: AbortSignal) =>
   request<{ texts: string[] }>('/translate/read', { method: 'POST', body, signal });

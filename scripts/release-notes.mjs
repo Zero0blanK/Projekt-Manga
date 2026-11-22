@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 const REPOSITORY = 'Zero0blanK/Projekt-Manga';
 const SECTIONS = [
   ['added', 'Added'],
+  ['improved', 'Improved'],
   ['changed', 'Changed'],
   ['fixed', 'Fixed'],
   ['removed', 'Removed'],

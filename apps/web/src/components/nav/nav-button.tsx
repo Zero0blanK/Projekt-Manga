@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import type { ComponentType } from 'react';
+import { scrollToTop } from '@/lib/scroll-to-top';
 
 export type NavItem = {
   label: string;
@@ -18,11 +20,19 @@ export const NAV_ITEM_SIZE = 'h-11 min-w-0 flex-1 sm:w-11 sm:flex-none sm:shrink
 
 export function NavButton({ item, active }: { item: NavItem; active: boolean }) {
   const Icon = item.icon;
+  const pathname = usePathname();
   return (
     <Link
       href={item.to}
       aria-label={item.label}
       aria-current={active ? 'page' : undefined}
+      onClick={(event) => {
+        // Clicked again on its own page: back to the top rather than a reload of where you
+        // are. On a page under it (a title under Discover) it still goes to the item's page.
+        if (pathname !== item.to || event.metaKey || event.ctrlKey || event.shiftKey) return;
+        event.preventDefault();
+        scrollToTop();
+      }}
       className={`group relative grid ${NAV_ITEM_SIZE} place-items-center rounded-full transition focus-visible:outline-2 focus-visible:outline-primary ${
         active
           ? 'bg-primary/15 text-primary'

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { AppError } from '../utils/customErrors.js';
 
 /**
  * The models behind local page translation, downloaded once on first use and kept:
@@ -234,6 +235,26 @@ export async function modelsState(): Promise<ModelsState> {
   }
   if (lastError) return { state: 'error', message: lastError };
   return { state: 'missing' };
+}
+
+/**
+ * Deletes the downloaded models, so local translation is back to not installed. Refused
+ * while they are downloading: the download would only write them again.
+ */
+export async function removeModels(): Promise<void> {
+  if (downloading) {
+    throw new AppError('The translation models are still downloading', 409, 'ConflictError');
+  }
+  verified = false;
+  lastError = null;
+  progress = 0;
+  const repos = [...new Set(MODEL_FILES.map((file) => file.repo))];
+  for (const repo of repos) {
+    await fs.rm(path.join(modelsDir(), ...repo.split('/')), { recursive: true, force: true });
+    // The owner's folder too, once nothing else of theirs is in it.
+    await fs.rmdir(path.join(modelsDir(), repo.split('/')[0])).catch(() => undefined);
+  }
+  await removeRetiredModels();
 }
 
 /** For tests. */

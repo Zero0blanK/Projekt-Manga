@@ -6,6 +6,7 @@ import {
   getLocalTranslationStatus,
   getTranslateSettings,
   getTranslateStatus,
+  removeLocalTranslation,
   removeTranslateSettings,
   saveTranslateSettings,
   type LocalTranslationStatus,
@@ -13,7 +14,8 @@ import {
   type TranslateStatus,
 } from '@projekt-manga/api-client';
 import { ActionButton, LoadingBlock } from '@/components/settings/field-controls';
-import { forgetTranslationStatus } from '@/lib/page-translation';
+import { forgetLocalModels, forgetTranslationStatus } from '@/lib/page-translation';
+import { useConfirm } from '@/hooks/use-confirm';
 
 type Provider = TranslateSettings['provider'];
 
@@ -43,6 +45,8 @@ const megabytes = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 function LocalTranslation({ active }: { active: boolean }) {
   const [local, setLocal] = useState<LocalTranslationStatus | null | undefined>(undefined);
   const [failed, setFailed] = useState('');
+  const [removing, setRemoving] = useState(false);
+  const { confirm, dialog } = useConfirm();
 
   useEffect(() => {
     let stopped = false;
@@ -72,6 +76,25 @@ function LocalTranslation({ active }: { active: boolean }) {
       .catch((error: unknown) => setFailed(errorText(error, "Couldn't start the download.")));
   };
 
+  const remove = async () => {
+    const yes = await confirm({
+      title: 'Remove the translation models?',
+      description: `This frees about ${megabytes(local.size)}. Pages are then read on this device until you download them again.`,
+      confirmLabel: 'Remove',
+    });
+    if (!yes) return;
+    setFailed('');
+    setRemoving(true);
+    try {
+      setLocal(await removeLocalTranslation());
+      forgetLocalModels();
+    } catch (error) {
+      setFailed(errorText(error, "Couldn't remove the models."));
+    } finally {
+      setRemoving(false);
+    }
+  };
+
   return (
     <section
       aria-label="Translate on this computer"
@@ -89,7 +112,13 @@ function LocalTranslation({ active }: { active: boolean }) {
         {(local.state === 'missing' || local.state === 'error') && (
           <ActionButton onClick={download}>Download ({megabytes(local.size)})</ActionButton>
         )}
+        {local.state === 'ready' && (
+          <ActionButton variant="destructive" onClick={() => void remove()} disabled={removing}>
+            {removing ? 'Removing…' : 'Remove'}
+          </ActionButton>
+        )}
       </div>
+      {dialog}
       <p className="text-xs text-muted-foreground">
         Models: comic text detector by ogkalu (Apache-2.0), manga-ocr by kha-white (Apache-2.0) and
         FuguMT by staka (CC BY-SA 4.0).
@@ -99,7 +128,7 @@ function LocalTranslation({ active }: { active: boolean }) {
       )}
       {local.state === 'missing' && (
         <p className="text-xs text-muted-foreground">
-          The models download once, the first time you translate a page, or now.
+          Download them now, or when you first translate a page (you will be asked).
         </p>
       )}
       {local.state === 'downloading' && (

@@ -53,3 +53,17 @@ export function repositoryPublisher(repository: {
     (repository.name || repository.url)
   );
 }
+
+/**
+ * A repository's author as Discover credits it: `@owner` for an account on a known code
+ * host, else the repository's own name or address as it is (an "@" on an address would
+ * read as an account that doesn't exist).
+ */
+export function repositoryAuthor(repository: {
+  url: string;
+  website?: string | null;
+  name?: string | null;
+}): string {
+  const owner = ownerFromUrl(repository.url) ?? ownerFromUrl(repository.website);
+  return owner ? `@${owner}` : repository.name || repository.url;
+}

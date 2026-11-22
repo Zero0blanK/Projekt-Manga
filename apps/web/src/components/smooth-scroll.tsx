@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import Lenis from 'lenis';
 import { SCROLL_LOCK_ATTRIBUTE, keepsNativeScroll } from '@/lib/smooth-scroll';
+import { setPageScroller } from '@/lib/scroll-to-top';
 
 /** The same easing as the long-strip reader (components/reader/long-strip-viewer.tsx). */
 const SMOOTH_SCROLL_LERP = 0.12;
@@ -30,6 +31,9 @@ export function SmoothScroll() {
       prevent: keepsNativeScroll,
     });
 
+    // Back to the top (lib/scroll-to-top.ts) goes through Lenis while it runs.
+    setPageScroller(lenis);
+
     const body = document.body;
     const followLock = () => {
       if (body.hasAttribute(SCROLL_LOCK_ATTRIBUTE)) lenis.stop();
@@ -41,6 +45,7 @@ export function SmoothScroll() {
 
     return () => {
       observer.disconnect();
+      setPageScroller(null);
       lenis.destroy();
     };
   }, []);

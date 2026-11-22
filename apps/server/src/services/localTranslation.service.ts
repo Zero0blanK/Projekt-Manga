@@ -12,8 +12,9 @@ import {
   localTranslationEnabled,
   modelsDir,
   modelsState,
+  removeModels,
 } from './translationModels.service.js';
-import { detectText, placeText } from './textDetection.service.js';
+import { detectText, placeText, releaseDetector } from './textDetection.service.js';
 
 /**
  * Local page translation, on this server: manga-ocr reads the Japanese in each speech
@@ -242,6 +243,27 @@ const localTranslation = {
   async download() {
     requireEnabled();
     void ensureModels().catch(() => undefined);
+    return this.status();
+  },
+
+  /**
+   * Deletes the downloaded models. Waits for any page being read to finish, then lets go of
+   * the loaded models, so no file is in use while it is deleted.
+   */
+  async remove() {
+    requireEnabled();
+    await serially(async () => {
+      const ocr = await ocrModel?.catch(() => null);
+      ocrModel = null;
+      await ocr?.encoder.release().catch(() => undefined);
+      await ocr?.decoder.release().catch(() => undefined);
+      const translate = (await translator?.catch(() => null)) as
+        (Translator & { dispose?: () => Promise<void> }) | null | undefined;
+      translator = null;
+      await translate?.dispose?.().catch(() => undefined);
+      await releaseDetector();
+      await removeModels();
+    });
     return this.status();
   },
 

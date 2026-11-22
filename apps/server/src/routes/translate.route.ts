@@ -73,6 +73,12 @@ router.post(
   '/local/download',
   run(() => localTranslation.download()),
 );
+/** Deletes the models. They are the server's, shared by every reader, so only its admin. */
+router.delete(
+  '/local',
+  requireAdmin,
+  run(() => localTranslation.remove()),
+);
 
 /**
  * The text on one whole page: found by this server's text detector and read by manga-ocr,
